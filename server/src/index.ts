@@ -31,7 +31,7 @@ import { SkillExtractor } from './skills/extractor.js';
 import { createSkillsRoute } from './api/routes/skills.js';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
-import { mkdirSync, readFileSync, existsSync } from 'node:fs';
+import { mkdirSync, readFileSync, existsSync, watch } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { logger } from './logging/index.js';
 
@@ -113,6 +113,23 @@ export async function startServer() {
   console.log(`Skills loaded: ${skillsLoaded.join(', ') || 'none'}`);
   for (const w of skillWarnings) console.warn(`Skill warning: ${w}`);
   const skillExtractor = new SkillExtractor();
+
+  // Hot-reload: watch file changes and reload registries
+  let reloadTimer: ReturnType<typeof setTimeout> | null = null;
+  const debouncedReload = () => {
+    if (reloadTimer) clearTimeout(reloadTimer);
+    reloadTimer = setTimeout(() => {
+      logger.info('Hot-reload: file change detected, reloading registries...');
+      const { loaded: wf } = wfRegistry.load(wfDir);
+      const { loaded: gl } = goalRegistry.load(goalsDir);
+      skillRegistry.load();
+      logger.info({ workflows: wf.join(', ') || 'none', goals: gl.join(', ') || 'none' }, 'Registries reloaded');
+    }, 1000);
+  };
+  for (const dir of [wfDir, goalsDir, skillsDir]) {
+    try { watch(dir, debouncedReload); } catch {}
+  }
+  logger.info('Hot-reload watchers active');
 
   const wfEngine = new WorkflowEngine(wfTracker, router, sessionMgr, agents, eventBuffer);
   const decomposer = new NLDecomposer();
