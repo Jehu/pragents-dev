@@ -11,6 +11,7 @@ import { WorkflowTracker } from './workflows/tracker.js';
 import { WorkflowEngine } from './workflows/engine.js';
 import { SkillRouter } from './routing/router.js';
 import { setupWebSocket, broadcast } from './api/ws.js';
+import { createEventsRoute, broadcastSSE } from './api/routes/events.js';
 import { healthRoute } from './api/routes/health.js';
 import { createTasksRoute } from './api/routes/tasks.js';
 import { createProjectsRoute, createAgentsRoute } from './api/routes/projects.js';
@@ -24,6 +25,9 @@ import { GoalScheduler } from './goals/scheduler.js';
 import { createGoalsRoute } from './api/routes/goals.js';
 import { createGatesRoute } from './api/routes/gates.js';
 import { createMemoryRoute } from './api/routes/memory.js';
+import { SkillRegistry } from './skills/registry.js';
+import { SkillExtractor } from './skills/extractor.js';
+import { createSkillsRoute } from './api/routes/skills.js';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { mkdirSync, readFileSync, existsSync } from 'node:fs';
@@ -67,7 +71,17 @@ export async function startServer() {
   if (wfRecovered > 0) logger.warn({ recovered: wfRecovered }, 'Stale workflow runs recovered');
 
   // Core services
-  const memory = new MemoryEngine(config.company.memory?.short_term?.max_entries ?? 100);
+  const memoryConfig = {
+    maxEntries: config.company.memory?.short_term?.max_entries ?? 100,
+    vectorStore: config.company.memory?.vectorStore ?? 'simple',
+    embeddings: config.company.memory?.embeddings ? {
+      apiKey: config.company.memory.embeddings.apiKey,
+      baseUrl: config.company.memory.embeddings.baseUrl,
+      model: config.company.memory.embeddings.model,
+      dimensions: config.company.memory.embeddings.dimensions,
+    } : undefined,
+  };
+  const memory = new MemoryEngine(memoryConfig);
   const eventBuffer = new EventBuffer(1000);
   const sessionMgr = new AgentSessionManager(memory);
   const router = new SkillRouter(agents);
@@ -75,6 +89,7 @@ export async function startServer() {
   sessionMgr.setEventCallback((event: any) => {
     const evt = eventBuffer.push(event.projectId, event.agentId, event.type, event.data);
     broadcast(evt);
+    broadcastSSE(evt);
   });
 
   // Workflow system
@@ -88,6 +103,14 @@ export async function startServer() {
   const { loaded: goalsLoaded, warnings: goalWarnings } = goalRegistry.load(goalsDir);
   console.log(`Goals loaded: ${goalsLoaded.join(', ') || 'none'}`);
   for (const w of warnings) console.warn(`Workflow warning: ${w}`);
+
+  // Skills system
+  const skillsDir = join(__dirname, '..', '..', 'skills');
+  const skillRegistry = new SkillRegistry(skillsDir);
+  const { loaded: skillsLoaded, warnings: skillWarnings } = skillRegistry.load();
+  console.log(`Skills loaded: ${skillsLoaded.join(', ') || 'none'}`);
+  for (const w of skillWarnings) console.warn(`Skill warning: ${w}`);
+  const skillExtractor = new SkillExtractor();
 
   const wfEngine = new WorkflowEngine(wfTracker, router, sessionMgr, agents, eventBuffer);
   const decomposer = new NLDecomposer();
@@ -115,6 +138,8 @@ export async function startServer() {
   app.route('/api/v1/goals', createGoalsRoute(goalRegistry));
   app.route('/api/v1/gates', createGatesRoute());
   app.route('/api/v1/memory', createMemoryRoute(memory));
+  app.route('/api/v1/skills', createSkillsRoute(skillRegistry, skillExtractor));
+  app.route('/api/v1/events', createEventsRoute(eventBuffer));
 
   // Traces
   app.get('/api/v1/traces', (c) => {

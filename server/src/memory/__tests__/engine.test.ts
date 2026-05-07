@@ -67,4 +67,46 @@ describe('MemoryEngine', () => {
     expect(summary!.compressedSummary).toContain('event B');
     expect(mem.context('sess-1')).toHaveLength(0);
   });
+
+  describe('cross-project memory (company scope)', () => {
+    it('recalls company-scope facts from any project scope', async () => {
+      engine.remember('company', 'convention', 'Use semantic versioning everywhere', 'office@global');
+
+      // Searching proj-a should also return company facts
+      const projAFacts = await engine.recall('semantic versioning', 'proj-a');
+      expect(projAFacts.length).toBeGreaterThanOrEqual(1);
+      const companyFact = projAFacts.find(f => f.scope === 'company');
+      expect(companyFact).toBeDefined();
+      expect(companyFact!.content).toBe('Use semantic versioning everywhere');
+    });
+
+    it('recalls company-scope facts directly', async () => {
+      const facts = await engine.recall('semantic versioning', 'company');
+      expect(facts.length).toBeGreaterThanOrEqual(1);
+      expect(facts.some(f => f.scope === 'company')).toBe(true);
+    });
+
+    it('searchGlobal returns company-scope facts across all projects', async () => {
+      engine.remember('company', 'policy', 'All repos must have CI configured', 'pm@global');
+
+      const results = await engine.searchGlobal('CI configured');
+      expect(results.length).toBeGreaterThanOrEqual(1);
+      expect(results.some(f => f.scope === 'company' && f.content.includes('CI'))).toBe(true);
+    });
+
+    it('searchGlobal with includeProject merges project facts', async () => {
+      engine.remember('proj-c', 'decision', 'Use pnpm for proj-c', 'dev@c');
+
+      const results = await engine.searchGlobal('pnpm', { includeProject: 'proj-c' });
+      expect(results.some(f => f.scope === 'proj-c')).toBe(true);
+    });
+
+    it('searchGlobal does not return unrelated project facts', async () => {
+      engine.remember('proj-x', 'test', 'Isolated proj-x fact about zebras', 'dev@x');
+
+      const results = await engine.searchGlobal('zebras');
+      // Should not find proj-x facts since searchGlobal only returns company scope
+      expect(results.every(f => f.scope === 'company')).toBe(true);
+    });
+  });
 });

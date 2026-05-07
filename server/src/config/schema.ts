@@ -33,6 +33,14 @@ const ShortTermConfig = z.object({
 
 const MemoryConfig = z.object({
   short_term: ShortTermConfig.default({}),
+  embeddings: z.object({
+    provider: z.enum(['openai', 'pseudo']).default('pseudo'),
+    apiKey: z.string().optional(),
+    baseUrl: z.string().optional(),
+    model: z.string().default('text-embedding-3-small'),
+    dimensions: z.number().int().positive().default(384),
+  }).optional(),
+  vectorStore: z.enum(['simple', 'lancedb']).default('simple'),
 });
 
 const CompanyConfig = z.object({

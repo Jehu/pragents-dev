@@ -27,6 +27,39 @@ export function createMemoryRoute(engine: MemoryEngine) {
     return c.json({ deleted: true });
   });
 
+  // Cross-project search: search company-scope facts (visible to all projects)
+  r.get('/search', async (c) => {
+    const query = c.req.query('query');
+    const scope = c.req.query('scope') || 'company';
+    const includeProject = c.req.query('includeProject');
+    const limit = parseInt(c.req.query('limit') || '20');
+
+    if (!query) {
+      return c.json({ error: 'query parameter is required' }, 400);
+    }
+
+    // If scope=company, use global search (cross-project)
+    if (scope === 'company') {
+      const facts = await engine.searchGlobal(query, { includeProject: includeProject || undefined, limit });
+      return c.json({ scope, query, count: facts.length, facts });
+    }
+
+    // Otherwise, standard scoped recall
+    const facts = await engine.recall(query, scope, limit);
+    return c.json({ scope, query, count: facts.length, facts });
+  });
+
+  // Remember a new fact (POST for creating facts via API)
+  r.post('/facts', async (c) => {
+    const body = await c.req.json();
+    const { scope, category, content, agentId } = body;
+    if (!scope || !category || !content || !agentId) {
+      return c.json({ error: 'scope, category, content, and agentId are required' }, 400);
+    }
+    const fact = engine.remember(scope, category, content, agentId);
+    return c.json(fact, 201);
+  });
+
   r.get('/stats', (c) => {
     const db = getDb();
     const total = (db.prepare('SELECT COUNT(*) as count FROM facts').get() as any).count;

@@ -64,8 +64,28 @@ export class AgentSessionManager {
       noPromptTemplates: true,
       noThemes: true,
       noContextFiles: true,
-      systemPromptOverride: (base: string | undefined) =>
-        (base ?? '') + '\n\n---\n' + (agent.personality || 'You are a helpful coding agent.'),
+      systemPromptOverride: (base: string | undefined) => {
+        const personality = agent.personality || 'You are a helpful coding agent.';
+        const rememberTool = [
+          '',
+          '## Auto-Fact Collection',
+          'When you discover important information during your work (conventions, decisions, patterns, constraints, architecture notes), output them as facts using this format:',
+          '',
+          'REMEMBER: [category] [scope] <fact content>',
+          '',
+          'Where:',
+          '- category is one of: convention, decision, pattern, constraint, architecture, error_pattern, dependency',
+          '- scope is the project ID (use the project you are working in) or "company" for org-wide facts',
+          '- fact content is a concise, self-contained statement of the fact',
+          '',
+          'Example: REMEMBER: convention proj-acme Use tabs for indentation in TypeScript files',
+          'Example: REMEMBER: decision company We use Hono for all HTTP routing',
+          '',
+          'You can output multiple REMEMBER lines. Place them at the end of your response.',
+          'Only output facts that are genuinely useful for future sessions — do not output trivial or obvious facts.',
+        ].join('\n');
+        return (base ?? '') + '\n\n---\n' + personality + '\n' + rememberTool;
+      },
     });
 
     console.log(`Agent "${agent.id}" model: ${agent.model}, projectDir: ${agent.projectDir}, cwd: ${agent.projectDir}`);
@@ -175,7 +195,55 @@ export class AgentSessionManager {
       });
     }
 
+    // Auto-fact collection: parse REMEMBER lines from agent response
+    const rememberedFacts = AgentSessionManager.extractRememberedFacts(response, agent.id);
+    for (const fact of rememberedFacts) {
+      this.memory.remember(fact.scope, fact.category, fact.content, agent.id);
+    }
+    if (rememberedFacts.length > 0) {
+      console.log(`Agent "${agent.id}" auto-remembered ${rememberedFacts.length} facts`);
+    }
+
     return response;
+  }
+
+  /**
+   * Parse REMEMBER: lines from an agent response.
+   * Format: REMEMBER: [category] [scope] <content>
+   * Returns the cleaned response (with REMEMBER lines removed) via the facts array.
+   */
+  static extractRememberedFacts(
+    response: string,
+    agentId: string,
+  ): Array<{ scope: string; category: string; content: string }> {
+    const facts: Array<{ scope: string; category: string; content: string }> = [];
+    const validCategories = new Set([
+      'convention', 'decision', 'pattern', 'constraint',
+      'architecture', 'error_pattern', 'dependency',
+    ]);
+
+    const lines = response.split('\n');
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith('REMEMBER:')) continue;
+
+      const rest = trimmed.substring('REMEMBER:'.length).trim();
+      // Parse: category scope content
+      const parts = rest.split(/\s+/);
+      if (parts.length < 3) continue;
+
+      const category = parts[0].toLowerCase();
+      if (!validCategories.has(category)) continue;
+
+      const scope = parts[1];
+      const content = parts.slice(2).join(' ');
+
+      if (content.length > 0) {
+        facts.push({ scope, category, content });
+      }
+    }
+
+    return facts;
   }
 
   async disposeIdle(): Promise<string[]> {
