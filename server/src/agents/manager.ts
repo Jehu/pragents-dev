@@ -37,14 +37,10 @@ export class AgentSessionManager {
 
   async getOrCreate(agent: ResolvedAgent): Promise<SessionHandle> {
     const existing = this.sessions.get(agent.id);
-    if (existing && !existing.session.isStreaming) {
+    if (existing) {
+      // Reuse existing session even if streaming — pi SDK sequential prompts work on same session
       existing.lastActivityAt = Date.now();
       return existing;
-    }
-    // Dispose old session if overwriting (e.g., streaming session being replaced)
-    if (existing) {
-      try { existing.session.dispose(); } catch {}
-      this.sessions.delete(agent.id);
     }
 
     return this.create(agent);
@@ -149,7 +145,7 @@ export class AgentSessionManager {
     }
 
     // Capture agent response — skip events, read session state after prompt completes
-    const responsePromise = new Promise<string>((resolve) => {
+    const responsePromise = new Promise<string>((resolve, reject) => {
       const unsubscribe = handle.session.subscribe((event: any) => {
         if (event.type === 'agent_end') {
           unsubscribe();
@@ -176,7 +172,7 @@ export class AgentSessionManager {
       // Timeout safety net
       setTimeout(() => {
         unsubscribe();
-        resolve('Task timed out without response');
+        reject(new Error('Task timed out without response'));
       }, 10 * 60 * 1000);
     });
 

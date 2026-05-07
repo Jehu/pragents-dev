@@ -18,14 +18,19 @@ async function getEmbedding(text: string, config: EmbeddingConfig): Promise<numb
     return pseudoEmbed(text, config.dimensions || 384);
   }
 
-  const response = await fetch(`${baseUrl}/embeddings`, {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 15000);
+  try {
+    const response = await fetch(`${baseUrl}/embeddings`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${apiKey}`,
     },
     body: JSON.stringify({ model, input: text }),
+    signal: ctrl.signal,
   });
+  } finally { clearTimeout(timer); }
 
   if (!response.ok) {
     const err = await response.text();

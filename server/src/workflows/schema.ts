@@ -8,7 +8,7 @@ const StepAgent = z.union([
   }),
 ]);
 
-const ParallelStep: z.ZodType<any> = z.lazy(() =>
+const ParallelStep = z.lazy(() =>
   z.object({
     id: z.string(),
     agent: StepAgent,
@@ -20,7 +20,7 @@ const ParallelStep: z.ZodType<any> = z.lazy(() =>
   }),
 );
 
-const WorkflowStep: z.ZodType<any> = z.lazy(() =>
+const WorkflowStep = z.lazy(() =>
   z.object({
     id: z.string(),
     type: z.enum(['agent', 'human_gate']).optional().default('agent'),

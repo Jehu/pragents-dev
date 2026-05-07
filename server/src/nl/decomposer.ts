@@ -56,8 +56,9 @@ Rules: Use agentId from the provided list. Order steps logically. Keep descripti
 
     try {
       let responseText = '';
-      const responsePromise = new Promise<string>((resolve) => {
-        session.subscribe((event: any) => {
+      let unsubscribe = () => {};
+      const responsePromise = new Promise<string>((resolve, reject) => {
+        unsubscribe = session.subscribe((event: any) => {
           if (event.type === 'assistant_message' && event.message?.content) {
             responseText += typeof event.message.content === 'string'
               ? event.message.content
@@ -65,7 +66,12 @@ Rules: Use agentId from the provided list. Order steps logically. Keep descripti
           }
           if (event.type === 'agent_end') resolve(responseText);
         });
-        setTimeout(() => resolve(responseText), 30000);
+        // 120s timeout with cleanup
+        setTimeout(() => {
+          unsubscribe();
+          try { session.dispose(); } catch {}
+          resolve(responseText || '');
+        }, 120000);
       });
 
       await session.prompt(userMessage);
@@ -79,15 +85,16 @@ Rules: Use agentId from the provided list. Order steps logically. Keep descripti
         parsed = JSON.parse(jsonMatch[0]);
       } catch {
         await session.prompt('Invalid JSON. Return ONLY the JSON object, no other text.');
+        let retryUnsubscribe = () => {};
         const retryRaw = await new Promise<string>((resolve) => {
           let rt = '';
-          session.subscribe((event: any) => {
+          retryUnsubscribe = session.subscribe((event: any) => {
             if (event.type === 'assistant_message' && event.message?.content) {
               rt += typeof event.message.content === 'string' ? event.message.content : event.message.content.map((b: any) => b.text || '').join('');
             }
             if (event.type === 'agent_end') resolve(rt);
           });
-          setTimeout(() => resolve(rt), 30000);
+          setTimeout(() => { retryUnsubscribe(); resolve(rt); }, 120000);
         });
         const retryMatch = retryRaw.match(/\{[\s\S]*\}/);
         if (!retryMatch) throw new Error('LLM failed to produce valid JSON after retry');

@@ -91,7 +91,7 @@ export class WorkflowTracker {
   getSteps(runId: string): WorkflowStepRow[] {
     return getDb().prepare(
       `SELECT id, run_id as runId, step_id as stepId, agent_id as agentId, status, output,
-              started_at as startedAt, completed_at as completedAt FROM workflow_steps WHERE run_id = ? ORDER BY started_at`,
+              started_at as startedAt, completed_at as completedAt FROM workflow_steps WHERE run_id = ? ORDER BY COALESCE(started_at, '9999') ASC, completed_at ASC`,
     ).all(runId) as any[];
   }
 

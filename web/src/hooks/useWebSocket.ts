@@ -52,6 +52,7 @@ function scheduleReconnect() {
 
 export function disconnectWebSocket() {
   if (reconnectTimer) clearTimeout(reconnectTimer);
+  listeners.length = 0;
   ws?.close();
   ws = null;
 }

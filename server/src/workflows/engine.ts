@@ -159,8 +159,12 @@ export class WorkflowEngine {
 
 function evaluateCondition(condition: string, outputs: Record<string, string>): boolean {
   // Simple DSL: step_id.status == 'completed' or step_id.output includes 'text'
-  const match = condition.match(/^(\w+)\.(\w+)\s*(==|!=|includes)\s*['"](.+?)['"]$/);
-  if (!match) return false;
+  // Also supports $step_id syntax: $step_id.output includes 'text'
+  const match = condition.match(/^\$?(\w+)\.(\w+)\s*(==|!=|includes)\s*['"](.+?)['"]$/);
+  if (!match) {
+    console.warn(`evaluateCondition: cannot parse condition "${condition}" — step will be skipped`);
+    return false;
+  }
 
   const [, stepId, field, op, value] = match;
   const key = `${stepId}.${field}`;

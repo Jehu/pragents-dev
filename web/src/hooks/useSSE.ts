@@ -48,6 +48,7 @@ export function connectSSE(options: SSEOptions = {}): void {
   }
 
   es.onopen = () => {
+    (window as any).__sseRetries = 0;
     retryDelay = 1000;
     options.onConnect?.();
     listeners.forEach((l) => l({ type: 'sse_connected' }));
@@ -69,6 +70,10 @@ export function connectSSE(options: SSEOptions = {}): void {
 
 function scheduleReconnect(options: SSEOptions): void {
   if (reconnectTimer) return;
+  // Max 15 reconnects then stop
+  let retryCount = (window as any).__sseRetries || 0;
+  if (retryCount >= 15) return;
+  (window as any).__sseRetries = retryCount + 1;
   // EventSource auto-reconnects, but if it fails completely, we recreate
   if (es) {
     es.close();

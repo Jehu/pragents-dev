@@ -17,9 +17,10 @@ export class CostTracker {
   }
 
   private estimateCost(model: string, tokensIn: number, tokensOut: number): number {
-    // Match by prefix (e.g., "anthropic/claude-sonnet" matches "anthropic/claude-sonnet-4-20250514")
-    for (const [key, rate] of Object.entries(this.rates)) {
-      if (model.startsWith(key) || model.includes(key)) {
+    // Match by longest key first — prevents prefix over-matching (gpt-4o-mini vs gpt-4o)
+    const sorted = Object.entries(this.rates).sort((a, b) => b[0].length - a[0].length);
+    for (const [key, rate] of sorted) {
+      if (model === key || model.startsWith(key + '/') || model.startsWith(key + '-')) {
         return (tokensIn / 1_000_000) * rate.in + (tokensOut / 1_000_000) * rate.out;
       }
     }

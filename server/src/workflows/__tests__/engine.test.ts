@@ -50,7 +50,7 @@ const conditionalWf: WorkflowDef = {
   name: 'conditional-test',
   steps: [
     { id: 'step1', agent: 'dev@test-project', prompt: 'Do step 1', output: 'result1' },
-    { id: 'step2', agent: 'seo@test-project', prompt: 'Do step 2', condition: "$result1 contains 'done'" },
+    { id: 'step2', agent: 'seo@test-project', prompt: 'Do step 2', condition: "result1.output includes 'done'" },
   ],
 };
 
@@ -93,12 +93,23 @@ describe('WorkflowEngine', () => {
     expect(result).toBeTruthy();
   });
 
-  it('skips conditional step when condition fails', async () => {
+  it('executes conditional step when condition passes', async () => {
     const mockWithResult = {
-      dispatch: vi.fn().mockResolvedValue('Step 1 result: not done'),
+      dispatch: vi.fn().mockResolvedValue('Task done successfully'),
     };
     const engine = new WorkflowEngine(tracker, router, mockWithResult, agents, eventBuffer, 'test-project');
     await engine.execute(conditionalWf);
+    // Condition matches → both steps execute
+    expect(mockWithResult.dispatch).toHaveBeenCalledTimes(2);
+  });
+
+  it('skips conditional step when condition fails', async () => {
+    const mockWithResult = {
+      dispatch: vi.fn().mockResolvedValue('Step 1 result: failure'),
+    };
+    const engine = new WorkflowEngine(tracker, router, mockWithResult, agents, eventBuffer, 'test-project');
+    await engine.execute(conditionalWf);
+    // Condition $result1 contains 'done' fails → step2 skipped
     expect(mockWithResult.dispatch).toHaveBeenCalledTimes(1);
   });
 

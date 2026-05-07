@@ -63,21 +63,21 @@ export class GoalScheduler {
       if (!goal) continue;
       if (now > info.deadline.getTime()) {
         // Escalate to PM agent
-        this.activeGoalRuns.delete(wfRunId);
         if (this.pmAgent) {
           const db = getDb();
           db.prepare("UPDATE goal_runs SET status = 'escalated' WHERE id = ?").run(info.goalRunId);
           this.sessionMgr.dispatch(this.pmAgent, 
             `Goal "${goal.id}" has passed its deadline. Workflow run ${wfRunId} may need attention. Check and take appropriate action.`
-          ).catch(() => {});
+          ).catch((err) => console.warn(`Goal escalation dispatch failed for "${goal.id}":`, err?.message));
         }
+        this.activeGoalRuns.delete(wfRunId);
       } else if (now > info.deadline.getTime() - (goal.warn_before_ms || 7200000)) {
         // Warning: deadline approaching — only warn once per hour
         if (this.pmAgent && (!info.warnedAt || now - info.warnedAt > 3600000)) {
           info.warnedAt = now;
           this.sessionMgr.dispatch(this.pmAgent,
             `Warning: Goal "${goal.id}" deadline approaching in ${Math.round((info.deadline.getTime() - now) / 60000)} minutes. Workflow run ${wfRunId} is active.`
-          ).catch(() => {});
+          ).catch((err) => console.warn(`Goal warning dispatch failed for "${goal.id}":`, err?.message));
         }
       }
     }
@@ -85,7 +85,7 @@ export class GoalScheduler {
     // Clean up completed runs
     for (const [wfRunId] of this.activeGoalRuns) {
       const db = getDb();
-      const row = db.prepare('SELECT goal_run_id FROM goal_runs WHERE workflow_run_id = ? AND status = ?').get(wfRunId, 'running') as any;
+      const row = db.prepare('SELECT id as goal_run_id FROM goal_runs WHERE workflow_run_id = ? AND status = ?').get(wfRunId, 'running') as any;
       if (!row) this.activeGoalRuns.delete(wfRunId);
     }
   }
