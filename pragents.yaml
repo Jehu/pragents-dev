@@ -4,7 +4,7 @@ company:
   agents:
     office:
       type: office
-      model: deepseek/deepseek-v4-flash
+      model: deepseek-v4-flash
       personality: |
         Du bist der Office-Manager einer Agentur. Koordiniere Deadlines,
         Meetings und sorge für unternehmensweite Ordnung.
@@ -16,7 +16,7 @@ company:
 
     pm:
       type: pm
-      model: deepseek/deepseek-v4-flash
+      model: deepseek-v4-flash
       personality: |
         Du bist der Projekt-Manager. Priorisiere Aufgaben, prüfe
         Ergebnisse und tracke Fortschritt.
@@ -35,11 +35,11 @@ company:
 projects:
   kunde-webshop:
     name: "Kunde Webshop Relaunch"
-    directory: ~/demo-projects/kunde-webshop
+    directory: "~/demo-projects/kunde-webshop"
     agents:
       dev:
         type: dev
-        model: deepseek/deepseek-v4-flash
+        model: deepseek-v4-flash
         personality: |
           Senior Fullstack-Entwickler. Stack: Next.js 14, TypeScript, Prisma, PostgreSQL, Tailwind.
         skills:
@@ -49,7 +49,7 @@ projects:
           - testing
       seo:
         type: seo
-        model: deepseek/deepseek-v4-flash
+        model: deepseek-v4-flash
         skills:
           - keyword-research
           - technical-seo
@@ -66,5 +66,5 @@ costs:
   openai/gpt-4o: { in: 2.5, out: 10.0 }
   openai/gpt-4o-mini: { in: 0.15, out: 0.6 }
   google/gemini-2.5-pro: { in: 1.25, out: 10.0 }
-  deepseek/deepseek-v4-flash: { in: 0.14, out: 0.28 }
-  deepseek/deepseek-v4-pro: { in: 0.435, out: 0.87 }
+  deepseek-v4-flash: { in: 0.14, out: 0.28 }
+  deepseek-v4-pro: { in: 0.435, out: 0.87 }
