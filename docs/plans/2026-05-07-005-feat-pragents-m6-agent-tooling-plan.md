@@ -1,7 +1,7 @@
 ---
 title: "M6: Agent-Native Tooling — Agents as First-Class Platform Users"
 type: feat
-status: active
+status: completed
 date: 2026-05-07
 ---
 
