@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { getDb } from '../db/sqlite.js';
+import type { VectorStore } from './vector-store/interface.js';
+import { SimpleVectorStore } from './vector-store/simple.js';
 
 export interface Fact {
   id: string;
@@ -19,9 +21,11 @@ export interface SessionSummary {
 
 export class MemoryEngine {
   private shortTerm: ShortTermMemory;
+  private vectorStore: VectorStore;
 
-  constructor(maxEntries: number = 100) {
+  constructor(maxEntries: number = 100, vectorStore?: VectorStore) {
     this.shortTerm = new ShortTermMemory(maxEntries);
+    this.vectorStore = vectorStore || new SimpleVectorStore();
   }
 
   // Long-term: facts
@@ -31,23 +35,40 @@ export class MemoryEngine {
     db.prepare(
       'INSERT INTO facts (id, scope, category, content, agent_id) VALUES (?, ?, ?, ?, ?)',
     ).run(id, scope, category, content, agentId);
+    // Index in vector store
+    this.vectorStore.add(id, content, { scope, category, agentId }).catch(() => {});
     return { id, scope, category, content, agentId, createdAt: new Date().toISOString() };
   }
 
-  recall(query: string, scope: string, limit: number = 10): Fact[] {
+  async recall(query: string, scope: string, limit: number = 10): Promise<Fact[]> {
     const db = getDb();
-    const rows = db
+    // Keyword search fallback
+    const sqlRows = db
       .prepare(
         `SELECT id, scope, category, content, agent_id as agentId, created_at as createdAt
          FROM facts WHERE scope = ? AND content LIKE ? ORDER BY created_at DESC LIMIT ?`,
       )
       .all(scope, `%${query}%`, limit) as Fact[];
-    return rows;
+
+    // Vector search
+    try {
+      const vectorResults = await this.vectorStore.search(query, { scope }, limit);
+      const vectorFacts = vectorResults.map(r => ({
+        id: r.id, scope: r.metadata.scope || scope, category: r.metadata.category || '',
+        content: r.content, agentId: r.metadata.agentId || '', createdAt: new Date().toISOString(),
+      }));
+      // Merge: vector results first, then keyword results (deduped)
+      const seen = new Set(vectorFacts.map(f => f.id));
+      return [...vectorFacts, ...sqlRows.filter(f => !seen.has(f.id))].slice(0, limit);
+    } catch {
+      return sqlRows;
+    }
   }
 
-  forget(factId: string): void {
+  async forget(factId: string): Promise<void> {
     const db = getDb();
     db.prepare('DELETE FROM facts WHERE id = ?').run(factId);
+    await this.vectorStore.delete(factId);
   }
 
   // Short-term

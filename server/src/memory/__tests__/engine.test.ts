@@ -19,31 +19,31 @@ describe('MemoryEngine', () => {
     rmSync(tmpDir, { recursive: true });
   });
 
-  it('remembers and recalls facts', () => {
+  it('remembers and recalls facts', async () => {
     engine.remember('proj-a', 'convention', 'Use tabs not spaces', 'dev@a');
     engine.remember('proj-a', 'decision', 'Use Hono for routing', 'dev@a');
     engine.remember('proj-b', 'convention', 'Use spaces', 'dev@b');
 
-    const aFacts = engine.recall('tabs', 'proj-a');
+    const aFacts = await engine.recall('tabs', 'proj-a');
     expect(aFacts).toHaveLength(1);
     expect(aFacts[0].content).toBe('Use tabs not spaces');
 
-    const bFacts = engine.recall('spaces', 'proj-b');
+    const bFacts = await engine.recall('spaces', 'proj-b');
     expect(bFacts).toHaveLength(1);
   });
 
-  it('recall returns empty for non-existent scope', () => {
-    const facts = engine.recall('nothing', 'non-existent');
+  it('recall returns empty for non-existent scope', async () => {
+    const facts = await engine.recall('nothing', 'non-existent');
     expect(facts).toHaveLength(0);
   });
 
-  it('forgets facts', () => {
+  it('forgets facts', async () => {
     const fact = engine.remember('proj-a', 'test', 'temporary', 'dev@a');
-    const before = engine.recall('temporary', 'proj-a');
+    const before = await engine.recall('temporary', 'proj-a');
     expect(before).toHaveLength(1);
 
-    engine.forget(fact.id);
-    const after = engine.recall('temporary', 'proj-a');
+    await engine.forget(fact.id);
+    const after = await engine.recall('temporary', 'proj-a');
     expect(after).toHaveLength(0);
   });
 

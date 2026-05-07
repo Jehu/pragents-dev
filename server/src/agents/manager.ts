@@ -92,7 +92,7 @@ export class AgentSessionManager {
     const handle = await this.getOrCreate(agent);
 
     // Assemble memory context
-    const facts = this.memory.recall(task, agent.projectId, 5);
+    const facts = await this.memory.recall(task, agent.projectId, 5);
     const contextStr =
       facts.length > 0
         ? '\n\nRelevant project knowledge:\n' +
