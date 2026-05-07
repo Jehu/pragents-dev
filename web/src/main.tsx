@@ -1,11 +1,29 @@
-import React, { useState } from 'react';
-import { useQuery, QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import React, { useState, useEffect } from 'react';
+import { useQuery, QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import ReactDOM from 'react-dom/client';
+import { connectWebSocket } from './hooks/useWebSocket';
 
 const API = '';
 const queryClient = new QueryClient();
 
 function App() {
+  const queryClient = useQueryClient();
+
+  // WebSocket real-time updates
+  useEffect(() => {
+    connectWebSocket((event: any) => {
+      if (event.type === 'ws_connected' || event.type === 'ws_disconnected') return;
+      // Invalidate relevant queries on any agent/task/workflow event
+      queryClient.invalidateQueries({ queryKey: ['agents'] });
+      queryClient.invalidateQueries({ queryKey: ['tasks'] });
+      queryClient.invalidateQueries({ queryKey: ['events'] });
+      queryClient.invalidateQueries({ queryKey: ['workflows'] });
+      queryClient.invalidateQueries({ queryKey: ['wf-runs'] });
+      queryClient.invalidateQueries({ queryKey: ['cost'] });
+    });
+    return () => {}; // connection persists
+  }, [queryClient]);
+
   const [view, setView] = useState<'dashboard' | 'traces' | 'tasks' | 'workflows'>('dashboard');
   const [description, setDescription] = useState('');
   const [submitting, setSubmitting] = useState(false);

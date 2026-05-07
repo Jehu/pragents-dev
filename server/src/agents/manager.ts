@@ -177,18 +177,3 @@ export class AgentSessionManager {
     return handle.session.isStreaming ? 'busy' : 'idle';
   }
 }
- this.memory.compress(id, id);
-    }
-    this.sessions.clear();
-  }
-
-  getActiveAgents(): string[] {
-    return Array.from(this.sessions.keys());
-  }
-
-  getAgentStatus(agentId: string): 'busy' | 'idle' | 'offline' {
-    const handle = this.sessions.get(agentId);
-    if (!handle) return 'offline';
-    return handle.session.isStreaming ? 'busy' : 'idle';
-  }
-}

@@ -10,13 +10,15 @@ import { WorkflowRegistry } from './workflows/loader.js';
 import { WorkflowTracker } from './workflows/tracker.js';
 import { WorkflowEngine } from './workflows/engine.js';
 import { SkillRouter } from './routing/router.js';
-import { setupWebSocket } from './api/ws.js';
+import { setupWebSocket, broadcast } from './api/ws.js';
 import { healthRoute } from './api/routes/health.js';
 import { createTasksRoute } from './api/routes/tasks.js';
 import { createProjectsRoute, createAgentsRoute } from './api/routes/projects.js';
 import { createWorkflowsRoute } from './api/routes/workflows.js';
 import { NLDecomposer } from './nl/decomposer.js';
 import { createNLRoutes } from './api/routes/nl.js';
+import { CostTracker } from './tracking/cost-tracker.js';
+import { createCostRoute } from './api/routes/cost.js';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { mkdirSync } from 'node:fs';
@@ -50,7 +52,8 @@ export async function startServer() {
   const router = new SkillRouter(agents);
 
   sessionMgr.setEventCallback((event: any) => {
-    eventBuffer.push(event.projectId, event.agentId, event.type, event.data);
+    const evt = eventBuffer.push(event.projectId, event.agentId, event.type, event.data);
+    broadcast(evt);
   });
 
   // Workflow system
@@ -67,7 +70,7 @@ export async function startServer() {
 
   // Build API
   const app = new Hono();
-  setupWebSocket(app, eventBuffer);
+  await setupWebSocket(app, eventBuffer);
 
   app.route('/', healthRoute);
   app.route('/api/v1/projects', createProjectsRoute(config));
@@ -113,8 +116,3 @@ startServer().catch((err) => {
   console.error('Failed to start pragents server:', err);
   process.exit(1);
 });
-
- err);
-  process.exit(1);
-});
-

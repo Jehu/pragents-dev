@@ -1,38 +1,43 @@
-import type { ServerWebSocket } from 'bun';
 import { EventBuffer, type PragentsEvent } from '../events/buffer.js';
 
-export function setupWebSocket(app: any, buffer: EventBuffer) {
-  // Using Hono's WebSocket helper
+const wsClients: Set<any> = new Set();
+
+export async function setupWebSocket(app: any, buffer: EventBuffer) {
   try {
-    const { upgradeWebSocket } = require('@hono/node-ws');
+    const { createNodeWebSocket } = await import('@hono/node-ws');
+    const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app });
 
     app.get(
       '/ws',
-      upgradeWebSocket((c: any) => ({
-        onOpen(_event: any, ws: ServerWebSocket<any>) {
-          console.log('WebSocket client connected');
+      upgradeWebSocket(() => ({
+        onOpen(_event: any, ws: any) {
+          wsClients.add(ws);
+          const events = buffer.getRecent(50);
+          ws.send(JSON.stringify({ type: 'replay', events }));
         },
-        onMessage(event: any, ws: ServerWebSocket<any>) {
+        onMessage(event: any, ws: any) {
           try {
             const msg = JSON.parse(event.data.toString());
             if (msg.type === 'subscribe' && msg.lastEventId !== undefined) {
               const events = buffer.getSince(msg.lastEventId, msg.projectId);
               ws.send(JSON.stringify({ type: 'replay', events }));
             }
-          } catch { /* ignore invalid messages */ }
+          } catch { /* ignore */ }
         },
-        onClose() {
-          console.log('WebSocket client disconnected');
+        onClose(_event: any, ws: any) {
+          wsClients.delete(ws);
         },
       })),
     );
-  } catch {
-    console.warn('WebSocket support requires @hono/node-ws. Install with: npm install @hono/node-ws');
+    console.log('WebSocket endpoint ready at /ws');
+  } catch (err: any) {
+    console.warn(`WebSocket not available: ${err.message}`);
   }
 }
 
-export function broadcast(buffer: EventBuffer, event: PragentsEvent, app: any): void {
-  // Events are buffered; clients pull on reconnect
-  // Real-time push requires tracking connected clients
-  buffer.push(event.projectId, event.agentId, event.type, event.data);
+export function broadcast(event: PragentsEvent): void {
+  const msg = JSON.stringify(event);
+  for (const ws of wsClients) {
+    try { ws.send(msg); } catch { wsClients.delete(ws); }
+  }
 }
