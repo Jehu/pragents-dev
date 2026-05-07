@@ -19,6 +19,9 @@ import { NLDecomposer } from './nl/decomposer.js';
 import { createNLRoutes } from './api/routes/nl.js';
 import { CostTracker } from './tracking/cost-tracker.js';
 import { createCostRoute } from './api/routes/cost.js';
+import { GoalRegistry } from './goals/loader.js';
+import { GoalScheduler } from './goals/scheduler.js';
+import { createGoalsRoute } from './api/routes/goals.js';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { mkdirSync } from 'node:fs';
@@ -61,12 +64,23 @@ export async function startServer() {
   const wfDir = join(__dirname, '..', '..', 'workflows');
   const { loaded, warnings } = wfRegistry.load(wfDir);
   console.log(`Workflows loaded: ${loaded.join(', ') || 'none'}`);
+
+  const goalRegistry = new GoalRegistry();
+  const goalsDir = join(__dirname, '..', '..', 'goals');
+  const { loaded: goalsLoaded, warnings: goalWarnings } = goalRegistry.load(goalsDir);
+  console.log(`Goals loaded: ${goalsLoaded.join(', ') || 'none'}`);
   for (const w of warnings) console.warn(`Workflow warning: ${w}`);
 
   const wfEngine = new WorkflowEngine(wfTracker, router, sessionMgr, agents, eventBuffer);
   const decomposer = new NLDecomposer();
   const costTracker = new CostTracker();
   sessionMgr.setCostTracker(costTracker);
+
+  // Goal scheduler
+  const goalScheduler = new GoalScheduler(wfRegistry, wfEngine, eventBuffer, sessionMgr, agents);
+  goalScheduler.start(goalRegistry.list());
+  process.on('SIGTERM', () => goalScheduler.stop());
+  process.on('SIGINT', () => goalScheduler.stop());
 
   // Build API
   const app = new Hono();
@@ -80,6 +94,7 @@ export async function startServer() {
   app.route('/api/v1/workflows', createWorkflowsRoute(wfRegistry, wfEngine, wfTracker));
   app.route('/api/v1/nl', createNLRoutes(decomposer, agents, wfEngine));
   app.route('/api/v1/cost', createCostRoute(costTracker));
+  app.route('/api/v1/goals', createGoalsRoute(goalRegistry));
 
   // Traces
   app.get('/api/v1/traces', (c) => {

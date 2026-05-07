@@ -1,0 +1,5 @@
+id: weekly-article
+description: "1 well-researched blog article per week"
+cadence: "0 8 * * 1"
+deadline: "0 16 * * 5"
+workflow: content-pipeline

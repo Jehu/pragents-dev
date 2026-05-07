@@ -24,7 +24,7 @@ function App() {
     return () => {}; // connection persists
   }, [queryClient]);
 
-  const [view, setView] = useState<'dashboard' | 'traces' | 'tasks' | 'workflows'>('dashboard');
+  const [view, setView] = useState<'dashboard' | 'traces' | 'tasks' | 'workflows' | 'goals'>('dashboard');
   const [description, setDescription] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [toast, setToast] = useState('');
@@ -35,6 +35,8 @@ function App() {
   const [nlError, setNlError] = useState('');
   const [wfRunResult, setWfRunResult] = useState('');
   const [expandedTrace, setExpandedTrace] = useState<number | null>(null);
+  const { data: goals } = useQuery({ queryKey: ['goals'], queryFn: () => fetch(`${API}/api/v1/goals`).then(r => r.json()), refetchInterval: 10000 });
+  const { data: goalRuns } = useQuery({ queryKey: ['goal-runs'], queryFn: () => fetch(`${API}/api/v1/goals/runs`).then(r => r.json()), refetchInterval: 10000, enabled: view === 'goals' });
   const { data: workflows } = useQuery({ queryKey: ['workflows'], queryFn: () => fetch(`${API}/api/v1/workflows`).then(r => r.json()), refetchInterval: 5000 });
   const { data: costSummary } = useQuery({ queryKey: ['cost'], queryFn: () => fetch(`${API}/api/v1/cost/summary`).then(r => r.json()), refetchInterval: 10000 });
   const { data: wfRuns } = useQuery({ queryKey: ['wf-runs'], queryFn: () => fetch(`${API}/api/v1/workflows/runs`).then(r => r.json()), refetchInterval: 3000, enabled: view === 'workflows' });
@@ -114,7 +116,7 @@ function App() {
         <div className="flex items-center gap-6">
           <h1 className="text-lg font-bold tracking-tight">pragents</h1>
           <nav className="flex gap-1">
-            {(['dashboard', 'workflows', 'traces', 'tasks'] as const).map(v => (
+            {(['dashboard', 'goals', 'workflows', 'traces', 'tasks'] as const).map(v => (
               <button
                 key={v}
                 onClick={() => setView(v)}
@@ -429,6 +431,57 @@ function App() {
                 >{nlDecomposing ? 'Executing...' : 'Approve & Execute →'}</button>
               </div>
             </div>
+          </div>
+        )}
+        {view === 'goals' && (
+          <div>
+            <h2 className="text-xl font-bold mb-4">Goals</h2>
+            {!goals || !Array.isArray(goals) || goals.length === 0 ? (
+              <p className="text-gray-400 text-sm">No goals defined. Add YAML files to goals/</p>
+            ) : (
+              <div className="space-y-4">
+                {goals.map((g: any) => {
+                  const runs = Array.isArray(goalRuns) ? goalRuns.filter((r: any) => r.goal_id === g.id) : [];
+                  const lastRun = runs[0];
+                  return (
+                    <div key={g.id} className="bg-white rounded-xl border border-gray-200 p-4">
+                      <div className="flex items-center justify-between mb-2">
+                        <div>
+                          <span className="font-medium text-gray-800">{g.id}</span>
+                          <span className="text-sm text-gray-400 ml-2">— {g.description}</span>
+                        </div>
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                          lastRun?.status === 'complete' ? 'bg-green-50 text-green-600' :
+                          lastRun?.status === 'running' ? 'bg-blue-50 text-blue-600' :
+                          lastRun?.status === 'escalated' ? 'bg-red-50 text-red-600' :
+                          'bg-gray-100 text-gray-400'
+                        }`}>{lastRun?.status || 'pending'}</span>
+                      </div>
+                      <div className="flex gap-6 text-xs text-gray-400">
+                        <span>🕐 Cadence: {g.cadence}</span>
+                        {g.deadline && <span>⏰ Deadline: {g.deadline}</span>}
+                        <span>📋 Workflow: {g.workflow}</span>
+                      </div>
+                      {runs.length > 0 && (
+                        <div className="mt-3 border-t border-gray-100 pt-3">
+                          <span className="text-xs text-gray-400">Recent runs:</span>
+                          <div className="flex gap-2 mt-1">
+                            {runs.slice(0, 8).map((r: any) => (
+                              <span key={r.id} className={`text-xs px-2 py-0.5 rounded-full ${
+                                r.status === 'complete' ? 'bg-green-100 text-green-700' :
+                                r.status === 'running' ? 'bg-blue-100 text-blue-700' :
+                                r.status === 'failed' ? 'bg-red-100 text-red-700' :
+                                'bg-gray-100 text-gray-500'
+                              }`}>{r.status}</span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
       </main>
