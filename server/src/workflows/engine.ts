@@ -19,7 +19,7 @@ export class WorkflowEngine {
     projectId?: string,
   ) {
     this.projectId = projectId || 'default';
-  }}
+  }
 
   async execute(def: WorkflowDef, params?: any, triggerSourceRunId?: string): Promise<string> {
     const run = this.tracker.createRun(def.name, params, triggerSourceRunId);
