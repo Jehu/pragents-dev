@@ -70,7 +70,8 @@ export async function startServer() {
 
   // Build API
   const app = new Hono();
-  await setupWebSocket(app, eventBuffer);
+  const wsInject = await setupWebSocket(app, eventBuffer);
+  if (wsInject) console.log('WebSocket endpoint ready');
 
   app.route('/', healthRoute);
   app.route('/api/v1/projects', createProjectsRoute(config));
@@ -78,6 +79,7 @@ export async function startServer() {
   app.route('/api/v1/tasks', createTasksRoute(tracker, agents, sessionMgr, eventBuffer));
   app.route('/api/v1/workflows', createWorkflowsRoute(wfRegistry, wfEngine, wfTracker));
   app.route('/api/v1/nl', createNLRoutes(decomposer, agents, wfEngine));
+  app.route('/api/v1/cost', createCostRoute(costTracker));
 
   // Traces
   app.get('/api/v1/traces', (c) => {
@@ -95,7 +97,9 @@ export async function startServer() {
   console.log(`pragents server starting on http://${host}:${port}`);
   console.log(`Company: ${config.company.name} | Projects: ${Object.keys(config.projects).length} | Agents: ${agents.length}`);
 
-  serve({ fetch: app.fetch, port, hostname: host }, (info) => {
+  const serveOptions: any = { fetch: app.fetch, port, hostname: host };
+  if (wsInject) Object.assign(serveOptions, wsInject);
+  serve(serveOptions, (info) => {
     console.log(`pragents ready — listening on http://${host}:${info.port}`);
   });
 

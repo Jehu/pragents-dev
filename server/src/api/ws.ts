@@ -30,8 +30,10 @@ export async function setupWebSocket(app: any, buffer: EventBuffer) {
       })),
     );
     console.log('WebSocket endpoint ready at /ws');
+    return injectWebSocket;
   } catch (err: any) {
     console.warn(`WebSocket not available: ${err.message}`);
+    return null;
   }
 }
 
