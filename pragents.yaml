@@ -1,0 +1,60 @@
+company:
+  name: "Meine Agentur"
+
+  agents:
+    office:
+      type: office
+      model: claude-sonnet
+      personality: |
+        Du bist der Office-Manager einer Agentur. Koordiniere Deadlines,
+        Meetings und sorge für unternehmensweite Ordnung.
+      memory:
+        company: read/write
+      skills:
+        - calendar-management
+        - task-tracking
+
+    pm:
+      type: pm
+      model: claude-sonnet
+      personality: |
+        Du bist der Projekt-Manager. Priorisiere Aufgaben, prüfe
+        Ergebnisse und tracke Fortschritt.
+      memory:
+        company: read/write
+        projects:
+          all: read
+      skills:
+        - task-prioritization
+        - quality-review
+
+  memory:
+    short_term:
+      max_entries: 100
+
+projects:
+  kunde-webshop:
+    name: "Kunde Webshop Relaunch"
+    directory: ~/projects/kunde-webshop
+    agents:
+      dev:
+        type: dev
+        model: claude-sonnet
+        personality: |
+          Senior Fullstack-Entwickler. Stack: Next.js 14, TypeScript, Prisma, PostgreSQL, Tailwind.
+        skills:
+          - typescript
+          - nextjs
+          - prisma
+          - testing
+      seo:
+        type: seo
+        model: claude-haiku
+        skills:
+          - keyword-research
+          - technical-seo
+
+interfaces:
+  web:
+    port: 3000
+    host: localhost

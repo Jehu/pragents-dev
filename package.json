@@ -1,0 +1,11 @@
+{
+  "name": "pragents",
+  "private": true,
+  "workspaces": [
+    "server",
+    "web"
+  ],
+  "dependencies": {
+    "@hono/node-ws": "^1.3.1"
+  }
+}
