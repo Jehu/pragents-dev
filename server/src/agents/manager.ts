@@ -125,17 +125,38 @@ export class AgentSessionManager {
 
     // Capture agent response via one-time event listener
     const responsePromise = new Promise<string>((resolve) => {
-      const messages: string[] = [];
+      let responseText = '';
       const unsubscribe = handle.session.subscribe((event: any) => {
-        if (event.type === 'assistant_message' && event.message?.content) {
+        // Capture all text content from any event type
+        if (event.message?.content) {
           const content = typeof event.message.content === 'string'
             ? event.message.content
-            : event.message.content.map((b: any) => b.text || '').join('');
-          messages.push(content);
+            : Array.isArray(event.message.content)
+              ? event.message.content.map((b: any) => b.text || b.type || '').join('')
+              : '';
+          if (content) responseText += content;
+        }
+        // Also capture tool_result content (agent responses via tools)
+        if (event.type === 'tool_result' && event.result) {
+          responseText += '\n' + (typeof event.result === 'string' ? event.result : JSON.stringify(event.result));
         }
         if (event.type === 'agent_end') {
           unsubscribe();
-          resolve(messages.join('\n') || 'Task completed (no text response)');
+          // Fallback: read last assistant message from session state
+          if (!responseText.trim() && handle.session.agent?.state?.messages) {
+            const msgs = handle.session.agent.state.messages;
+            for (let i = msgs.length - 1; i >= 0; i--) {
+              if (msgs[i].role === 'assistant' && msgs[i].content) {
+                responseText = typeof msgs[i].content === 'string'
+                  ? msgs[i].content
+                  : Array.isArray(msgs[i].content)
+                    ? msgs[i].content.map((b: any) => b.text || '').join('')
+                    : '';
+                break;
+              }
+            }
+          }
+          resolve(responseText.trim() || 'Task completed (no text response)');
         }
       });
       // Timeout safety net
