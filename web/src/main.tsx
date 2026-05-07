@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery, QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import ReactDOM from 'react-dom/client';
-import { connectWebSocket } from './hooks/useWebSocket';
+import { useConnectionStore } from './stores/connection';
 
 const API = '';
 const queryClient = new QueryClient();
@@ -9,9 +9,12 @@ const queryClient = new QueryClient();
 function App() {
   const queryClient = useQueryClient();
 
-  // WebSocket real-time updates
+  const connect = useConnectionStore((s) => s.connect);
+  const disconnect = useConnectionStore((s) => s.disconnect);
+
+  // Real-time updates via SSE (primary) or WebSocket (fallback)
   useEffect(() => {
-    connectWebSocket((event: any) => {
+    connect((event: any) => {
       if (event.type === 'ws_connected' || event.type === 'ws_disconnected') return;
       // Invalidate relevant queries on any agent/task/workflow event
       queryClient.invalidateQueries({ queryKey: ['agents'] });
@@ -21,7 +24,7 @@ function App() {
       queryClient.invalidateQueries({ queryKey: ['wf-runs'] });
       queryClient.invalidateQueries({ queryKey: ['cost'] });
     });
-    return () => {}; // connection persists
+    return () => { disconnect(); };
   }, [queryClient]);
 
   const [view, setView] = useState<'dashboard' | 'traces' | 'tasks' | 'workflows' | 'goals' | 'memory'>('dashboard');
