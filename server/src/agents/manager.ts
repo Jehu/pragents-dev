@@ -127,32 +127,35 @@ export class AgentSessionManager {
     const responsePromise = new Promise<string>((resolve) => {
       let responseText = '';
       const unsubscribe = handle.session.subscribe((event: any) => {
-        // Capture all text content from any event type
-        if (event.message?.content) {
+        // Capture text content — skip thinking/reasoning blocks
+        if (event.message?.content && event.type !== 'thinking') {
           const content = typeof event.message.content === 'string'
             ? event.message.content
             : Array.isArray(event.message.content)
-              ? event.message.content.map((b: any) => b.text || b.type || '').join('')
+              ? event.message.content
+                  .filter((b: any) => b.type === 'text' || !b.type)
+                  .map((b: any) => b.text || '')
+                  .join('')
               : '';
-          if (content) responseText += content;
-        }
-        // Also capture tool_result content (agent responses via tools)
-        if (event.type === 'tool_result' && event.result) {
-          responseText += '\n' + (typeof event.result === 'string' ? event.result : JSON.stringify(event.result));
+          if (content && !content.startsWith('thinking')) responseText += content;
         }
         if (event.type === 'agent_end') {
           unsubscribe();
-          // Fallback: read last assistant message from session state
+          // Fallback: read last assistant message from session state, skip thinking blocks
           if (!responseText.trim() && handle.session.agent?.state?.messages) {
             const msgs = handle.session.agent.state.messages;
             for (let i = msgs.length - 1; i >= 0; i--) {
               if (msgs[i].role === 'assistant' && msgs[i].content) {
-                responseText = typeof msgs[i].content === 'string'
-                  ? msgs[i].content
-                  : Array.isArray(msgs[i].content)
-                    ? msgs[i].content.map((b: any) => b.text || '').join('')
-                    : '';
-                break;
+                const content = msgs[i].content;
+                if (Array.isArray(content)) {
+                  responseText = content
+                    .filter((b: any) => b.type === 'text')
+                    .map((b: any) => b.text || '')
+                    .join('');
+                } else if (typeof content === 'string') {
+                  responseText = content;
+                }
+                if (responseText.trim()) break;
               }
             }
           }
