@@ -2,6 +2,9 @@ import { createAgentSession, DefaultResourceLoader, SessionManager } from '@mari
 import type { AgentSession, ResourceLoader } from '@mariozechner/pi-coding-agent';
 import type { ResolvedAgent } from '../config/schema.js';
 import { MemoryEngine } from '../memory/engine.js';
+import type { CostTracker } from '../tracking/cost-tracker.js';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 export interface SessionHandle {
   agentId: string;
@@ -43,8 +46,17 @@ export class AgentSessionManager {
   }
 
   private async create(agent: ResolvedAgent): Promise<SessionHandle> {
+    // Ensure pi directory structure exists
+    const piDir = join(agent.projectDir, '.pi');
+    const agentDir = join(piDir, 'agent');
+    mkdirSync(agentDir, { recursive: true });
+    // Create minimal settings file if missing
+    const settingsPath = join(piDir, 'settings.json');
+    try { writeFileSync(settingsPath, JSON.stringify({ model: agent.model, enableThinking: false }), { flag: 'wx' }); } catch {}
+
     const loader = new DefaultResourceLoader({
       cwd: agent.projectDir,
+      agentDir,
       noExtensions: true,
       noSkills: true,
       noPromptTemplates: true,
