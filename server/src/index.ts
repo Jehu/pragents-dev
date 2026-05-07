@@ -26,7 +26,7 @@ import { createGatesRoute } from './api/routes/gates.js';
 import { createMemoryRoute } from './api/routes/memory.js';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { logger, childLogger } from './logging/index.js';
 
@@ -36,6 +36,22 @@ const DATA_DIR = join(homedir(), '.pragents', 'data');
 mkdirSync(DATA_DIR, { recursive: true });
 
 export async function startServer() {
+  // Load .env from ~/.pragents/.env
+  const envPath = join(homedir(), '.pragents', '.env');
+  if (existsSync(envPath)) {
+    const envContent = readFileSync(envPath, 'utf-8');
+    for (const line of envContent.split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      const eqIdx = trimmed.indexOf('=');
+      if (eqIdx === -1) continue;
+      const key = trimmed.substring(0, eqIdx).trim();
+      const value = trimmed.substring(eqIdx + 1).trim().replace(/^["']|["']$/g, '');
+      if (!process.env[key]) process.env[key] = value;
+    }
+    console.log(`Loaded env from ${envPath}`);
+  }
+
   const { config, agents } = loadConfig();
 
   // Initialize database
