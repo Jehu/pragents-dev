@@ -137,7 +137,7 @@ export function resolveAgent(
     memory: agentConfig.memory ?? { project: 'read/write', company: 'read' },
     skills: agentConfig.skills ?? [],
     projectDir: (projectConfig.directory || process.env.HOME || '/tmp').replace(/^~/, process.env.HOME || ''),
-    tokenBudget: (agentConfig as any).tokenBudget || TOKEN_BUDGETS[agentConfig.type] || TOKEN_BUDGETS.default,
+    tokenBudget: agentConfig.tokenBudget || TOKEN_BUDGETS[agentConfig.type] || TOKEN_BUDGETS.default,
   };
 }
 

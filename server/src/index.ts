@@ -28,7 +28,7 @@ import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { mkdirSync, readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { logger, childLogger } from './logging/index.js';
+import { logger } from './logging/index.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -49,7 +49,7 @@ export async function startServer() {
       const value = trimmed.substring(eqIdx + 1).trim().replace(/^["']|["']$/g, '');
       if (!process.env[key]) process.env[key] = value;
     }
-    console.log(`Loaded env from ${envPath}`);
+    logger.info({ path: envPath }, 'Env loaded');
   }
 
   const { config, agents } = loadConfig();
@@ -63,8 +63,8 @@ export async function startServer() {
   const wfTracker = new WorkflowTracker();
   const recovered = tracker.recoverStaleTasks();
   const wfRecovered = wfTracker.recoverStaleRuns();
-  if (recovered > 0) console.log(`Recovered ${recovered} stale task(s)`);
-  if (wfRecovered > 0) console.log(`Recovered ${wfRecovered} stale workflow run(s)`);
+  if (recovered > 0) logger.warn({ recovered }, 'Stale tasks recovered');
+  if (wfRecovered > 0) logger.warn({ recovered: wfRecovered }, 'Stale workflow runs recovered');
 
   // Core services
   const memory = new MemoryEngine(config.company.memory?.short_term?.max_entries ?? 100);
@@ -130,11 +130,11 @@ export async function startServer() {
   const port = config.interfaces.web.port;
   const host = config.interfaces.web.host;
   console.log(`pragents server starting on http://${host}:${port}`);
-  console.log(`Company: ${config.company.name} | Projects: ${Object.keys(config.projects).length} | Agents: ${agents.length}`);
+  logger.info({ count: agents.length }, 'Agents loaded');
 
   const serveOptions: any = { fetch: app.fetch, port, hostname: host };
   const service = serve(serveOptions, (info) => {
-    console.log(`pragents ready — listening on http://${host}:${info.port}`);
+    logger.info({ port: info.port, host }, 'Server ready');
   });
 
   if (wsInject) {
