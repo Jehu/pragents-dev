@@ -33,10 +33,11 @@ function App() {
   const [nlDecomposing, setNlDecomposing] = useState(false);
   const [nlPlan, setNlPlan] = useState<any>(null);
   const [nlError, setNlError] = useState('');
+  const [wfRunResult, setWfRunResult] = useState('');
+  const [expandedTrace, setExpandedTrace] = useState<number | null>(null);
   const { data: workflows } = useQuery({ queryKey: ['workflows'], queryFn: () => fetch(`${API}/api/v1/workflows`).then(r => r.json()), refetchInterval: 5000 });
   const { data: costSummary } = useQuery({ queryKey: ['cost'], queryFn: () => fetch(`${API}/api/v1/cost/summary`).then(r => r.json()), refetchInterval: 10000 });
   const { data: wfRuns } = useQuery({ queryKey: ['wf-runs'], queryFn: () => fetch(`${API}/api/v1/workflows/runs`).then(r => r.json()), refetchInterval: 3000, enabled: view === 'workflows' });
-  const [expandedTrace, setExpandedTrace] = useState<number | null>(null);
 
   const { data: agents } = useQuery({ queryKey: ['agents'], queryFn: () => fetch(`${API}/api/v1/agents`).then(r => r.json()) });
   const { data: tasks } = useQuery({ queryKey: ['tasks'], queryFn: () => fetch(`${API}/api/v1/tasks`).then(r => r.json()), refetchInterval: 3000 });

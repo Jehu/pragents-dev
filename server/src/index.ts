@@ -98,10 +98,14 @@ export async function startServer() {
   console.log(`Company: ${config.company.name} | Projects: ${Object.keys(config.projects).length} | Agents: ${agents.length}`);
 
   const serveOptions: any = { fetch: app.fetch, port, hostname: host };
-  if (wsInject) Object.assign(serveOptions, wsInject);
-  serve(serveOptions, (info) => {
+  const service = serve(serveOptions, (info) => {
     console.log(`pragents ready — listening on http://${host}:${info.port}`);
   });
+
+  if (wsInject) {
+    wsInject(service);
+    console.log('WebSocket upgrade injected');
+  }
 
   const shutdown = async () => {
     console.log('\nShutting down...');
