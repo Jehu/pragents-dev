@@ -123,40 +123,26 @@ export class AgentSessionManager {
       contextStr = '\n\nRelevant project knowledge:\n' + contextStr;
     }
 
-    // Capture agent response via one-time event listener
+    // Capture agent response — skip events, read session state after prompt completes
     const responsePromise = new Promise<string>((resolve) => {
-      let responseText = '';
       const unsubscribe = handle.session.subscribe((event: any) => {
-        // Capture text content — skip thinking/reasoning blocks
-        if (event.message?.content && event.type !== 'thinking') {
-          const content = typeof event.message.content === 'string'
-            ? event.message.content
-            : Array.isArray(event.message.content)
-              ? event.message.content
-                  .filter((b: any) => b.type === 'text' || !b.type)
-                  .map((b: any) => b.text || '')
-                  .join('')
-              : '';
-          if (content && !content.startsWith('thinking')) responseText += content;
-        }
         if (event.type === 'agent_end') {
           unsubscribe();
-          // Fallback: read last assistant message from session state, skip thinking blocks
-          if (!responseText.trim() && handle.session.agent?.state?.messages) {
-            const msgs = handle.session.agent.state.messages;
-            for (let i = msgs.length - 1; i >= 0; i--) {
-              if (msgs[i].role === 'assistant' && msgs[i].content) {
-                const content = msgs[i].content;
-                if (Array.isArray(content)) {
-                  responseText = content
-                    .filter((b: any) => b.type === 'text')
-                    .map((b: any) => b.text || '')
-                    .join('');
-                } else if (typeof content === 'string') {
-                  responseText = content;
-                }
-                if (responseText.trim()) break;
+          // Read last assistant message, filtering out thinking blocks
+          const msgs = handle.session.agent?.state?.messages || [];
+          let responseText = '';
+          for (let i = msgs.length - 1; i >= 0; i--) {
+            if (msgs[i].role === 'assistant' && msgs[i].content) {
+              const content = msgs[i].content;
+              if (Array.isArray(content)) {
+                responseText = content
+                  .filter((b: any) => b.type === 'text')
+                  .map((b: any) => b.text || '')
+                  .join('');
+              } else if (typeof content === 'string') {
+                responseText = content;
               }
+              if (responseText.trim()) break;
             }
           }
           resolve(responseText.trim() || 'Task completed (no text response)');
