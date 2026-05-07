@@ -11,10 +11,10 @@ interface CostEntry {
 
 // Approximate costs per 1M tokens (USD)
 const MODEL_COSTS: Record<string, { in: number; out: number }> = {
-  'claude-sonnet': { in: 3.0, out: 15.0 },
-  'claude-sonnet-4': { in: 3.0, out: 15.0 },
-  'claude-haiku': { in: 0.8, out: 4.0 },
-  'claude-opus': { in: 15.0, out: 75.0 },
+  'anthropic/claude-sonnet-4-20250514': { in: 3.0, out: 15.0 },
+  'anthropic/claude-sonnet-4': { in: 3.0, out: 15.0 },
+  'anthropic/claude-haiku-3-5-20241022': { in: 0.8, out: 4.0 },
+  'anthropic/claude-opus-4-20250514': { in: 15.0, out: 75.0 },
   default: { in: 3.0, out: 15.0 },
 };
 

@@ -4,7 +4,7 @@ company:
   agents:
     office:
       type: office
-      model: claude-sonnet
+      model: anthropic/claude-sonnet-4-20250514
       personality: |
         Du bist der Office-Manager einer Agentur. Koordiniere Deadlines,
         Meetings und sorge für unternehmensweite Ordnung.
@@ -35,7 +35,7 @@ company:
 projects:
   kunde-webshop:
     name: "Kunde Webshop Relaunch"
-    directory: ~/projects/kunde-webshop
+    directory: ~/demo-projects/kunde-webshop
     agents:
       dev:
         type: dev
@@ -49,7 +49,7 @@ projects:
           - testing
       seo:
         type: seo
-        model: claude-haiku
+        model: anthropic/claude-haiku-3-5-20241022
         skills:
           - keyword-research
           - technical-seo
