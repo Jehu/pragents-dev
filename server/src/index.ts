@@ -23,6 +23,7 @@ import { GoalRegistry } from './goals/loader.js';
 import { GoalScheduler } from './goals/scheduler.js';
 import { createGoalsRoute } from './api/routes/goals.js';
 import { createGatesRoute } from './api/routes/gates.js';
+import { createMemoryRoute } from './api/routes/memory.js';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { mkdirSync } from 'node:fs';
@@ -97,6 +98,7 @@ export async function startServer() {
   app.route('/api/v1/cost', createCostRoute(costTracker));
   app.route('/api/v1/goals', createGoalsRoute(goalRegistry));
   app.route('/api/v1/gates', createGatesRoute());
+  app.route('/api/v1/memory', createMemoryRoute(memory));
 
   // Traces
   app.get('/api/v1/traces', (c) => {

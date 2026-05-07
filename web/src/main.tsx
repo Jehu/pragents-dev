@@ -24,7 +24,7 @@ function App() {
     return () => {}; // connection persists
   }, [queryClient]);
 
-  const [view, setView] = useState<'dashboard' | 'traces' | 'tasks' | 'workflows' | 'goals'>('dashboard');
+  const [view, setView] = useState<'dashboard' | 'traces' | 'tasks' | 'workflows' | 'goals' | 'memory'>('dashboard');
   const [description, setDescription] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [toast, setToast] = useState('');
@@ -38,6 +38,9 @@ function App() {
   const { data: goals } = useQuery({ queryKey: ['goals'], queryFn: () => fetch(`${API}/api/v1/goals`).then(r => r.json()), refetchInterval: 10000 });
   const { data: goalRuns } = useQuery({ queryKey: ['goal-runs'], queryFn: () => fetch(`${API}/api/v1/goals/runs`).then(r => r.json()), refetchInterval: 10000, enabled: view === 'goals' });
   const { data: pendingGates } = useQuery({ queryKey: ['gates'], queryFn: () => fetch(`${API}/api/v1/gates/pending`).then(r => r.json()), refetchInterval: 5000 });
+  const { data: memoryStats } = useQuery({ queryKey: ['memory-stats'], queryFn: () => fetch(`${API}/api/v1/memory/stats`).then(r => r.json()), refetchInterval: 15000, enabled: view === 'memory' });
+  const [memorySearch, setMemorySearch] = useState('');
+  const { data: memoryFacts } = useQuery({ queryKey: ['memory-facts', memorySearch], queryFn: () => fetch(`${API}/api/v1/memory/facts?search=${encodeURIComponent(memorySearch)}&limit=30`).then(r => r.json()), refetchInterval: 10000, enabled: view === 'memory' });
   const { data: workflows } = useQuery({ queryKey: ['workflows'], queryFn: () => fetch(`${API}/api/v1/workflows`).then(r => r.json()), refetchInterval: 5000 });
   const { data: costSummary } = useQuery({ queryKey: ['cost'], queryFn: () => fetch(`${API}/api/v1/cost/summary`).then(r => r.json()), refetchInterval: 10000 });
   const { data: wfRuns } = useQuery({ queryKey: ['wf-runs'], queryFn: () => fetch(`${API}/api/v1/workflows/runs`).then(r => r.json()), refetchInterval: 3000, enabled: view === 'workflows' });
@@ -123,7 +126,7 @@ function App() {
         <div className="flex items-center gap-6">
           <h1 className="text-lg font-bold tracking-tight">pragents</h1>
           <nav className="flex gap-1">
-            {(['dashboard', 'goals', 'workflows', 'traces', 'tasks'] as const).map(v => (
+            {(['dashboard', 'workflows', 'goals', 'traces', 'tasks', 'memory'] as const).map(v => (
               <button
                 key={v}
                 onClick={() => setView(v)}
@@ -511,6 +514,42 @@ function App() {
                     </div>
                   );
                 })}
+              </div>
+            )}
+          </div>
+        )}
+        {view === 'memory' && (
+          <div>
+            <h2 className="text-xl font-bold mb-4">Memory Explorer</h2>
+            {memoryStats && (
+              <div className="flex gap-4 mb-6 text-sm">
+                <div className="bg-white rounded-xl border border-gray-200 p-3"><span className="text-gray-400">Total Facts:</span> <span className="font-bold text-gray-800 ml-1">{memoryStats.total}</span></div>
+                {Array.isArray(memoryStats.byScope) && memoryStats.byScope.map((s: any) => (
+                  <div key={s.scope} className="bg-white rounded-xl border border-gray-200 p-3"><span className="text-gray-400">{s.scope}:</span> <span className="font-bold text-gray-800 ml-1">{s.count}</span></div>
+                ))}
+              </div>
+            )}
+            <div className="mb-4">
+              <input type="text" value={memorySearch} onChange={e => setMemorySearch(e.target.value)}
+                placeholder="Search facts..." className="border border-gray-200 rounded-lg px-4 py-2.5 text-sm w-full max-w-md focus:outline-none focus:ring-2 focus:ring-blue-500/20" />
+            </div>
+            {Array.isArray(memoryFacts) && memoryFacts.length === 0 ? (
+              <p className="text-gray-400 text-sm">No facts found. Agents will store knowledge here as they work.</p>
+            ) : (
+              <div className="space-y-2">
+                {Array.isArray(memoryFacts) && memoryFacts.map((f: any) => (
+                  <div key={f.id} className="bg-white rounded-xl border border-gray-200 p-4">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-500 font-medium">{f.scope}</span>
+                      <span className="text-xs text-gray-300">{new Date(f.created_at || f.createdAt).toLocaleDateString()}</span>
+                    </div>
+                    <p className="text-sm text-gray-700">{f.content}</p>
+                    <div className="flex gap-2 mt-2">
+                      {f.category && <span className="text-xs text-gray-400">#{f.category}</span>}
+                      {f.agent_id && <span className="text-xs text-gray-400">{f.agent_id}</span>}
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
           </div>
