@@ -6,9 +6,15 @@ const API = 'http://localhost:3000';
 const queryClient = new QueryClient();
 
 function App() {
-  const [view, setView] = useState<'dashboard' | 'traces' | 'tasks'>('dashboard');
+  const [view, setView] = useState<'dashboard' | 'traces' | 'tasks' | 'workflows'>('dashboard');
   const [description, setDescription] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [toast, setToast] = useState('');
+  const [nlMode, setNlMode] = useState(false);
+  const [nlPrompt, setNlPrompt] = useState('');
+  const [nlDecomposing, setNlDecomposing] = useState(false);
+  const [nlPlan, setNlPlan] = useState<any>(null);
+  const [nlError, setNlError] = useState('');
   const { data: workflows } = useQuery({ queryKey: ['workflows'], queryFn: () => fetch(`${API}/api/v1/workflows`).then(r => r.json()), refetchInterval: 5000 });
   const { data: wfRuns } = useQuery({ queryKey: ['wf-runs'], queryFn: () => fetch(`${API}/api/v1/workflows/runs`).then(r => r.json()), refetchInterval: 3000, enabled: view === 'workflows' });
   const [wfRunResult, setWfRunResult] = useState('');
@@ -46,6 +52,36 @@ function App() {
     } catch (err: any) {
       setWfRunResult(`Error: ${err.message}`);
     }
+  };
+
+  const decomposeNL = async () => {
+    if (!nlPrompt.trim()) return;
+    setNlDecomposing(true);
+    setNlError('');
+    try {
+      const res = await fetch(`${API}/api/v1/nl/decompose`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: nlPrompt.trim() }),
+      });
+      const data = await res.json();
+      if (res.ok) { setNlPlan(data); setNlPrompt(''); }
+      else setNlError(data.error);
+    } catch (err: any) { setNlError(err.message); }
+    finally { setNlDecomposing(false); }
+  };
+
+  const executePlan = async (plan: any) => {
+    setNlDecomposing(true);
+    try {
+      const res = await fetch(`${API}/api/v1/nl/execute`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: nlPrompt, plan }),
+      });
+      const data = await res.json();
+      if (res.ok) { setToast(`Plan dispatched — run ${data.runId}`); setNlPlan(null); }
+      else setNlError(data.error);
+    } catch (err: any) { setNlError(err.message); }
+    finally { setNlDecomposing(false); }
   };
 
   return (
@@ -152,6 +188,24 @@ function App() {
 
             {/* Task Input */}
             <div className="bg-white rounded-xl border border-gray-200 p-4" data-block="dashboard.task-input-bar">
+              <div className="flex items-center gap-2 mb-3">
+                <button onClick={() => setNlMode(false)} className={`text-xs px-3 py-1 rounded-full ${!nlMode ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-500'}`}>Direct Task</button>
+                <button onClick={() => setNlMode(true)} className={`text-xs px-3 py-1 rounded-full ${nlMode ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-500'}`}>NL Delegate</button>
+              </div>
+              {nlMode ? (
+                <div className="flex flex-col gap-2">
+                  <textarea value={nlPrompt} onChange={e => setNlPrompt(e.target.value)}
+                    placeholder="Describe what you want in natural language...&#10;e.g. Create a landing page with SEO optimization and deploy it"
+                    className="border border-gray-200 rounded-lg px-4 py-2.5 text-sm h-20 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400"
+                    disabled={nlDecomposing}
+                    onKeyDown={e => { if (e.key === 'Enter' && e.metaKey) decomposeNL(); }}
+                  />
+                  {nlError && <p className="text-red-500 text-xs">{nlError}</p>}
+                  <button onClick={decomposeNL} disabled={nlDecomposing || !nlPrompt.trim()}
+                    className="bg-gray-900 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-800 disabled:opacity-30 self-end"
+                  >{nlDecomposing ? 'Decomposing...' : 'Decompose →'}</button>
+                </div>
+              ) : (
               <div className="flex gap-3 items-center">
                 <input
                   type="text"
@@ -168,6 +222,7 @@ function App() {
                   className="bg-gray-900 text-white px-6 py-2.5 rounded-lg text-sm font-medium hover:bg-gray-800 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
                 >{submitting ? 'Dispatching...' : 'Dispatch →'}</button>
               </div>
+              )}
             </div>
           </div>
         )}
@@ -270,6 +325,41 @@ function App() {
                 )}
               </div>
             )}
+          </div>
+        )}
+        {/* Plan Review Modal */}
+        {nlPlan && (
+          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onClick={() => setNlPlan(null)}>
+            <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-2xl w-full mx-4 max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+              <h2 className="text-lg font-bold mb-1">Review Plan</h2>
+              <p className="text-sm text-gray-500 mb-4">Review and edit the decomposed plan before execution.</p>
+              <div className="space-y-3 mb-6">
+                {nlPlan.steps.map((s: any, i: number) => (
+                  <div key={i} className="border border-gray-200 rounded-xl p-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs font-bold text-gray-400">Step {i + 1}</span>
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 font-medium">{s.agentId}</span>
+                    </div>
+                    <textarea
+                      value={s.description}
+                      onChange={e => {
+                        const updated = { ...nlPlan, steps: nlPlan.steps.map((st: any, j: number) => j === i ? { ...st, description: e.target.value } : st) };
+                        setNlPlan(updated);
+                      }}
+                      className="text-sm w-full border border-gray-200 rounded-lg px-3 py-2 resize-none focus:outline-none focus:border-blue-400"
+                      rows={2}
+                    />
+                  </div>
+                ))}
+              </div>
+              {nlError && <p className="text-red-500 text-sm mb-3">{nlError}</p>}
+              <div className="flex gap-3 justify-end">
+                <button onClick={() => setNlPlan(null)} className="px-4 py-2 text-sm text-gray-500 hover:text-gray-700">Cancel</button>
+                <button onClick={() => executePlan(nlPlan)} disabled={nlDecomposing}
+                  className="bg-gray-900 text-white px-6 py-2 rounded-lg text-sm font-medium hover:bg-gray-800 disabled:opacity-30"
+                >{nlDecomposing ? 'Executing...' : 'Approve & Execute →'}</button>
+              </div>
+            </div>
           </div>
         )}
       </main>

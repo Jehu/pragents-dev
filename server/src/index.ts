@@ -15,6 +15,8 @@ import { healthRoute } from './api/routes/health.js';
 import { createTasksRoute } from './api/routes/tasks.js';
 import { createProjectsRoute, createAgentsRoute } from './api/routes/projects.js';
 import { createWorkflowsRoute } from './api/routes/workflows.js';
+import { NLDecomposer } from './nl/decomposer.js';
+import { createNLRoutes } from './api/routes/nl.js';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { mkdirSync } from 'node:fs';
@@ -58,6 +60,7 @@ export async function startServer() {
   for (const w of warnings) console.warn(`Workflow warning: ${w}`);
 
   const wfEngine = new WorkflowEngine(wfTracker, router, sessionMgr, agents, eventBuffer);
+  const decomposer = new NLDecomposer();
 
   // Build API
   const app = new Hono();
@@ -68,6 +71,7 @@ export async function startServer() {
   app.route('/api/v1/agents', createAgentsRoute(agents, sessionMgr));
   app.route('/api/v1/tasks', createTasksRoute(tracker, agents, sessionMgr, eventBuffer));
   app.route('/api/v1/workflows', createWorkflowsRoute(wfRegistry, wfEngine, wfTracker));
+  app.route('/api/v1/nl', createNLRoutes(decomposer, agents, wfEngine));
 
   // Traces
   app.get('/api/v1/traces', (c) => {
