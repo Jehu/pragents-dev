@@ -127,11 +127,11 @@ export async function startServer() {
     memory,
     skills: skillRegistry,
     costTracker,
-    dispatchTask: (projectId, agentId, description) =>
-      sessionMgr.dispatch(
-        agents.find(a => a.id === agentId) || agents[0],
-        description,
-      ),
+    dispatchTask: (projectId, agentId, description) => {
+      const agent = agents.find(a => a.id === agentId) || agents[0];
+      if (!agent) return Promise.reject(new Error(`No agent found for "${agentId}"`));
+      return sessionMgr.dispatch(agent, description);
+    },
   });
   sessionMgr.setToolExecutor(toolExecutor);
 

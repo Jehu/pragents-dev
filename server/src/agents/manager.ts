@@ -185,6 +185,8 @@ export class AgentSessionManager {
         if (event.type === 'custom_tool_call' && this.toolExecutor) {
           this.toolExecutor.execute(event.name, event.args || {}).then((result) => {
             try { handle.session.sendToolResult?.(event.callId, result); } catch {}
+          }).catch((err) => {
+            try { handle.session.sendToolResult?.(event.callId, `Error: ${err?.message || String(err)}`); } catch {}
           });
         }
       });
