@@ -63,6 +63,7 @@ export class AgentSessionManager {
         (base ?? '') + '\n\n---\n' + (agent.personality || 'You are a helpful coding agent.'),
     });
 
+    console.log(`Agent "${agent.id}" model: ${agent.model}, projectDir: ${agent.projectDir}`);
     await loader.reload();
 
     // Need to pass projectDir so agent tools can access actual project files
@@ -72,6 +73,7 @@ export class AgentSessionManager {
       sessionManager: SessionManager.inMemory() as any,
       model: agent.model as any,
     });
+    console.log(`Session created for "${agent.id}" with model "${agent.model}"`);
 
     // Subscribe to SDK events
     session.subscribe((event: any) => {
