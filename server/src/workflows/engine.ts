@@ -4,6 +4,8 @@ import { SkillRouter } from '../routing/router.js';
 import type { AgentSessionManager } from '../agents/manager.js';
 import type { ResolvedAgent } from '../config/schema.js';
 import type { EventBuffer } from '../events/buffer.js';
+import { getDb } from '../db/sqlite.js';
+import { randomUUID } from 'node:crypto';
 
 export class WorkflowEngine {
   constructor(
@@ -65,7 +67,35 @@ export class WorkflowEngine {
       }
 
       // Single step
-      if (!step.id || !step.prompt) continue; // skip placeholder steps
+      if (!step.id) continue;
+
+      // Human gate
+      if (step.type === 'human_gate') {
+        const gateId = randomUUID();
+        const db = getDb();
+        const timeoutMs = (step.timeout || 14400) * 1000;
+        const timeoutAt = new Date(Date.now() + timeoutMs).toISOString();
+        db.prepare(
+          'INSERT INTO human_gates (id, workflow_run_id, step_id, label, timeout_at) VALUES (?, ?, ?, ?, ?)',
+        ).run(gateId, runId, step.id, step.label || 'Approval required', timeoutAt);
+
+        this.emit('workflow.human_gate_pending', { runId, stepId: step.id, gateId, label: step.label, timeoutAt });
+        const stepRow = this.tracker.createStep(runId, step.id);
+        this.tracker.startStep(stepRow.id);
+
+        // Wait for gate resolution (polled via API)
+        await this.waitForGate(gateId, timeoutMs);
+        const gate = db.prepare('SELECT status FROM human_gates WHERE id = ?').get(gateId) as any;
+        if (gate?.status === 'approved') {
+          this.tracker.completeStep(stepRow.id, 'approved');
+        } else {
+          this.tracker.failStep(stepRow.id, 'rejected or timed out');
+          throw new Error(`Human gate "${step.label}" was rejected or timed out`);
+        }
+        continue;
+      }
+
+      if (!step.prompt) continue;
       const stepRow = this.tracker.createStep(runId, step.id);
       try {
         this.tracker.startStep(stepRow.id);
@@ -103,6 +133,18 @@ export class WorkflowEngine {
 
   private emit(type: string, data: any): void {
     this.eventBuffer.push(data.projectId || 'workflow', data.agentId, type, data);
+  }
+
+  private async waitForGate(gateId: string, timeoutMs: number): Promise<void> {
+    const db = getDb();
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      const gate = db.prepare('SELECT status FROM human_gates WHERE id = ?').get(gateId) as any;
+      if (gate?.status === 'approved' || gate?.status === 'rejected') return;
+      await new Promise(resolve => setTimeout(resolve, 2000)); // poll every 2s
+    }
+    // Timed out
+    db.prepare("UPDATE human_gates SET status = 'timed_out' WHERE id = ?").run(gateId);
   }
 }
 

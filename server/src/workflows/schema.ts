@@ -23,8 +23,10 @@ const ParallelStep: z.ZodType<any> = z.lazy(() =>
 const WorkflowStep: z.ZodType<any> = z.lazy(() =>
   z.object({
     id: z.string(),
+    type: z.enum(['agent', 'human_gate']).optional().default('agent'),
     agent: StepAgent.optional(),
     prompt: z.string().optional(),
+    label: z.string().optional(),
     input: z.string().optional(),
     output: z.string().optional(),
     timeout: z.number().int().positive().optional(),

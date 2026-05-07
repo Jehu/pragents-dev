@@ -15,6 +15,11 @@ steps:
     output: draft
     timeout: 600
 
+  - id: review
+    type: human_gate
+    label: "Review the draft before SEO optimization"
+    timeout: 14400
+
   - id: optimize
     agent: seo@kunde-webshop
     prompt: "Review the draft and suggest SEO improvements: meta title, meta description, keyword density, and headings structure."

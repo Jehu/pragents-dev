@@ -37,6 +37,7 @@ function App() {
   const [expandedTrace, setExpandedTrace] = useState<number | null>(null);
   const { data: goals } = useQuery({ queryKey: ['goals'], queryFn: () => fetch(`${API}/api/v1/goals`).then(r => r.json()), refetchInterval: 10000 });
   const { data: goalRuns } = useQuery({ queryKey: ['goal-runs'], queryFn: () => fetch(`${API}/api/v1/goals/runs`).then(r => r.json()), refetchInterval: 10000, enabled: view === 'goals' });
+  const { data: pendingGates } = useQuery({ queryKey: ['gates'], queryFn: () => fetch(`${API}/api/v1/gates/pending`).then(r => r.json()), refetchInterval: 5000 });
   const { data: workflows } = useQuery({ queryKey: ['workflows'], queryFn: () => fetch(`${API}/api/v1/workflows`).then(r => r.json()), refetchInterval: 5000 });
   const { data: costSummary } = useQuery({ queryKey: ['cost'], queryFn: () => fetch(`${API}/api/v1/cost/summary`).then(r => r.json()), refetchInterval: 10000 });
   const { data: wfRuns } = useQuery({ queryKey: ['wf-runs'], queryFn: () => fetch(`${API}/api/v1/workflows/runs`).then(r => r.json()), refetchInterval: 3000, enabled: view === 'workflows' });
@@ -106,6 +107,12 @@ function App() {
     finally { setNlDecomposing(false); }
   };
 
+  const handleGate = async (gateId: string, action: 'approve' | 'reject') => {
+    await fetch(`${API}/api/v1/gates/${gateId}/${action}`, { method: 'POST' });
+    setToast(`Gate ${action}d`);
+    setTimeout(() => setToast(''), 2000);
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 text-gray-900 font-sans">
       {/* Toast */}
@@ -128,6 +135,9 @@ function App() {
           </nav>
         </div>
         <div className="flex items-center gap-3 text-xs text-gray-500">
+          {Array.isArray(pendingGates) && pendingGates.length > 0 && (
+            <span className="bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium">{pendingGates.length} pending</span>
+          )}
           <span className="w-2 h-2 rounded-full bg-green-500 inline-block" />
           connected
         </div>
@@ -263,6 +273,27 @@ function App() {
               </div>
               )}
             </div>
+            {/* Pending Human Gates */}
+            {Array.isArray(pendingGates) && pendingGates.length > 0 && (
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+                <h2 className="text-sm font-semibold text-amber-700 uppercase tracking-wide mb-3">⚠ Pending Approvals</h2>
+                <div className="space-y-2">
+                  {pendingGates.map((g: any) => (
+                    <div key={g.id} className="flex items-center justify-between bg-white rounded-lg p-3 border border-amber-100">
+                      <div>
+                        <span className="text-sm font-medium text-gray-800">{g.label}</span>
+                        <span className="text-xs text-gray-400 ml-2">Step: {g.step_id}</span>
+                        {g.timeout_at && <span className="text-xs text-amber-500 ml-2">⏰ {new Date(g.timeout_at).toLocaleTimeString()}</span>}
+                      </div>
+                      <div className="flex gap-2">
+                        <button onClick={() => handleGate(g.id, 'approve')} className="bg-green-600 text-white px-3 py-1 rounded-lg text-xs font-medium hover:bg-green-700">Approve</button>
+                        <button onClick={() => handleGate(g.id, 'reject')} className="bg-red-100 text-red-700 px-3 py-1 rounded-lg text-xs font-medium hover:bg-red-200">Reject</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
