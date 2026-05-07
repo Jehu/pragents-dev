@@ -18,6 +18,7 @@ const AgentConfig = z.object({
   personality: z.string().optional(),
   memory: MemoryAccess.optional(),
   skills: z.array(z.string()).optional(),
+  tokenBudget: z.number().int().positive().optional(),
 });
 
 const CompanyAgentConfig = AgentConfig.extend({
@@ -86,7 +87,17 @@ export interface ResolvedAgent {
   memory: MemoryAccess;
   skills: string[];
   projectDir: string;
+  tokenBudget: number;
 }
+
+const TOKEN_BUDGETS: Record<string, number> = {
+  dev: 40000,
+  seo: 20000,
+  content: 30000,
+  pm: 30000,
+  office: 20000,
+  default: 20000,
+};
 
 const SYSTEM_DEFAULTS: Record<string, string> = {
   model: 'claude-sonnet',
@@ -110,7 +121,7 @@ export function resolveAgent(
       agentConfig.personality ?? SYSTEM_DEFAULTS.personality,
     memory: agentConfig.memory ?? { project: 'read/write', company: 'read' },
     skills: agentConfig.skills ?? [],
-    projectDir: projectConfig.directory.replace(/^~/, process.env.HOME || ''),
+    tokenBudget: (agentConfig as any).tokenBudget || TOKEN_BUDGETS[agentConfig.type] || TOKEN_BUDGETS.default,
   };
 }
 

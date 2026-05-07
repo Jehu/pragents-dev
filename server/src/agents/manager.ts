@@ -91,13 +91,22 @@ export class AgentSessionManager {
   async dispatch(agent: ResolvedAgent, task: string): Promise<string> {
     const handle = await this.getOrCreate(agent);
 
-    // Assemble memory context
-    const facts = await this.memory.recall(task, agent.projectId, 5);
-    const contextStr =
-      facts.length > 0
-        ? '\n\nRelevant project knowledge:\n' +
-          facts.map((f) => `- ${f.category}: ${f.content}`).join('\n')
-        : '';
+    // Assemble memory context — respect token budget
+    const facts = await this.memory.recall(task, agent.projectId, 10);
+    const budget = agent.tokenBudget || 40000;
+    const taskTokens = Math.ceil(task.length / 4);
+    const remainingBudget = Math.max(budget - taskTokens - 500, 500); // Reserve 500 for system prompt overhead
+    let contextStr = '';
+    let usedTokens = 0;
+    for (const f of facts) {
+      const factTokens = Math.ceil(f.content.length / 4);
+      if (usedTokens + factTokens > remainingBudget) break;
+      contextStr += `\n- ${f.category}: ${f.content}`;
+      usedTokens += factTokens;
+    }
+    if (contextStr) {
+      contextStr = '\n\nRelevant project knowledge:\n' + contextStr;
+    }
 
     // Capture agent response via one-time event listener
     const responsePromise = new Promise<string>((resolve) => {
