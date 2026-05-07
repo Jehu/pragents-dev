@@ -67,14 +67,20 @@ describe('AgentSessionManager', () => {
     const { createAgentSession, DefaultResourceLoader } = await import('@mariozechner/pi-coding-agent');
     const mockSession = {
       subscribe: vi.fn((cb: any) => {
-        // Simulate agent response events
-        setTimeout(() => cb({ type: 'assistant_message', message: { content: 'Task done!' } }), 10);
-        setTimeout(() => cb({ type: 'agent_end' }), 20);
+        setTimeout(() => cb({ type: 'agent_end' }), 10);
         return () => {};
       }),
       prompt: vi.fn().mockResolvedValue(undefined),
       dispose: vi.fn(),
       isStreaming: false,
+      agent: {
+        state: {
+          messages: [
+            { role: 'user', content: 'test' },
+            { role: 'assistant', content: 'Task done!' },
+          ],
+        },
+      },
     };
     (createAgentSession as any).mockResolvedValue({ session: mockSession });
     (DefaultResourceLoader as any).mockImplementation(() => ({
