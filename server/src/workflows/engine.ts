@@ -147,16 +147,29 @@ export class WorkflowEngine {
   private async waitForGate(gateId: string, timeoutMs: number): Promise<void> {
     const db = getDb();
     const start = Date.now();
+    let delay = 2000;
     while (Date.now() - start < timeoutMs) {
       const gate = db.prepare('SELECT status FROM human_gates WHERE id = ?').get(gateId) as any;
       if (gate?.status === 'approved' || gate?.status === 'rejected') return;
-      await new Promise(resolve => setTimeout(resolve, 2000)); // poll every 2s
+      await new Promise(resolve => setTimeout(resolve, delay));
+      delay = Math.min(delay * 1.5, 30000); // backoff with jitter: 2s → 3s → 4.5s → ... → 30s
     }
     // Timed out
     db.prepare("UPDATE human_gates SET status = 'timed_out' WHERE id = ?").run(gateId);
   }
 }
 
+/**
+ * Evaluate a workflow step condition against step outputs.
+ *
+ * Supported DSL:
+ *   step_id.output includes 'text'    — check if output contains string
+ *   step_id.status == 'completed'     — check if step produced output
+ *   step_id.status != 'completed'     — check if step has no output
+ *
+ * Also supports optional $ prefix: $step_id.output includes 'text'
+ * Unknown conditions log a warning and return false (step is skipped).
+ */
 function evaluateCondition(condition: string, outputs: Record<string, string>): boolean {
   // Simple DSL: step_id.status == 'completed' or step_id.output includes 'text'
   // Also supports $step_id syntax: $step_id.output includes 'text'

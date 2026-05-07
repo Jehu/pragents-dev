@@ -35,6 +35,13 @@ export class GoalScheduler {
     cron('*/5 * * * *', () => this.pmCheck());
   }
 
+  /** Called by the orchestrator on every event — used to clean up completed goal runs. */
+  onEvent(evt: any): void {
+    if ((evt.type === 'workflow.completed' || evt.type === 'workflow.failed') && evt.runId) {
+      this.activeGoalRuns.delete(evt.runId);
+    }
+  }
+
   private async trigger(goal: GoalDef): Promise<void> {
     const wfDef = this.wfRegistry.get(goal.workflow);
     if (!wfDef) { console.warn(`Goal "${goal.id}": workflow "${goal.workflow}" not found`); return; }

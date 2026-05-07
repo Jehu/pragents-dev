@@ -90,6 +90,7 @@ export async function startServer() {
     const evt = eventBuffer.push(event.projectId, event.agentId, event.type, event.data);
     broadcast(evt);
     broadcastSSE(evt);
+    goalScheduler?.onEvent(evt);
   });
 
   // Workflow system
@@ -168,10 +169,15 @@ export async function startServer() {
   }
 
   const shutdown = async () => {
-    console.log('\nShutting down...');
+    logger.info('Shutting down...');
+    // Drain in-flight dispatches (up to 15s)
+    const deadline = Date.now() + 15000;
+    while (sessionMgr.getActiveAgents().length > 0 && Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, 500));
+    }
     await sessionMgr.disposeAll();
     closeDb();
-    console.log('Shutdown complete');
+    logger.info('Shutdown complete');
     process.exit(0);
   };
   process.on('SIGTERM', shutdown);

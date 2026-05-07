@@ -53,6 +53,7 @@ export const WorkflowDef = z.object({
   steps: z.array(WorkflowStep),
 });
 
+// Zod schema + inferred type: import type { WorkflowStep } for the type, { WorkflowStepSchema } for the schema
 export type WorkflowDef = z.infer<typeof WorkflowDef>;
 export type WorkflowStep = z.infer<typeof WorkflowStep>;
 export type TriggerConfig = z.infer<typeof TriggerConfig>;
