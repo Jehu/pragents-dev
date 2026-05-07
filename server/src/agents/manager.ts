@@ -82,7 +82,7 @@ export class AgentSessionManager {
     return handle;
   }
 
-  async dispatch(agent: ResolvedAgent, task: string): Promise<void> {
+  async dispatch(agent: ResolvedAgent, task: string): Promise<string> {
     const handle = await this.getOrCreate(agent);
 
     // Assemble memory context
@@ -93,8 +93,31 @@ export class AgentSessionManager {
           facts.map((f) => `- ${f.category}: ${f.content}`).join('\n')
         : '';
 
+    // Capture agent response via one-time event listener
+    const responsePromise = new Promise<string>((resolve) => {
+      const messages: string[] = [];
+      const unsubscribe = handle.session.subscribe((event: any) => {
+        if (event.type === 'assistant_message' && event.message?.content) {
+          const content = typeof event.message.content === 'string'
+            ? event.message.content
+            : event.message.content.map((b: any) => b.text || '').join('');
+          messages.push(content);
+        }
+        if (event.type === 'agent_end') {
+          unsubscribe();
+          resolve(messages.join('\n') || 'Task completed (no text response)');
+        }
+      });
+      // Timeout safety net
+      setTimeout(() => {
+        unsubscribe();
+        resolve(messages.join('\n') || 'Task timed out without response');
+      }, 10 * 60 * 1000);
+    });
+
     await handle.session.prompt(task + contextStr);
     handle.lastActivityAt = Date.now();
+    return responsePromise;
   }
 
   async disposeIdle(): Promise<string[]> {

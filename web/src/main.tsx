@@ -9,7 +9,9 @@ function App() {
   const [view, setView] = useState<'dashboard' | 'traces' | 'tasks'>('dashboard');
   const [description, setDescription] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [toast, setToast] = useState('');
+  const { data: workflows } = useQuery({ queryKey: ['workflows'], queryFn: () => fetch(`${API}/api/v1/workflows`).then(r => r.json()), refetchInterval: 5000 });
+  const { data: wfRuns } = useQuery({ queryKey: ['wf-runs'], queryFn: () => fetch(`${API}/api/v1/workflows/runs`).then(r => r.json()), refetchInterval: 3000, enabled: view === 'workflows' });
+  const [wfRunResult, setWfRunResult] = useState('');
 
   const { data: agents } = useQuery({ queryKey: ['agents'], queryFn: () => fetch(`${API}/api/v1/agents`).then(r => r.json()) });
   const { data: tasks } = useQuery({ queryKey: ['tasks'], queryFn: () => fetch(`${API}/api/v1/tasks`).then(r => r.json()), refetchInterval: 3000 });
@@ -34,6 +36,18 @@ function App() {
     } finally { setSubmitting(false); }
   };
 
+  const runWorkflow = async (name: string) => {
+    setWfRunResult('Starting...');
+    try {
+      const res = await fetch(`${API}/api/v1/workflows/${name}/run`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      const data = await res.json();
+      if (res.ok) setWfRunResult(`Run ${data.runId} started`);
+      else setWfRunResult(`Error: ${data.error}`);
+    } catch (err: any) {
+      setWfRunResult(`Error: ${err.message}`);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 text-gray-900 font-sans">
       {/* Toast */}
@@ -44,7 +58,7 @@ function App() {
         <div className="flex items-center gap-6">
           <h1 className="text-lg font-bold tracking-tight">pragents</h1>
           <nav className="flex gap-1">
-            {(['dashboard', 'traces', 'tasks'] as const).map(v => (
+            {(['dashboard', 'workflows', 'traces', 'tasks'] as const).map(v => (
               <button
                 key={v}
                 onClick={() => setView(v)}
@@ -214,6 +228,50 @@ function App() {
             )}
           </div>
         )}
+        {view === 'workflows' && (
+          <div>
+            <h2 className="text-xl font-bold mb-4">Workflows</h2>
+            {wfRunResult && <div className="mb-4 p-2 bg-gray-100 rounded-lg text-sm text-gray-700">{wfRunResult}</div>}
+            {!workflows || !Array.isArray(workflows) || workflows.length === 0 ? (
+              <p className="text-gray-400 text-sm">No workflows defined. Add YAML files to workflows/</p>
+            ) : (
+              <div className="space-y-4">
+                {workflows.map((w: any) => (
+                  <div key={w.name} className="bg-white rounded-xl border border-gray-200 p-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <div>
+                        <span className="font-medium text-gray-800">{w.name}</span>
+                        {w.description && <span className="text-sm text-gray-400 ml-2">— {w.description}</span>}
+                      </div>
+                      <button onClick={() => runWorkflow(w.name)} className="bg-gray-900 text-white px-4 py-1.5 rounded-lg text-sm font-medium hover:bg-gray-800 transition-colors">Run →</button>
+                    </div>
+                    <div className="text-xs text-gray-400">{w.steps} steps{w.trigger ? ` · trigger: ${w.trigger}` : ''}</div>
+                  </div>
+                ))}
+                {/* Run history */}
+                {Array.isArray(wfRuns) && wfRuns.length > 0 && (
+                  <div className="mt-6">
+                    <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Run History</h3>
+                    <div className="space-y-1">
+                      {wfRuns.slice(0, 10).map((r: any) => (
+                        <div key={r.id} className="flex items-center gap-4 text-sm py-1 border-b border-gray-50">
+                          <span className="font-medium text-gray-700">{r.workflowName}</span>
+                          <span className={`text-xs px-2 py-0.5 rounded-full ${
+                            r.status === 'complete' ? 'bg-green-50 text-green-600' :
+                            r.status === 'failed' ? 'bg-red-50 text-red-600' :
+                            r.status === 'interrupted' ? 'bg-amber-50 text-amber-600' :
+                            'bg-blue-50 text-blue-600'
+                          }`}>{r.status}</span>
+                          <span className="text-xs text-gray-400 ml-auto">{new Date(r.startedAt).toLocaleString()}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </main>
     </div>
   );
@@ -226,3 +284,4 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     </QueryClientProvider>
   </React.StrictMode>,
 );
+

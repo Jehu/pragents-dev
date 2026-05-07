@@ -1,9 +1,10 @@
 import { Hono } from 'hono';
 import type { TaskTracker } from '../../tasks/tracker.js';
 import type { AgentSessionManager } from '../../agents/manager.js';
-import type { PragentsConfig, ResolvedAgent } from '../../config/schema.js';
+import type { ResolvedAgent } from '../../config/schema.js';
+import type { EventBuffer } from '../../events/buffer.js';
 
-export function createTasksRoute(tracker: TaskTracker, agents: ResolvedAgent[], sessionMgr: AgentSessionManager) {
+export function createTasksRoute(tracker: TaskTracker, agents: ResolvedAgent[], sessionMgr: AgentSessionManager, eventBuffer: EventBuffer) {
   const r = new Hono();
 
   r.post('/', async (c) => {
@@ -21,12 +22,16 @@ export function createTasksRoute(tracker: TaskTracker, agents: ResolvedAgent[], 
 
     const task = tracker.create({ projectId, agentId, description: description.trim() });
 
-    // Dispatch asynchronously
+    // Dispatch with lifecycle events + capture agent result
     tracker.setRunning(task.id);
-    sessionMgr.dispatch(agent, description.trim()).then(() => {
-      tracker.setComplete(task.id, 'Task completed');
+    eventBuffer.push(projectId, agentId, 'task.running', { taskId: task.id });
+
+    sessionMgr.dispatch(agent, description.trim()).then((result) => {
+      tracker.setComplete(task.id, result);
+      eventBuffer.push(projectId, agentId, 'task.complete', { taskId: task.id, result });
     }).catch((err: Error) => {
       tracker.setFailed(task.id, err.message);
+      eventBuffer.push(projectId, agentId, 'task.failed', { taskId: task.id, error: err.message });
     });
 
     return c.json(task, 201);
