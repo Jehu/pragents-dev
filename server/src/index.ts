@@ -62,6 +62,8 @@ export async function startServer() {
 
   const wfEngine = new WorkflowEngine(wfTracker, router, sessionMgr, agents, eventBuffer);
   const decomposer = new NLDecomposer();
+  const costTracker = new CostTracker();
+  sessionMgr.setCostTracker(costTracker);
 
   // Build API
   const app = new Hono();
@@ -109,6 +111,10 @@ export async function startServer() {
 
 startServer().catch((err) => {
   console.error('Failed to start pragents server:', err);
+  process.exit(1);
+});
+
+ err);
   process.exit(1);
 });
 

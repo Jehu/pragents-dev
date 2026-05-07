@@ -16,6 +16,7 @@ function App() {
   const [nlPlan, setNlPlan] = useState<any>(null);
   const [nlError, setNlError] = useState('');
   const { data: workflows } = useQuery({ queryKey: ['workflows'], queryFn: () => fetch(`${API}/api/v1/workflows`).then(r => r.json()), refetchInterval: 5000 });
+  const { data: costSummary } = useQuery({ queryKey: ['cost'], queryFn: () => fetch(`${API}/api/v1/cost/summary`).then(r => r.json()), refetchInterval: 10000 });
   const { data: wfRuns } = useQuery({ queryKey: ['wf-runs'], queryFn: () => fetch(`${API}/api/v1/workflows/runs`).then(r => r.json()), refetchInterval: 3000, enabled: view === 'workflows' });
   const [expandedTrace, setExpandedTrace] = useState<number | null>(null);
 
@@ -155,6 +156,23 @@ function App() {
                         </div>
                       ))}
                     </div>
+                  )}
+                </div>
+
+                {/* Cost */}
+                <div className="bg-white rounded-xl border border-gray-200 p-4">
+                  <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-3">Cost (est.)</h2>
+                  {Array.isArray(costSummary) && costSummary.length > 0 ? (
+                    <div className="space-y-1 text-sm">
+                      {costSummary.slice(0, 3).map((r: any) => (
+                        <div key={r.project_id + r.month} className="flex justify-between">
+                          <span className="text-gray-600">{r.project_id} {r.month}</span>
+                          <span className="font-medium text-gray-700">${r.cost.toFixed(3)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-gray-300 text-sm">No cost data yet</p>
                   )}
                 </div>
 

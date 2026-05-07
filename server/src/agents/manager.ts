@@ -17,9 +17,15 @@ export class AgentSessionManager {
   private memory: MemoryEngine;
   private onEvent: ((event: any) => void) | null = null;
 
+  private costTracker: CostTracker | null = null;
+
   constructor(memory: MemoryEngine, idleTimeoutMs: number = 10 * 60 * 1000) {
     this.memory = memory;
     this.idleTimeoutMs = idleTimeoutMs;
+  }
+
+  setCostTracker(ct: CostTracker): void {
+    this.costTracker = ct;
   }
 
   setEventCallback(cb: (event: any) => void): void {
@@ -117,7 +123,20 @@ export class AgentSessionManager {
 
     await handle.session.prompt(task + contextStr);
     handle.lastActivityAt = Date.now();
-    return responsePromise;
+    const response = await responsePromise;
+
+    // Track cost (character-based token estimate)
+    if (this.costTracker) {
+      this.costTracker.record({
+        projectId: agent.projectId,
+        agentId: agent.id,
+        model: agent.model,
+        tokensIn: Math.ceil((task + contextStr).length / 4),
+        tokensOut: Math.ceil(response.length / 4),
+      });
+    }
+
+    return response;
   }
 
   async disposeIdle(): Promise<string[]> {
@@ -144,6 +163,21 @@ export class AgentSessionManager {
       }
       handle.session.dispose();
       this.memory.compress(id, id);
+    }
+    this.sessions.clear();
+  }
+
+  getActiveAgents(): string[] {
+    return Array.from(this.sessions.keys());
+  }
+
+  getAgentStatus(agentId: string): 'busy' | 'idle' | 'offline' {
+    const handle = this.sessions.get(agentId);
+    if (!handle) return 'offline';
+    return handle.session.isStreaming ? 'busy' : 'idle';
+  }
+}
+ this.memory.compress(id, id);
     }
     this.sessions.clear();
   }
