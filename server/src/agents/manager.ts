@@ -151,7 +151,7 @@ export class AgentSessionManager {
       // Timeout safety net
       setTimeout(() => {
         unsubscribe();
-        resolve(messages.join('\n') || 'Task timed out without response');
+        resolve('Task timed out without response');
       }, 10 * 60 * 1000);
     });
 

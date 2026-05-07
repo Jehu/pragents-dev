@@ -67,10 +67,16 @@ const InterfacesConfig = z.object({
     .default({}),
 });
 
+const CostRate = z.object({
+  in: z.number(),
+  out: z.number(),
+});
+
 export const PragentsConfig = z.object({
   company: CompanyConfig,
   projects: z.record(z.string(), ProjectConfig).default({}),
   interfaces: InterfacesConfig.default({}),
+  costs: z.record(z.string(), CostRate).optional(),
 });
 
 export type PragentsConfig = z.infer<typeof PragentsConfig>;

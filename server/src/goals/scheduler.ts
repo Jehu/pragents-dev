@@ -24,6 +24,7 @@ export class GoalScheduler {
   }
 
   start(goals: GoalDef[]): void {
+    this.goals = goals;
     for (const goal of goals) {
       const job = cron(goal.cadence, () => this.trigger(goal));
       this.jobs.push(job);
