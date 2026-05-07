@@ -152,6 +152,9 @@ export async function startServer() {
   process.on('SIGTERM', shutdown);
   process.on('SIGINT', shutdown);
 
+  // Periodic idle session cleanup
+  setInterval(() => { sessionMgr.disposeIdle(); }, 60000);
+
   return { app, config, agents, tracker, sessionMgr, memory, eventBuffer, wfRegistry, wfEngine };
 }
 

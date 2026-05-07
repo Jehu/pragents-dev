@@ -37,8 +37,4 @@ export class WorkflowRegistry {
   list(): WorkflowDefType[] {
     return Array.from(this.workflows.values());
   }
-
-  get names(): string[] {
-    return Array.from(this.workflows.keys());
-  }
 }

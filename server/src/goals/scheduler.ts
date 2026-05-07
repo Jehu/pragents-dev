@@ -11,7 +11,7 @@ import type { ResolvedAgent } from '../config/schema.js';
 export class GoalScheduler {
   private jobs: cron[] = [];
   private pmAgent: ResolvedAgent | null = null;
-  private activeGoalRuns: Map<string, { goalRunId: string; deadline: Date; goalId: string }> = new Map();
+  private activeGoalRuns: Map<string, { goalRunId: string; deadline: Date; goalId: string; warnedAt?: number }> = new Map();
 
   constructor(
     private wfRegistry: WorkflowRegistry,
@@ -72,8 +72,9 @@ export class GoalScheduler {
           ).catch(() => {});
         }
       } else if (now > info.deadline.getTime() - (goal.warn_before_ms || 7200000)) {
-        // Warning: deadline approaching
-        if (this.pmAgent) {
+        // Warning: deadline approaching — only warn once per hour
+        if (this.pmAgent && (!info.warnedAt || now - info.warnedAt > 3600000)) {
+          info.warnedAt = now;
           this.sessionMgr.dispatch(this.pmAgent,
             `Warning: Goal "${goal.id}" deadline approaching in ${Math.round((info.deadline.getTime() - now) / 60000)} minutes. Workflow run ${wfRunId} is active.`
           ).catch(() => {});

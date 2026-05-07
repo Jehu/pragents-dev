@@ -8,13 +8,18 @@ import { getDb } from '../db/sqlite.js';
 import { randomUUID } from 'node:crypto';
 
 export class WorkflowEngine {
+  private projectId: string;
+
   constructor(
     private tracker: WorkflowTracker,
     private router: SkillRouter,
     private sessionMgr: AgentSessionManager,
     private agents: ResolvedAgent[],
     private eventBuffer: EventBuffer,
-  ) {}
+    projectId?: string,
+  ) {
+    this.projectId = projectId || 'default';
+  }}
 
   async execute(def: WorkflowDef, params?: any, triggerSourceRunId?: string): Promise<string> {
     const run = this.tracker.createRun(def.name, params, triggerSourceRunId);
@@ -43,26 +48,30 @@ export class WorkflowEngine {
       // Parallel group
       if (step.parallel?.length) {
         const stepRows = step.parallel.map((s) => this.tracker.createStep(runId, s.id));
-        const promises = step.parallel.map(async (s, i) => {
-          try {
-            this.tracker.startStep(stepRows[i].id);
-            this.emit('workflow.step_started', { runId, stepId: s.id });
-            const agentId = await this.resolveAgent(s);
-            const agent = this.agents.find((a) => a.id === agentId);
-            if (!agent) throw new Error(`Agent "${agentId}" not found`);
-
-            const prompt = this.buildPrompt(s, outputs);
-            const result = await this.sessionMgr.dispatch(agent, prompt);
-            this.tracker.completeStep(stepRows[i].id, result);
-            if (s.output) outputs[s.output] = result;
-            this.emit('workflow.step_completed', { runId, stepId: s.id });
-          } catch (err: any) {
-            this.tracker.failStep(stepRows[i].id, err.message);
-            this.emit('workflow.step_failed', { runId, stepId: s.id, error: err.message });
-            throw err; // fail-fast
+        const results = await Promise.allSettled(step.parallel.map(async (s, i) => {
+          this.tracker.startStep(stepRows[i].id);
+          this.emit('workflow.step_started', { runId, stepId: s.id });
+          const agentId = await this.resolveAgent(s);
+          const agent = this.agents.find((a) => a.id === agentId);
+          if (!agent) throw new Error(`Agent "${agentId}" not found`);
+          const prompt = this.buildPrompt(s, outputs);
+          const result = await this.sessionMgr.dispatch(agent, prompt);
+          this.tracker.completeStep(stepRows[i].id, result);
+          if (s.output) outputs[s.output] = result;
+          this.emit('workflow.step_completed', { runId, stepId: s.id });
+        }));
+        // Check for failures and fail-fast
+        const failures = results.filter(r => r.status === 'rejected');
+        if (failures.length > 0) {
+          for (let i = 0; i < results.length; i++) {
+            if (results[i].status === 'rejected') {
+              const err = (results[i] as PromiseRejectedResult).reason;
+              this.tracker.failStep(stepRows[i].id, err?.message || String(err));
+              this.emit('workflow.step_failed', { runId, stepId: step.parallel[i].id, error: err?.message });
+            }
           }
-        });
-        await Promise.all(promises);
+          throw new Error(`Parallel group failed: ${failures.length} step(s) failed`);
+        }
         continue;
       }
 
@@ -120,7 +129,7 @@ export class WorkflowEngine {
   private async resolveAgent(step: WorkflowStep): Promise<string> {
     if (!step.agent) throw new Error(`Step "${step.id}" has no agent configured`);
     if (typeof step.agent === 'string') return step.agent;
-    return this.router.resolveAgent(step.prompt || '', 'kunde-webshop', step.agent.prefer);
+    return this.router.resolveAgent(step.prompt || '', this.projectId, step.agent.prefer);
   }
 
   private buildPrompt(step: WorkflowStep, outputs: Record<string, string>): string {

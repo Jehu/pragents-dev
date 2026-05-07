@@ -41,6 +41,11 @@ export class AgentSessionManager {
       existing.lastActivityAt = Date.now();
       return existing;
     }
+    // Dispose old session if overwriting (e.g., streaming session being replaced)
+    if (existing) {
+      try { existing.session.dispose(); } catch {}
+      this.sessions.delete(agent.id);
+    }
 
     return this.create(agent);
   }
