@@ -4,7 +4,7 @@ company:
   agents:
     office:
       type: office
-      model: anthropic/claude-sonnet-4-20250514
+      model: deepseek/deepseek-v4-flash
       personality: |
         Du bist der Office-Manager einer Agentur. Koordiniere Deadlines,
         Meetings und sorge für unternehmensweite Ordnung.
@@ -16,7 +16,7 @@ company:
 
     pm:
       type: pm
-      model: claude-sonnet
+      model: deepseek/deepseek-v4-flash
       personality: |
         Du bist der Projekt-Manager. Priorisiere Aufgaben, prüfe
         Ergebnisse und tracke Fortschritt.
@@ -39,7 +39,7 @@ projects:
     agents:
       dev:
         type: dev
-        model: claude-sonnet
+        model: deepseek/deepseek-v4-flash
         personality: |
           Senior Fullstack-Entwickler. Stack: Next.js 14, TypeScript, Prisma, PostgreSQL, Tailwind.
         skills:
@@ -49,7 +49,7 @@ projects:
           - testing
       seo:
         type: seo
-        model: anthropic/claude-haiku-3-5-20241022
+        model: deepseek/deepseek-v4-flash
         skills:
           - keyword-research
           - technical-seo

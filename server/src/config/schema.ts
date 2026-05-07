@@ -99,8 +99,18 @@ const TOKEN_BUDGETS: Record<string, number> = {
   default: 20000,
 };
 
+const MODEL_MAP: Record<string, string> = {
+  'claude-sonnet': 'anthropic/claude-sonnet-4-20250514',
+  'claude-haiku': 'anthropic/claude-haiku-3-5-20241022',
+  'claude-opus': 'anthropic/claude-opus-4-20250514',
+};
+
+function resolveModel(model: string): string {
+  return MODEL_MAP[model] || model; // pass through unknown models directly
+}
+
 const SYSTEM_DEFAULTS: Record<string, string> = {
-  model: 'anthropic/claude-sonnet-4-20250514',
+  model: 'claude-sonnet',
   personality: 'You are a helpful coding agent.',
 };
 
@@ -115,7 +125,7 @@ export function resolveAgent(
     id: agentId,
     projectId,
     type: agentConfig.type,
-    model: agentConfig.model || SYSTEM_DEFAULTS.model,
+    model: resolveModel(agentConfig.model || SYSTEM_DEFAULTS.model),
     personality:
       agentConfig.personality ?? SYSTEM_DEFAULTS.personality,
     memory: agentConfig.memory ?? { project: 'read/write', company: 'read' },
