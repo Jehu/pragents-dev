@@ -46,13 +46,13 @@ export class AgentSessionManager {
   }
 
   private async create(agent: ResolvedAgent): Promise<SessionHandle> {
-    // Use user's pi home for agent resources (extensions, skills, themes)
-    const piHome = join(process.env.HOME || '/tmp', '.pi');
-    const agentDir = join(piHome, 'agent');
+    // Create temp dir for SDK session (avoids pi SDK init issues)
+    const tmpDir = join(process.env.HOME || '/tmp', '.pragents', 'sessions', agent.id);
+    const agentDir = join(tmpDir, '.pi', 'agent');
     mkdirSync(agentDir, { recursive: true });
 
     const loader = new DefaultResourceLoader({
-      cwd: agent.projectDir,
+      cwd: tmpDir,
       agentDir,
       noExtensions: true,
       noSkills: true,
@@ -65,6 +65,7 @@ export class AgentSessionManager {
 
     await loader.reload();
 
+    // Need to pass projectDir so agent tools can access actual project files
     const { session } = await createAgentSession({
       cwd: agent.projectDir,
       resourceLoader: loader,
