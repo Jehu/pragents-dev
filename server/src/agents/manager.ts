@@ -63,7 +63,10 @@ export class AgentSessionManager {
         (base ?? '') + '\n\n---\n' + (agent.personality || 'You are a helpful coding agent.'),
     });
 
-    console.log(`Agent "${agent.id}" model: ${agent.model}, projectDir: ${agent.projectDir}`);
+    console.log(`Agent "${agent.id}" model: ${agent.model}, projectDir: ${agent.projectDir}, cwd: ${agent.projectDir}`);
+    if (!agent.projectDir) {
+      console.error(`FATAL: agent.projectDir is undefined for ${agent.id}. Agent config:`, JSON.stringify(agent));
+    }
     await loader.reload();
 
     // Need to pass projectDir so agent tools can access actual project files
