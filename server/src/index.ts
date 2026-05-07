@@ -75,7 +75,7 @@ export async function startServer() {
 
   const wfEngine = new WorkflowEngine(wfTracker, router, sessionMgr, agents, eventBuffer);
   const decomposer = new NLDecomposer();
-  const costTracker = new CostTracker();
+  const costTracker = new CostTracker((config as any).costs || {});
   sessionMgr.setCostTracker(costTracker);
 
   // Goal scheduler

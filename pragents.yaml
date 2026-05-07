@@ -58,3 +58,11 @@ interfaces:
   web:
     port: 3000
     host: localhost
+
+costs:
+  anthropic/claude-sonnet: { in: 3.0, out: 15.0 }
+  anthropic/claude-haiku: { in: 0.8, out: 4.0 }
+  anthropic/claude-opus: { in: 15.0, out: 75.0 }
+  openai/gpt-4o: { in: 2.5, out: 10.0 }
+  openai/gpt-4o-mini: { in: 0.15, out: 0.6 }
+  google/gemini-2.5-pro: { in: 1.25, out: 10.0 }

@@ -115,7 +115,6 @@ export function resolveAgent(
     id: agentId,
     projectId,
     type: agentConfig.type,
-    model:
     model: agentConfig.model || SYSTEM_DEFAULTS.model,
     personality:
       agentConfig.personality ?? SYSTEM_DEFAULTS.personality,
