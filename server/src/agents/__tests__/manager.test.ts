@@ -1,4 +1,8 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { initDb, closeDb } from '../../db/sqlite.js';
 
 // Mock pi SDK
 vi.mock('@mariozechner/pi-coding-agent', () => ({
@@ -24,10 +28,23 @@ const mockAgent: ResolvedAgent = {
 };
 
 describe('AgentSessionManager', () => {
+  const tmpDir = mkdtempSync(join(tmpdir(), 'pragents-agent-test-'));
+
+  beforeAll(() => {
+    initDb(join(tmpDir, 'test.db'));
+  });
+
+  afterAll(() => {
+    closeDb();
+    rmSync(tmpDir, { recursive: true });
+  });
   it('dispatch creates session with correct config', async () => {
     const { createAgentSession, DefaultResourceLoader } = await import('@mariozechner/pi-coding-agent');
     const mockSession = {
-      subscribe: vi.fn(),
+      subscribe: vi.fn((cb: any) => {
+        setTimeout(() => cb({ type: 'agent_end' }), 10);
+        return () => {};
+      }),
       prompt: vi.fn().mockResolvedValue(undefined),
       dispose: vi.fn(),
       isStreaming: false,
