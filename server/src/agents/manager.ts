@@ -74,7 +74,7 @@ export class AgentSessionManager {
       cwd: agent.projectDir,
       resourceLoader: loader,
       sessionManager: SessionManager.inMemory() as any,
-      model: agent.model as any,
+      // model auto-discovered by pi SDK from configured API keys
     });
     console.log(`Session created for "${agent.id}" with model "${agent.model}"`);
 
