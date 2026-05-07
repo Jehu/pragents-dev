@@ -21,6 +21,7 @@ import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { logger, childLogger } from './logging/index.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 

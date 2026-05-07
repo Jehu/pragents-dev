@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useQuery, QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import ReactDOM from 'react-dom/client';
 
-const API = 'http://localhost:3000';
+const API = '';
 const queryClient = new QueryClient();
 
 function App() {
@@ -17,7 +17,7 @@ function App() {
   const [nlError, setNlError] = useState('');
   const { data: workflows } = useQuery({ queryKey: ['workflows'], queryFn: () => fetch(`${API}/api/v1/workflows`).then(r => r.json()), refetchInterval: 5000 });
   const { data: wfRuns } = useQuery({ queryKey: ['wf-runs'], queryFn: () => fetch(`${API}/api/v1/workflows/runs`).then(r => r.json()), refetchInterval: 3000, enabled: view === 'workflows' });
-  const [wfRunResult, setWfRunResult] = useState('');
+  const [expandedTrace, setExpandedTrace] = useState<number | null>(null);
 
   const { data: agents } = useQuery({ queryKey: ['agents'], queryFn: () => fetch(`${API}/api/v1/agents`).then(r => r.json()) });
   const { data: tasks } = useQuery({ queryKey: ['tasks'], queryFn: () => fetch(`${API}/api/v1/tasks`).then(r => r.json()), refetchInterval: 3000 });
@@ -235,11 +235,43 @@ function App() {
             ) : (
               <div className="space-y-1">
                 {eventList.map((e: any, i: number) => (
-                  <div key={e.id || i} className="bg-white rounded-lg border border-gray-200 p-3 flex items-center gap-4 text-sm">
-                    <span className="text-xs text-gray-300 w-16 font-mono">{new Date(e.timestamp).toLocaleTimeString()}</span>
-                    <span className="font-medium text-gray-600 w-28 truncate">{e.agentId || '—'}</span>
-                    <span className="text-gray-500">{e.type}</span>
-                    {e.data?.tool && <span className="text-blue-500 font-mono text-xs">{e.data.tool}</span>}
+                  <div key={e.id || i}>
+                    <div
+                      onClick={() => setExpandedTrace(expandedTrace === i ? null : i)}
+                      className="bg-white rounded-lg border border-gray-200 p-3 flex items-center gap-4 text-sm cursor-pointer hover:border-blue-300 transition-colors"
+                    >
+                      <span className="text-xs text-gray-300 w-16 font-mono">{new Date(e.timestamp).toLocaleTimeString()}</span>
+                      <span className="font-medium text-gray-600 w-28 truncate">{e.agentId || '—'}</span>
+                      <span className="text-gray-500 flex-1">{e.type}</span>
+                      {e.data?.tool && <span className="text-blue-500 font-mono text-xs">{e.data.tool}</span>}
+                      <span className="text-gray-300 text-xs">{expandedTrace === i ? '▲' : '▼'}</span>
+                    </div>
+                    {expandedTrace === i && (
+                      <div className="bg-gray-50 border border-t-0 border-gray-200 rounded-b-lg p-4 ml-4 mr-0">
+                        <div className="grid grid-cols-2 gap-3 text-xs mb-3">
+                          <div><span className="text-gray-400">Project:</span> <span className="font-mono">{e.projectId}</span></div>
+                          <div><span className="text-gray-400">Agent:</span> <span className="font-mono">{e.agentId || '—'}</span></div>
+                          <div><span className="text-gray-400">Type:</span> <span className="font-mono">{e.type}</span></div>
+                          <div><span className="text-gray-400">Timestamp:</span> <span className="font-mono">{e.timestamp}</span></div>
+                        </div>
+                        {e.data?.tool && (
+                          <details className="mb-2">
+                            <summary className="text-xs text-gray-500 cursor-pointer hover:text-gray-700">Tool Call: {e.data.tool}</summary>
+                            <pre className="mt-1 p-2 bg-gray-100 rounded text-xs overflow-x-auto max-h-40">{JSON.stringify(e.data, null, 2)}</pre>
+                          </details>
+                        )}
+                        {e.data?.result && (
+                          <details className="mb-2">
+                            <summary className="text-xs text-gray-500 cursor-pointer hover:text-gray-700">Result</summary>
+                            <pre className="mt-1 p-2 bg-gray-100 rounded text-xs overflow-x-auto max-h-40 whitespace-pre-wrap">{typeof e.data.result === 'string' ? e.data.result.substring(0, 1000) : JSON.stringify(e.data.result, null, 2).substring(0, 1000)}</pre>
+                          </details>
+                        )}
+                        <details>
+                          <summary className="text-xs text-gray-500 cursor-pointer hover:text-gray-700">Raw Event Data</summary>
+                          <pre className="mt-1 p-2 bg-gray-100 rounded text-xs overflow-x-auto max-h-60">{JSON.stringify(e, null, 2)}</pre>
+                        </details>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
