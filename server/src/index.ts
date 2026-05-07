@@ -141,9 +141,14 @@ export async function startServer() {
     tracker,
     wfEngine,
     wfRegistry,
+    wfTracker,
     memory,
     skills: skillRegistry,
     costTracker,
+    agents,
+    goalRegistry,
+    eventBuffer,
+    decomposer,
     dispatchTask: (projectId, agentId, description) => {
       const agent = agents.find(a => a.id === agentId) || agents[0];
       if (!agent) return Promise.reject(new Error(`No agent found for "${agentId}"`));

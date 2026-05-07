@@ -24,15 +24,32 @@ function makeDeps(overrides: Record<string, any> = {}) {
       get: vi.fn().mockReturnValue({ name: 'test-wf' }),
       list: vi.fn().mockReturnValue([{ name: 'test-wf', description: 'A test workflow' }]),
     },
+    wfTracker: {
+      listRuns: vi.fn().mockReturnValue([{ id: 'r1', workflowName: 'test-wf', status: 'complete' }]),
+    },
     memory: {
       recall: vi.fn().mockResolvedValue([{ id: 'f1', content: 'test', metadata: {} }]),
       remember: vi.fn().mockResolvedValue('fact-1'),
+      forget: vi.fn().mockResolvedValue(undefined),
     },
     skills: {
       list: vi.fn().mockReturnValue([{ name: 'code-review', description: 'Review code' }]),
     },
     costTracker: {
       getProjectCost: vi.fn().mockReturnValue({ tokensIn: 1000, tokensOut: 500, cost: 0.05 }),
+    },
+    agents: [
+      { id: 'dev@proj-a', type: 'dev', projectId: 'proj-a', skills: ['typescript'] },
+      { id: 'seo@proj-a', type: 'seo', projectId: 'proj-a', skills: ['keyword-research'] },
+    ],
+    goalRegistry: {
+      list: vi.fn().mockReturnValue([{ id: 'weekly-article', cadence: '0 8 * * 1', workflow: 'content-pipeline' }]),
+    },
+    eventBuffer: {
+      getRecent: vi.fn().mockReturnValue([{ id: 1, type: 'task.started' }]),
+    },
+    decomposer: {
+      decompose: vi.fn().mockResolvedValue({ steps: [{ id: 'step1', description: 'Research', agent: 'dev' }] }),
     },
     dispatchTask: vi.fn().mockResolvedValue('dispatched'),
     ...overrides,
@@ -181,7 +198,7 @@ describe('ToolExecutor', () => {
     expect(result).toBe('Error: DB down');
   });
 
-  it('executes all 10 tools without errors', async () => {
+  it('executes all 18 tools without errors', async () => {
     const deps = makeDeps();
     const executor = new ToolExecutor(deps);
     const tools = [
@@ -195,11 +212,62 @@ describe('ToolExecutor', () => {
       { name: 'remember_fact', args: { content: 'c', category: 'convention', scope: 'project' } },
       { name: 'list_skills', args: {} },
       { name: 'get_cost_summary', args: { projectId: 'p' } },
+      { name: 'list_agents', args: {} },
+      { name: 'list_goals', args: {} },
+      { name: 'get_goal_runs', args: {} },
+      { name: 'list_pending_gates', args: {} },
+      { name: 'get_workflow_runs', args: {} },
+      { name: 'list_events', args: {} },
+      { name: 'delete_fact', args: { factId: 'f1' } },
     ];
     for (const t of tools) {
       const result = await executor.execute(t.name, t.args);
       expect(result).toBeTruthy();
       expect(result).not.toContain('Error: Unknown tool');
     }
+  });
+
+  it('executes list_agents', async () => {
+    const deps = makeDeps();
+    const executor = new ToolExecutor(deps);
+    const result = await executor.execute('list_agents', {});
+    const parsed = JSON.parse(result);
+    expect(parsed).toHaveLength(2);
+    expect(parsed[0].id).toBe('dev@proj-a');
+  });
+
+  it('executes list_goals', async () => {
+    const deps = makeDeps();
+    const executor = new ToolExecutor(deps);
+    const result = await executor.execute('list_goals', {});
+    expect(deps.goalRegistry.list).toHaveBeenCalled();
+    const parsed = JSON.parse(result);
+    expect(parsed[0].id).toBe('weekly-article');
+  });
+
+  it('executes get_workflow_runs', async () => {
+    const deps = makeDeps();
+    const executor = new ToolExecutor(deps);
+    const result = await executor.execute('get_workflow_runs', { limit: 5 });
+    expect(deps.wfTracker.listRuns).toHaveBeenCalledWith(5);
+    const parsed = JSON.parse(result);
+    expect(parsed[0].workflowName).toBe('test-wf');
+  });
+
+  it('executes list_events', async () => {
+    const deps = makeDeps();
+    const executor = new ToolExecutor(deps);
+    const result = await executor.execute('list_events', { limit: 10 });
+    expect(deps.eventBuffer.getRecent).toHaveBeenCalledWith(10);
+    const parsed = JSON.parse(result);
+    expect(parsed[0].type).toBe('task.started');
+  });
+
+  it('executes delete_fact', async () => {
+    const deps = makeDeps();
+    const executor = new ToolExecutor(deps);
+    const result = await executor.execute('delete_fact', { factId: 'f1' });
+    expect(deps.memory.forget).toHaveBeenCalledWith('f1');
+    expect(result).toContain('deleted');
   });
 });

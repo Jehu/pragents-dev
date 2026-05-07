@@ -134,4 +134,71 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
       required: ['projectId'],
     },
   },
+  {
+    name: 'list_agents',
+    description: 'List all configured agents with their types, skills, and project assignments.',
+    parameters: { type: 'object', properties: {} },
+  },
+  {
+    name: 'list_goals',
+    description: 'List all configured goals with their cadence, workflow, and deadline settings.',
+    parameters: { type: 'object', properties: {} },
+  },
+  {
+    name: 'get_goal_runs',
+    description: 'Get recent goal runs — check which goals triggered and their status.',
+    parameters: {
+      type: 'object',
+      properties: {
+        limit: { type: 'number', description: 'Max results (default 20)' },
+      },
+    },
+  },
+  {
+    name: 'list_pending_gates',
+    description: 'List all pending human gates that need approval or rejection.',
+    parameters: { type: 'object', properties: {} },
+  },
+  {
+    name: 'get_workflow_runs',
+    description: 'Get recent workflow runs — check workflow status, steps, and results.',
+    parameters: {
+      type: 'object',
+      properties: {
+        limit: { type: 'number', description: 'Max results (default 20)' },
+      },
+    },
+  },
+  {
+    name: 'list_events',
+    description: 'Get recent platform events — task starts, workflow steps, gate changes.',
+    parameters: {
+      type: 'object',
+      properties: {
+        limit: { type: 'number', description: 'Max results (default 20)' },
+      },
+    },
+  },
+  {
+    name: 'decompose_task',
+    description: 'Decompose a complex task description into a structured plan with steps and agent assignments.',
+    parameters: {
+      type: 'object',
+      properties: {
+        prompt: { type: 'string', description: 'The task to decompose into a plan' },
+      },
+      required: ['prompt'],
+    },
+  },
+  {
+    name: 'delete_fact',
+    description: 'Remove a fact from the knowledge base by its ID.',
+    parameters: {
+      type: 'object',
+      properties: {
+        factId: { type: 'string', description: 'ID of the fact to delete' },
+      },
+      required: ['factId'],
+    },
+  },
 ];
