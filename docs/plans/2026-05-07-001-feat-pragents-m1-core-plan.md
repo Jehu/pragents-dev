@@ -1,7 +1,7 @@
 ---
 title: "feat: pragents M1 Core — Agent Foundation"
 type: feat
-status: active
+status: completed
 date: 2026-05-07
 origin: docs/superpowers/specs/2026-05-06-pragents-design.md
 deepened: 2026-05-07

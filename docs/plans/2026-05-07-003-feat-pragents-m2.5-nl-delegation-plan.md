@@ -1,7 +1,7 @@
 ---
 title: "feat: pragents M2.5 — NL Delegation & Plan Review"
 type: feat
-status: active
+status: completed
 date: 2026-05-07
 origin: docs/brainstorms/2026-05-07-pragents-m2-orchestrate-requirements.md
 ---
