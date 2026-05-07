@@ -4,6 +4,7 @@ import { loadConfig } from './config/loader.js';
 import { initDb, closeDb } from './db/sqlite.js';
 import { MemoryEngine } from './memory/engine.js';
 import { AgentSessionManager } from './agents/manager.js';
+import { ToolExecutor } from './agents/tool-executor.js';
 import { TaskTracker } from './tasks/tracker.js';
 import { EventBuffer } from './events/buffer.js';
 import { WorkflowRegistry } from './workflows/loader.js';
@@ -117,6 +118,22 @@ export async function startServer() {
   const decomposer = new NLDecomposer();
   const costTracker = new CostTracker(config.costs || {});
   sessionMgr.setCostTracker(costTracker);
+
+  // Agent-native tooling (M6)
+  const toolExecutor = new ToolExecutor({
+    tracker,
+    wfEngine,
+    wfRegistry,
+    memory,
+    skills: skillRegistry,
+    costTracker,
+    dispatchTask: (projectId, agentId, description) =>
+      sessionMgr.dispatch(
+        agents.find(a => a.id === agentId) || agents[0],
+        description,
+      ),
+  });
+  sessionMgr.setToolExecutor(toolExecutor);
 
   // Goal scheduler
   const goalScheduler = new GoalScheduler(wfRegistry, wfEngine, eventBuffer, sessionMgr, agents);

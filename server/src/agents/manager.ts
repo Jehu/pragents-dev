@@ -5,6 +5,8 @@ import { MemoryEngine } from '../memory/engine.js';
 import type { CostTracker } from '../tracking/cost-tracker.js';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
+import type { ToolExecutor } from './tool-executor.js';
+import { TOOL_DEFINITIONS } from './tool-definitions.js';
 
 export interface SessionHandle {
   agentId: string;
@@ -21,10 +23,15 @@ export class AgentSessionManager {
   private onEvent: ((event: any) => void) | null = null;
 
   private costTracker: CostTracker | null = null;
+  private toolExecutor: ToolExecutor | null = null;
 
   constructor(memory: MemoryEngine, idleTimeoutMs: number = 10 * 60 * 1000) {
     this.memory = memory;
     this.idleTimeoutMs = idleTimeoutMs;
+  }
+
+  setToolExecutor(te: ToolExecutor): void {
+    this.toolExecutor = te;
   }
 
   setCostTracker(ct: CostTracker): void {
@@ -80,7 +87,12 @@ export class AgentSessionManager {
           'You can output multiple REMEMBER lines. Place them at the end of your response.',
           'Only output facts that are genuinely useful for future sessions — do not output trivial or obvious facts.',
         ].join('\n');
-        return (base ?? '') + '\n\n---\n' + personality + '\n' + rememberTool;
+        let prompt = (base ?? '') + '\n\n---\n' + personality + '\n' + rememberTool;
+        if (this.toolExecutor) {
+          prompt += '\n\n## Available Tools\nYou have access to the following tools. Call them when you need to query, create, or act on platform resources.\n\n';
+          prompt += TOOL_DEFINITIONS.map((t: any) => `- **${t.name}**: ${t.description}`).join('\n');
+        }
+        return prompt;
       },
     });
 
@@ -95,6 +107,7 @@ export class AgentSessionManager {
       cwd: agent.projectDir,
       resourceLoader: loader,
       sessionManager: SessionManager.inMemory() as any,
+      customTools: this.toolExecutor ? TOOL_DEFINITIONS as any : undefined,
       // model auto-discovered by pi SDK from configured API keys
     });
     console.log(`Session created for "${agent.id}" with model "${agent.model}"`);
@@ -167,6 +180,12 @@ export class AgentSessionManager {
             }
           }
           resolve(responseText.trim() || 'Task completed (no text response)');
+        }
+        // Handle custom tool calls from the agent
+        if (event.type === 'custom_tool_call' && this.toolExecutor) {
+          this.toolExecutor.execute(event.name, event.args || {}).then((result) => {
+            try { handle.session.sendToolResult?.(event.callId, result); } catch {}
+          });
         }
       });
       // Timeout safety net
