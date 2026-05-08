@@ -42,13 +42,31 @@ npm install
 
 ## Configure
 
-Create `~/.pragents/pragents.yaml` (use the included `pragents.example.yaml` as a template) and `~/.pragents/.env` for your API keys.
+All configuration and runtime state lives in `~/.pragents/` — a hidden directory in your home folder. The server creates subdirectories automatically on first start; you only need to provide the config file and API keys.
 
 ```bash
 mkdir -p ~/.pragents
 cp pragents.example.yaml ~/.pragents/pragents.yaml
 cp .env.example ~/.pragents/.env
 # edit ~/.pragents/.env — uncomment and fill in your API keys
+```
+
+**What goes where:**
+
+```
+~/.pragents/
+├── pragents.yaml         # your config (agents, projects, models, costs)
+├── .env                  # API keys (auto-loaded on start)
+│
+├── data/                 # ← auto-created
+│   ├── pragents.db       # SQLite — tasks, workflows, memory, skills, events
+│   └── lancedb/          # vector index (if LanceDB is configured)
+│
+├── logs/                 # ← auto-created
+│   └── pragents.log      # structured JSON logs (debug level)
+│
+└── sessions/             # ← auto-created
+    └── <agent-id>/       # one pi SDK session directory per agent
 ```
 
 ## Run
@@ -84,5 +102,3 @@ server: {
   },
 },
 ```
-
-Data is stored in `~/.pragents/data/`.
