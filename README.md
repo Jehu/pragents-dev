@@ -13,11 +13,11 @@ npm install
 
 ## Configure
 
-Create `~/.pragents/pragents.yaml` (use the included `pragents.yaml` as a template) and an optional `~/.pragents/.env` for API keys.
+Create `~/.pragents/pragents.yaml` (use the included `pragents.example.yaml` as a template) and an optional `~/.pragents/.env` for API keys.
 
 ```bash
 mkdir -p ~/.pragents
-cp pragents.yaml ~/.pragents/pragents.yaml
+cp pragents.example.yaml ~/.pragents/pragents.yaml
 ```
 
 ## Run
