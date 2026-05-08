@@ -6,3 +6,6 @@ dist/
 *.db-wal
 *.db-shm
 pragents.yaml
+.DS_Store
+*.tsbuildinfo
+*.local
