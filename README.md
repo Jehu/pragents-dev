@@ -18,6 +18,19 @@ PrAgents fixes that:
 
 PrAgents is built for the one-person agency that wants agents working *for* them — not the other way around.
 
+## Dependencies
+
+| Layer | Technology | Role |
+|-------|-----------|------|
+| **Runtime** | Node.js 20+ | Server & agent host |
+| **Agent SDK** | [`@mariozechner/pi-coding-agent`](https://pi.dev/) | Agent session management |
+| **Server** | [Hono 4](https://hono.dev/), Zod, Pino | HTTP framework, validation, logging |
+| **Database** | better-sqlite3 (WAL) + [LanceDB](https://lancedb.com/) | Persistent state + vector search |
+| **Scheduling** | croner | Recurring goal & workflow triggers |
+| **Frontend** | React 19, TanStack Router/Query, Zustand, UnoCSS | Dashboard SPA |
+
+Everything is installed via `npm install` at the repo root — npm workspaces wire `server/` and `web/` together.
+
 ## Install
 
 ```bash
@@ -29,11 +42,13 @@ npm install
 
 ## Configure
 
-Create `~/.pragents/pragents.yaml` (use the included `pragents.example.yaml` as a template) and an optional `~/.pragents/.env` for API keys.
+Create `~/.pragents/pragents.yaml` (use the included `pragents.example.yaml` as a template) and `~/.pragents/.env` for your API keys.
 
 ```bash
 mkdir -p ~/.pragents
 cp pragents.example.yaml ~/.pragents/pragents.yaml
+cp .env.example ~/.pragents/.env
+# edit ~/.pragents/.env — uncomment and fill in your API keys
 ```
 
 ## Run
