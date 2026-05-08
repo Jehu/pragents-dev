@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { getDb } from '../db/sqlite.js';
 
-export type TaskStatus = 'pending' | 'running' | 'complete' | 'failed' | 'needs_review';
+export type TaskStatus = 'pending' | 'running' | 'complete' | 'failed' | 'needs_review' | 'blocked';
 
 export interface Task {
   id: string;
@@ -10,6 +10,8 @@ export interface Task {
   status: TaskStatus;
   description: string;
   result: string | null;
+  reason: string | null;
+  externalRef: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -18,6 +20,7 @@ export interface TaskCreate {
   projectId: string;
   agentId: string;
   description: string;
+  status?: TaskStatus;
 }
 
 export class TaskTracker {
@@ -25,18 +28,21 @@ export class TaskTracker {
     const db = getDb();
     const id = randomUUID();
     const now = new Date().toISOString();
+    const status = input.status ?? 'pending';
 
     db.prepare(
       'INSERT INTO tasks (id, project_id, agent_id, status, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-    ).run(id, input.projectId, input.agentId, 'pending', input.description, now, now);
+    ).run(id, input.projectId, input.agentId, status, input.description, now, now);
 
     return {
       id,
       projectId: input.projectId,
       agentId: input.agentId,
-      status: 'pending',
+      status,
       description: input.description,
       result: null,
+      reason: null,
+      externalRef: null,
       createdAt: now,
       updatedAt: now,
     };
@@ -62,14 +68,26 @@ export class TaskTracker {
 
   setNeedsReview(taskId: string, reason: string): void {
     getDb()
-      .prepare("UPDATE tasks SET status = 'needs_review', result = ?, updated_at = ? WHERE id = ?")
+      .prepare("UPDATE tasks SET status = 'needs_review', reason = ?, updated_at = ? WHERE id = ?")
       .run(reason, new Date().toISOString(), taskId);
+  }
+
+  setBlocked(taskId: string, reason: string): void {
+    getDb()
+      .prepare("UPDATE tasks SET status = 'blocked', reason = ?, updated_at = ? WHERE id = ?")
+      .run(reason, new Date().toISOString(), taskId);
+  }
+
+  setPending(taskId: string): void {
+    getDb()
+      .prepare("UPDATE tasks SET status = 'pending', reason = NULL, updated_at = ? WHERE id = ?")
+      .run(new Date().toISOString(), taskId);
   }
 
   get(taskId: string): Task | null {
     const row = getDb()
       .prepare(
-        `SELECT id, project_id as projectId, agent_id as agentId, status, description, result,
+        `SELECT id, project_id as projectId, agent_id as agentId, status, description, result, reason, external_ref as externalRef,
                 created_at as createdAt, updated_at as updatedAt FROM tasks WHERE id = ?`,
       )
       .get(taskId) as Task | undefined;
@@ -80,7 +98,7 @@ export class TaskTracker {
     if (projectId) {
       return getDb()
         .prepare(
-          `SELECT id, project_id as projectId, agent_id as agentId, status, description, result,
+          `SELECT id, project_id as projectId, agent_id as agentId, status, description, result, reason, external_ref as externalRef,
                   created_at as createdAt, updated_at as updatedAt FROM tasks WHERE project_id = ?
            ORDER BY created_at DESC`,
         )
@@ -88,7 +106,7 @@ export class TaskTracker {
     }
     return getDb()
       .prepare(
-        `SELECT id, project_id as projectId, agent_id as agentId, status, description, result,
+        `SELECT id, project_id as projectId, agent_id as agentId, status, description, result, reason, external_ref as externalRef,
                 created_at as createdAt, updated_at as updatedAt FROM tasks ORDER BY created_at DESC`,
       )
       .all() as Task[];
@@ -97,11 +115,12 @@ export class TaskTracker {
   recoverStaleTasks(): number {
     const db = getDb();
     const now = new Date().toISOString();
+    const reason = `Server restarted at ${now}`;
     const result = db
       .prepare(
-        "UPDATE tasks SET status = 'needs_review', result = ?, updated_at = ? WHERE status = 'running'",
+        "UPDATE tasks SET status = 'needs_review', reason = ?, updated_at = ? WHERE status = 'running'",
       )
-      .run(`Server restarted at ${now}`, now);
+      .run(reason, now);
     return result.changes;
   }
 }

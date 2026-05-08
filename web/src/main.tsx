@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useQuery, QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import ReactDOM from 'react-dom/client';
 import { useConnectionStore } from './stores/connection';
+import { FeedView } from './components/FeedView';
 
 const API = '';
 const queryClient = new QueryClient();
@@ -23,11 +24,12 @@ function App() {
       queryClient.invalidateQueries({ queryKey: ['workflows'] });
       queryClient.invalidateQueries({ queryKey: ['wf-runs'] });
       queryClient.invalidateQueries({ queryKey: ['cost'] });
+      queryClient.invalidateQueries({ queryKey: ['feed'] });
     });
     return () => { disconnect(); };
   }, [queryClient]);
 
-  const [view, setView] = useState<'dashboard' | 'traces' | 'tasks' | 'workflows' | 'goals' | 'memory'>('dashboard');
+  const [view, setView] = useState<'dashboard' | 'feed' | 'traces' | 'tasks' | 'workflows' | 'goals' | 'memory'>('dashboard');
   const [description, setDescription] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [toast, setToast] = useState('');
@@ -129,7 +131,7 @@ function App() {
         <div className="flex items-center gap-6">
           <h1 className="text-lg font-bold tracking-tight">pragents</h1>
           <nav className="flex gap-1">
-            {(['dashboard', 'workflows', 'goals', 'traces', 'tasks', 'memory'] as const).map(v => (
+            {(['dashboard', 'feed', 'workflows', 'goals', 'traces', 'tasks', 'memory'] as const).map(v => (
               <button
                 key={v}
                 onClick={() => setView(v)}
@@ -302,6 +304,8 @@ function App() {
             )}
           </div>
         )}
+
+        {view === 'feed' && <FeedView />}
 
         {view === 'traces' && (
           <div>
