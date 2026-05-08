@@ -49,5 +49,14 @@ export function createTasksRoute(tracker: TaskTracker, agents: ResolvedAgent[], 
     return c.json(task);
   });
 
+  r.post('/:id/unblock', (c) => {
+    const task = tracker.get(c.req.param('id'));
+    if (!task) return c.json({ error: 'Task not found' }, 404);
+    if (task.status !== 'blocked') return c.json({ error: 'Task is not blocked' }, 400);
+    tracker.setPending(task.id);
+    eventBuffer.push(task.projectId, task.agentId, 'task.unblocked', { taskId: task.id });
+    return c.json({ status: 'pending' });
+  });
+
   return r;
 }

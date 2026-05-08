@@ -93,7 +93,7 @@ export class WorkflowEngine {
         this.tracker.startStep(stepRow.id);
 
         // Wait for gate resolution (polled via API)
-        await this.waitForGate(gateId, timeoutMs);
+        await this.waitForGate(gateId, timeoutMs, step.id, runId);
         const gate = db.prepare('SELECT status FROM human_gates WHERE id = ?').get(gateId) as any;
         if (gate?.status === 'approved') {
           this.tracker.completeStep(stepRow.id, 'approved');
@@ -144,7 +144,7 @@ export class WorkflowEngine {
     this.eventBuffer.push(data.projectId || 'workflow', data.agentId, type, data);
   }
 
-  private async waitForGate(gateId: string, timeoutMs: number): Promise<void> {
+  private async waitForGate(gateId: string, timeoutMs: number, stepId: string, runId: string): Promise<void> {
     const db = getDb();
     const start = Date.now();
     let delay = 2000;
@@ -156,6 +156,7 @@ export class WorkflowEngine {
     }
     // Timed out
     db.prepare("UPDATE human_gates SET status = 'timed_out' WHERE id = ?").run(gateId);
+    this.emit('gate.timed_out', { gateId, workflowRunId: runId, stepId, projectId: this.projectId });
   }
 }
 

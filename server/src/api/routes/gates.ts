@@ -1,7 +1,8 @@
 import { Hono } from 'hono';
 import { getDb } from '../../db/sqlite.js';
+import type { EventBuffer } from '../../events/buffer.js';
 
-export function createGatesRoute() {
+export function createGatesRoute(eventBuffer: EventBuffer) {
   const r = new Hono();
 
   r.get('/pending', (c) => {
@@ -18,6 +19,14 @@ export function createGatesRoute() {
     getDb().prepare(
       "UPDATE human_gates SET status = 'approved', approved_at = ? WHERE id = ?",
     ).run(new Date().toISOString(), gate.id);
+
+    eventBuffer.push('workflow', undefined, 'gate.approved', {
+      gateId: gate.id,
+      workflowRunId: gate.workflow_run_id,
+      stepId: gate.step_id,
+      label: gate.label,
+    });
+
     return c.json({ status: 'approved' });
   });
 
@@ -28,6 +37,14 @@ export function createGatesRoute() {
     getDb().prepare(
       "UPDATE human_gates SET status = 'rejected', approved_at = ? WHERE id = ?",
     ).run(new Date().toISOString(), gate.id);
+
+    eventBuffer.push('workflow', undefined, 'gate.rejected', {
+      gateId: gate.id,
+      workflowRunId: gate.workflow_run_id,
+      stepId: gate.step_id,
+      label: gate.label,
+    });
+
     return c.json({ status: 'rejected' });
   });
 

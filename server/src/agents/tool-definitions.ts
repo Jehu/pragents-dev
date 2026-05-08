@@ -22,25 +22,26 @@ export interface ToolDefinition {
 export const TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     name: 'query_tasks',
-    description: 'List tasks for a project. Optionally filter by status (pending, running, complete, failed).',
+    description: 'List tasks for a project. Optionally filter by status (pending, running, complete, failed, needs_review, blocked).',
     parameters: {
       type: 'object',
       properties: {
         projectId: { type: 'string', description: 'Project ID to query tasks for' },
-        status: { type: 'string', description: 'Filter by task status', enum: ['pending', 'running', 'complete', 'failed'] },
+        status: { type: 'string', description: 'Filter by task status', enum: ['pending', 'running', 'complete', 'failed', 'needs_review', 'blocked'] },
       },
       required: ['projectId'],
     },
   },
   {
     name: 'create_task',
-    description: 'Create a new task and dispatch it to an agent. The agent will work on it asynchronously.',
+    description: 'Create a new task and dispatch it to an agent. The agent will work on it asynchronously. Set status=needs_review to create a task that signals the human for review without dispatching to an agent.',
     parameters: {
       type: 'object',
       properties: {
         projectId: { type: 'string', description: 'Project ID' },
         agentId: { type: 'string', description: 'Agent ID (e.g., dev@project-name)' },
         description: { type: 'string', description: 'Task description — what the agent should do' },
+        status: { type: 'string', description: 'Task status (default: pending, which triggers dispatch)', enum: ['pending', 'needs_review'] },
       },
       required: ['projectId', 'agentId', 'description'],
     },
@@ -158,6 +159,18 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     name: 'list_pending_gates',
     description: 'List all pending human gates that need approval or rejection.',
     parameters: { type: 'object', properties: {} },
+  },
+  {
+    name: 'list_pending_attention',
+    description: 'List all items waiting for human attention: pending gates, needs_review tasks, and your own blocked tasks. Use this before asking the human for input to avoid duplicates.',
+    parameters: {
+      type: 'object',
+      properties: {
+        projectId: { type: 'string', description: 'Project ID to scope the attention check' },
+        agentId: { type: 'string', description: 'Your agent ID — used to filter blocked tasks to only your own' },
+      },
+      required: ['projectId', 'agentId'],
+    },
   },
   {
     name: 'get_workflow_runs',

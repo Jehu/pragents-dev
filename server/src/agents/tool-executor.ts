@@ -40,8 +40,13 @@ export class ToolExecutor {
           return JSON.stringify(filtered.slice(0, 20));
         }
         case 'create_task': {
-          const { projectId, agentId, description } = args as { projectId: string; agentId: string; description: string };
-          const task = this.deps.tracker.create({ projectId, agentId, description });
+          const { projectId, agentId, description, status } = args as { projectId: string; agentId: string; description: string; status?: string };
+          const taskStatus = status === 'needs_review' ? 'needs_review' : 'pending';
+          const task = this.deps.tracker.create({ projectId, agentId, description, status: taskStatus });
+          if (taskStatus === 'needs_review') {
+            this.deps.tracker.setNeedsReview(task.id, description);
+            return JSON.stringify({ taskId: task.id, status: 'needs_review', note: 'Not dispatched — human review requested' });
+          }
           this.deps.dispatchTask(projectId, agentId, description).then(
             (result) => this.deps.tracker.setComplete(task.id, result),
             (err) => this.deps.tracker.setFailed(task.id, err?.message || String(err)),
@@ -121,6 +126,14 @@ export class ToolExecutor {
           const gates = db.prepare("SELECT id, workflow_run_id, step_id, label, created_at, timeout_at FROM human_gates WHERE status = 'pending' ORDER BY created_at ASC").all();
           return JSON.stringify(gates);
         }
+        case 'list_pending_attention': {
+          const { projectId, agentId } = args as { projectId: string; agentId: string };
+          const db = getDb();
+          const gates = db.prepare("SELECT id, workflow_run_id as workflowRunId, step_id as stepId, label, created_at as createdAt, timeout_at as timeoutAt FROM human_gates WHERE status = 'pending' ORDER BY created_at ASC").all();
+          const needsReview = this.deps.tracker.list(projectId).filter((t: any) => t.status === 'needs_review');
+          const ownBlocked = this.deps.tracker.list(projectId).filter((t: any) => t.status === 'blocked' && t.agentId === agentId);
+          return JSON.stringify({ gates, needsReview, blocked: ownBlocked });
+        }
         case 'get_workflow_runs': {
           const { limit } = args as { limit?: number };
           const runs = this.deps.wfTracker.listRuns(limit || 20);
@@ -142,7 +155,7 @@ export class ToolExecutor {
           return JSON.stringify({ status: 'deleted', factId });
         }
         default:
-          return `Error: Unknown tool "${toolName}". Available tools: query_tasks, create_task, run_workflow, list_workflows, approve_gate, reject_gate, search_memory, remember_fact, list_skills, get_cost_summary, list_agents, list_goals, get_goal_runs, list_pending_gates, get_workflow_runs, list_events, decompose_task, delete_fact`;
+          return `Error: Unknown tool "${toolName}". Available tools: query_tasks, create_task, run_workflow, list_workflows, approve_gate, reject_gate, search_memory, remember_fact, list_skills, get_cost_summary, list_agents, list_goals, get_goal_runs, list_pending_gates, list_pending_attention, get_workflow_runs, list_events, decompose_task, delete_fact`;
       }
     } catch (err: any) {
       return `Error: ${err?.message || String(err)}`;

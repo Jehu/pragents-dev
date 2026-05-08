@@ -16,6 +16,9 @@ function makeDeps(overrides: Record<string, any> = {}) {
       create: vi.fn().mockReturnValue({ id: 'task-1', status: 'pending' }),
       setComplete: vi.fn(),
       setFailed: vi.fn(),
+      setNeedsReview: vi.fn(),
+      setBlocked: vi.fn(),
+      setPending: vi.fn(),
     },
     wfEngine: {
       execute: vi.fn().mockResolvedValue('run-1'),
@@ -82,7 +85,7 @@ describe('ToolExecutor', () => {
     const result = await executor.execute('create_task', {
       projectId: 'proj-a', agentId: 'dev@proj-a', description: 'Fix bug',
     });
-    expect(deps.tracker.create).toHaveBeenCalledWith({ projectId: 'proj-a', agentId: 'dev@proj-a', description: 'Fix bug' });
+    expect(deps.tracker.create).toHaveBeenCalledWith({ projectId: 'proj-a', agentId: 'dev@proj-a', description: 'Fix bug', status: 'pending' });
     expect(deps.dispatchTask).toHaveBeenCalledWith('proj-a', 'dev@proj-a', 'Fix bug');
     const parsed = JSON.parse(result);
     expect(parsed.taskId).toBe('task-1');
@@ -198,35 +201,6 @@ describe('ToolExecutor', () => {
     expect(result).toBe('Error: DB down');
   });
 
-  it('executes all 18 tools without errors', async () => {
-    const deps = makeDeps();
-    const executor = new ToolExecutor(deps);
-    const tools = [
-      { name: 'query_tasks', args: { projectId: 'p' } },
-      { name: 'create_task', args: { projectId: 'p', agentId: 'a', description: 'd' } },
-      { name: 'run_workflow', args: { workflowName: 'w', projectId: 'p' } },
-      { name: 'list_workflows', args: {} },
-      { name: 'approve_gate', args: { gateId: 'g' } },
-      { name: 'reject_gate', args: { gateId: 'g' } },
-      { name: 'search_memory', args: { query: 'q' } },
-      { name: 'remember_fact', args: { content: 'c', category: 'convention', scope: 'project' } },
-      { name: 'list_skills', args: {} },
-      { name: 'get_cost_summary', args: { projectId: 'p' } },
-      { name: 'list_agents', args: {} },
-      { name: 'list_goals', args: {} },
-      { name: 'get_goal_runs', args: {} },
-      { name: 'list_pending_gates', args: {} },
-      { name: 'get_workflow_runs', args: {} },
-      { name: 'list_events', args: {} },
-      { name: 'delete_fact', args: { factId: 'f1' } },
-    ];
-    for (const t of tools) {
-      const result = await executor.execute(t.name, t.args);
-      expect(result).toBeTruthy();
-      expect(result).not.toContain('Error: Unknown tool');
-    }
-  });
-
   it('executes list_agents', async () => {
     const deps = makeDeps();
     const executor = new ToolExecutor(deps);
@@ -269,5 +243,112 @@ describe('ToolExecutor', () => {
     const result = await executor.execute('delete_fact', { factId: 'f1' });
     expect(deps.memory.forget).toHaveBeenCalledWith('f1');
     expect(result).toContain('deleted');
+  });
+
+  // U4: query_tasks with blocked and needs_review status filters
+  it('executes query_tasks with status=blocked filter', async () => {
+    const tasks = [
+      { id: 't1', status: 'blocked', agentId: 'dev', projectId: 'p', reason: 'waiting' },
+      { id: 't2', status: 'pending', agentId: 'seo', projectId: 'p' },
+    ];
+    const deps = makeDeps({ tracker: { list: vi.fn().mockReturnValue(tasks), create: vi.fn(), setNeedsReview: vi.fn(), setBlocked: vi.fn(), setPending: vi.fn() } });
+    const executor = new ToolExecutor(deps);
+    const result = await executor.execute('query_tasks', { projectId: 'p', status: 'blocked' });
+    const parsed = JSON.parse(result);
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0].id).toBe('t1');
+  });
+
+  it('executes query_tasks with status=needs_review filter', async () => {
+    const tasks = [
+      { id: 't1', status: 'needs_review', agentId: 'dev', projectId: 'p', reason: 'review plz' },
+      { id: 't2', status: 'complete', agentId: 'seo', projectId: 'p' },
+    ];
+    const deps = makeDeps({ tracker: { list: vi.fn().mockReturnValue(tasks), create: vi.fn(), setNeedsReview: vi.fn(), setBlocked: vi.fn(), setPending: vi.fn() } });
+    const executor = new ToolExecutor(deps);
+    const result = await executor.execute('query_tasks', { projectId: 'p', status: 'needs_review' });
+    const parsed = JSON.parse(result);
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0].id).toBe('t1');
+  });
+
+  // U4: create_task with needs_review status — no dispatch
+  it('create_task with status=needs_review skips dispatch', async () => {
+    const deps = makeDeps();
+    const executor = new ToolExecutor(deps);
+    const result = await executor.execute('create_task', {
+      projectId: 'proj-a', agentId: 'dev@proj-a', description: 'PR needs review', status: 'needs_review',
+    });
+    expect(deps.tracker.create).toHaveBeenCalledWith({
+      projectId: 'proj-a', agentId: 'dev@proj-a', description: 'PR needs review', status: 'needs_review',
+    });
+    expect(deps.tracker.setNeedsReview).toHaveBeenCalledWith('task-1', 'PR needs review');
+    expect(deps.dispatchTask).not.toHaveBeenCalled();
+    const parsed = JSON.parse(result);
+    expect(parsed.status).toBe('needs_review');
+  });
+
+  // U4: list_pending_attention
+  it('executes list_pending_attention', async () => {
+    const tasks = [
+      { id: 't1', status: 'needs_review', agentId: 'dev', projectId: 'p', reason: 'check this' },
+      { id: 't2', status: 'blocked', agentId: 'dev', projectId: 'p', reason: 'waiting for api' },
+      { id: 't3', status: 'blocked', agentId: 'seo', projectId: 'p', reason: 'other agents block' },
+    ];
+    const deps = makeDeps({ tracker: { list: vi.fn().mockReturnValue(tasks), create: vi.fn(), setNeedsReview: vi.fn(), setBlocked: vi.fn(), setPending: vi.fn() } });
+    const executor = new ToolExecutor(deps);
+    const result = await executor.execute('list_pending_attention', { projectId: 'p', agentId: 'dev' });
+    const parsed = JSON.parse(result);
+    expect(parsed.gates).toEqual([]);
+    expect(parsed.needsReview).toHaveLength(1);
+    expect(parsed.needsReview[0].id).toBe('t1');
+    // Only own blocked tasks
+    expect(parsed.blocked).toHaveLength(1);
+    expect(parsed.blocked[0].id).toBe('t2');
+  });
+
+  it('list_pending_attention excludes blocked tasks of other agents', async () => {
+    const tasks = [
+      { id: 't1', status: 'blocked', agentId: 'other-agent', projectId: 'p', reason: 'theirs' },
+      { id: 't2', status: 'blocked', agentId: 'dev', projectId: 'p', reason: 'mine' },
+    ];
+    const deps = makeDeps({ tracker: { list: vi.fn().mockReturnValue(tasks), create: vi.fn(), setNeedsReview: vi.fn(), setBlocked: vi.fn(), setPending: vi.fn() } });
+    const executor = new ToolExecutor(deps);
+    const result = await executor.execute('list_pending_attention', { projectId: 'p', agentId: 'dev' });
+    const parsed = JSON.parse(result);
+    expect(parsed.blocked).toHaveLength(1);
+    expect(parsed.blocked[0].id).toBe('t2');
+  });
+
+  // Update the "all tools" count to 19 (added list_pending_attention)
+  it('executes all 19 tools without errors', async () => {
+    const deps = makeDeps();
+    const executor = new ToolExecutor(deps);
+    const tools = [
+      { name: 'query_tasks', args: { projectId: 'p' } },
+      { name: 'create_task', args: { projectId: 'p', agentId: 'a', description: 'd' } },
+      { name: 'run_workflow', args: { workflowName: 'w', projectId: 'p' } },
+      { name: 'list_workflows', args: {} },
+      { name: 'approve_gate', args: { gateId: 'g' } },
+      { name: 'reject_gate', args: { gateId: 'g' } },
+      { name: 'search_memory', args: { query: 'q' } },
+      { name: 'remember_fact', args: { content: 'c', category: 'convention', scope: 'project' } },
+      { name: 'list_skills', args: {} },
+      { name: 'get_cost_summary', args: { projectId: 'p' } },
+      { name: 'list_agents', args: {} },
+      { name: 'list_goals', args: {} },
+      { name: 'get_goal_runs', args: {} },
+      { name: 'list_pending_gates', args: {} },
+      { name: 'list_pending_attention', args: { projectId: 'p', agentId: 'a' } },
+      { name: 'decompose_task', args: { prompt: 'build a thing' } },
+      { name: 'get_workflow_runs', args: {} },
+      { name: 'list_events', args: {} },
+      { name: 'delete_fact', args: { factId: 'f1' } },
+    ];
+    for (const t of tools) {
+      const result = await executor.execute(t.name, t.args);
+      expect(result).toBeTruthy();
+      expect(result).not.toContain('Error: Unknown tool');
+    }
   });
 });
