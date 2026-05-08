@@ -41,4 +41,17 @@ interfaces:
     host: 0.0.0.0   # optional: bind to all interfaces
 ```
 
+To change the dashboard dev-server port, edit `web/vite.config.ts`:
+
+```ts
+server: {
+  port: 5174,                                            // was 5173
+  proxy: {
+    '/api': 'http://localhost:8080',                     // match the API port
+    '/ws':  { target: 'ws://localhost:8080', ws: true },
+    '/sse': 'http://localhost:8080',
+  },
+},
+```
+
 Data is stored in `~/.pragents/data/`.
