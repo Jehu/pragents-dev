@@ -181,8 +181,8 @@ function Dashboard() {
           <div className="flex flex-col gap-1">
             <label className="text-xs text-gray-500 dark:text-gray-400">Project</label>
             <select
-              value={selectedProject}
-              onChange={(e) => setProject(e.target.value)}
+              value={selectedProject || ''}
+              onChange={(e) => setProject(e.target.value || '')}
               className="border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 dark:text-gray-200"
             >
               <option value="">Any</option>
