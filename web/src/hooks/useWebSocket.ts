@@ -9,11 +9,7 @@ export function connectWebSocket(onEvent?: EventCallback) {
   if (onEvent) listeners.push(onEvent);
 
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  // In dev (Vite), connect directly to pragents server
-  const host = location.hostname === 'localhost' && location.port !== '3000'
-    ? 'localhost:3000'
-    : location.host;
-  const wsUrl = `${protocol}//${host}/ws`;
+  const wsUrl = `${protocol}//${location.host}/ws`;
 
   try {
     ws = new WebSocket(wsUrl);

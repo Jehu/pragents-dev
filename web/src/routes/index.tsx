@@ -6,7 +6,7 @@ export const Route = createFileRoute('/')({
   component: Dashboard,
 });
 
-const API = 'http://localhost:3000';
+const API = '';
 
 function Dashboard() {
   const { data: agents } = useQuery({

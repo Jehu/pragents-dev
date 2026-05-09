@@ -1,7 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
 
-const API = 'http://localhost:3000';
+const API = '';
 
 export const Route = createFileRoute('/tasks/$taskId')({
   component: TaskDetail,

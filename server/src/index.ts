@@ -183,14 +183,45 @@ export async function startServer() {
   app.route('/api/v1/skills', createSkillsRoute(skillRegistry, skillExtractor, eventBuffer));
   app.route('/api/v1/events', createEventsRoute(eventBuffer));
 
-  // Traces
+  // Traces (read from persisted events table)
   app.get('/api/v1/traces', (c) => {
-    return c.json(eventBuffer.getRecent(50, c.req.query('project') || undefined));
+    const db = getDb();
+    const taskId = c.req.query('taskId');
+    const project = c.req.query('project');
+    const limit = Math.min(parseInt(c.req.query('limit') || '50'), 200);
+    const since = c.req.query('since');
+
+    let sql = 'SELECT id, project_id as projectId, agent_id as agentId, task_id as taskId, type, data, timestamp FROM events WHERE 1=1';
+    const params: any[] = [];
+
+    if (taskId) { sql += ' AND task_id = ?'; params.push(taskId); }
+    if (project) { sql += ' AND project_id = ?'; params.push(project); }
+    if (since) { sql += ' AND timestamp > ?'; params.push(since); }
+
+    sql += ' ORDER BY id DESC LIMIT ?';
+    params.push(limit);
+
+    const rows = db.prepare(sql).all(...params) as any[];
+    const events = rows.map((r: any) => ({
+      ...r,
+      data: r.data ? JSON.parse(r.data) : null,
+    }));
+    // Return in chronological order
+    events.reverse();
+    return c.json(events);
   });
+
   app.get('/api/v1/traces/:id', (c) => {
-    const events = eventBuffer.getSince(parseInt(c.req.param('id')) - 1);
-    const event = events.find((e) => e.id === parseInt(c.req.param('id')));
-    return event ? c.json(event) : c.json({ error: 'Trace not found' }, 404);
+    const db = getDb();
+    const row = db.prepare(
+      'SELECT id, project_id as projectId, agent_id as agentId, task_id as taskId, type, data, timestamp FROM events WHERE id = ?',
+    ).get(c.req.param('id')) as any;
+
+    if (!row) return c.json({ error: 'Trace not found' }, 404);
+    return c.json({
+      ...row,
+      data: row.data ? JSON.parse(row.data) : null,
+    });
   });
 
   // Startup
@@ -236,6 +267,19 @@ export async function startServer() {
       ).run();
       if (result.changes > 0) {
         logger.info({ deleted: result.changes }, 'Session messages TTL cleanup');
+      }
+    } catch {}
+  }, 6 * 60 * 60 * 1000);
+
+  // Periodic events TTL cleanup (30 days)
+  setInterval(() => {
+    try {
+      const db = getDb();
+      const result = db.prepare(
+        "DELETE FROM events WHERE timestamp < datetime('now', '-30 days')",
+      ).run();
+      if (result.changes > 0) {
+        logger.info({ deleted: result.changes }, 'Events TTL cleanup');
       }
     } catch {}
   }, 6 * 60 * 60 * 1000);
