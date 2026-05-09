@@ -3,7 +3,6 @@ import type { TaskTracker } from '../../tasks/tracker.js';
 import type { AgentSessionManager } from '../../agents/manager.js';
 import type { ResolvedAgent } from '../../config/schema.js';
 import type { EventBuffer } from '../../events/buffer.js';
-import { getDb } from '../../db/sqlite.js';
 export function createTasksRoute(tracker: TaskTracker, agents: ResolvedAgent[], sessionMgr: AgentSessionManager, eventBuffer: EventBuffer) {
   const r = new Hono();
 
@@ -115,14 +114,13 @@ export function createTasksRoute(tracker: TaskTracker, agents: ResolvedAgent[], 
     return c.json({ status: 'complete' });
   });
 
-  // Soft-delete a task
+  // Soft-delete a task (marks as failed with deletion note)
   r.delete('/:id', (c) => {
     const task = tracker.get(c.req.param('id'));
     if (!task) return c.json({ error: 'Task not found' }, 404);
-    const db = getDb();
-    db.prepare("UPDATE tasks SET status = 'deleted' WHERE id = ?").run(task.id);
+    tracker.setFailed(task.id, 'Manually deleted by operator');
     eventBuffer.push(task.projectId, task.agentId, 'task.deleted', { taskId: task.id }, task.id);
-    return c.json({ status: 'deleted' });
+    return c.json({ status: 'failed', reason: 'Manually deleted by operator' });
   });
 
   return r;
