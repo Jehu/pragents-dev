@@ -2,6 +2,7 @@ import { createAgentSession, DefaultResourceLoader, SessionManager } from '@mari
 import type { ResolvedAgent } from '../config/schema.js';
 import type { SkillDef } from './schema.js';
 import type { AgentSessionManager } from '../agents/manager.js';
+import { getDb } from '../db/sqlite.js';
 import { z } from 'zod';
 import { mkdtempSync, rmSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -126,13 +127,15 @@ export class SkillExtractor {
       const raw = await responsePromise;
 
       // 6. Parse JSON, with one retry on failure
-      const parsed = this.parseWithRetry(raw, userMessage, session);
+      const parsed = await this.parseWithRetry(raw, userMessage, session);
       const proposal = LLMSkillProposalSchema.parse(parsed);
 
       // 7. Map to SkillDef
       const skill: SkillDef = {
         name: proposal.name,
         description: proposal.description,
+        source_session: sessionId,
+        source_agent: this.resolveAgentId(sessionId),
         tags: proposal.tags,
         steps: proposal.steps.map((s, i) => ({
           id: s.id || `step-${i + 1}`,
@@ -153,6 +156,7 @@ export class SkillExtractor {
         version: 1,
         extraction_metadata: {
           source_session_id: sessionId,
+          source_agent_id: this.resolveAgentId(sessionId),
           extracted_at: new Date().toISOString(),
           model_used: model,
           confidence: proposal.confidence,
@@ -198,6 +202,19 @@ export class SkillExtractor {
   private selectModel(): string {
     const haikuAgent = this.agents.find((a) => a.model?.includes('haiku'));
     return haikuAgent?.model || this.agents[0]?.model || 'claude-sonnet';
+  }
+
+  /**
+   * Resolve the agent ID that produced a session from the sessions table.
+   */
+  private resolveAgentId(sessionId: string): string | undefined {
+    try {
+      const db = getDb();
+      const row = db.prepare('SELECT agent_id FROM sessions WHERE id = ?').get(sessionId) as { agent_id: string } | undefined;
+      return row?.agent_id;
+    } catch {
+      return undefined;
+    }
   }
 
   /**
@@ -273,11 +290,9 @@ If no clear pattern is extractable, return:
     try {
       return JSON.parse(jsonMatch[0]);
     } catch {
-      // One retry
-      await session.prompt('Invalid JSON. Return ONLY the JSON object specified in the system prompt — no markdown, no explanation, no surrounding text.');
-
+      // One retry: subscribe BEFORE prompting to catch all events
       let retryText = '';
-      await new Promise<void>((resolve) => {
+      const retryPromise = new Promise<string>((resolve) => {
         const unsubscribe = session.subscribe((event: any) => {
           if (event.type === 'assistant_message' && event.message?.content) {
             const content = event.message.content;
@@ -289,11 +304,14 @@ If no clear pattern is extractable, return:
           }
           if (event.type === 'agent_end') {
             unsubscribe();
-            resolve();
+            resolve(retryText);
           }
         });
-        setTimeout(() => { unsubscribe(); resolve(); }, 60000);
+        setTimeout(() => { unsubscribe(); resolve(retryText || ''); }, 60000);
       });
+
+      await session.prompt('Invalid JSON. Return ONLY the JSON object specified in the system prompt — no markdown, no explanation, no surrounding text.');
+      retryText = await retryPromise;
 
       const retryMatch = retryText.match(/\{[\s\S]*\}/);
       if (!retryMatch) throw new Error('LLM failed to produce valid JSON after retry');
