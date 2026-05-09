@@ -245,7 +245,7 @@ These directories are compound-engineering pipeline artifacts. Never flag their 
 
 - `docs/brainstorms/*` — requirements documents (ce-brainstorm output)
 - `docs/plans/*.md` — implementation plans (ce-plan output)
-- `docs/solutions/*.md` — institutional learnings (ce-compound output)
+- `docs/solutions/*.md` — institutional learnings (ce-compound output). Searchable by YAML frontmatter fields (`module`, `tags`, `problem_type`). Consult before implementing features, debugging, or making decisions in documented areas.
 
 ---
 
