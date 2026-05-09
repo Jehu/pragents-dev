@@ -72,5 +72,14 @@ export function createMemoryRoute(engine: MemoryEngine) {
     return c.json({ total, byScope, byCategory });
   });
 
+  r.get('/sessions', (c) => {
+    const db = getDb();
+    const limit = Math.min(parseInt(c.req.query('limit') || '20'), 100);
+    const rows = db.prepare(
+      'SELECT id, agent_id as agentId, compressed_summary as summary, created_at as createdAt FROM sessions WHERE compressed_summary IS NOT NULL ORDER BY created_at DESC LIMIT ?',
+    ).all(limit);
+    return c.json(rows);
+  });
+
   return r;
 }
