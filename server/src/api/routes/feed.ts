@@ -40,11 +40,11 @@ export function createFeedRoute(tracker: TaskTracker, eventBuffer: EventBuffer) 
     if (!intent || intent === 'gates') {
       const pendingSkillsSql = `
         SELECT name, description, source_session as extractedFromSession,
-               source_agent as sourceAgent, extracted_at as extractedAt,
+               source_agent as sourceAgent, created_at as extractedAt,
                tags, tools, extraction_metadata_yaml as extractionMetadata
         FROM skills
         WHERE status = 'proposed'
-        ORDER BY extracted_at DESC
+        ORDER BY created_at DESC
         LIMIT 20
       `;
       const skills = db.prepare(pendingSkillsSql).all() as any[];
