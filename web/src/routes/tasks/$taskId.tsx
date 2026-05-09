@@ -28,9 +28,12 @@ function TaskDetail() {
     setActing(action);
     try {
       const method = action === 'delete' ? 'DELETE' : 'POST';
-      await fetch(`${API}/api/v1/tasks/${taskId}/${action}`, { method });
+      const url = action === 'delete'
+        ? `${API}/api/v1/tasks/${taskId}`
+        : `${API}/api/v1/tasks/${taskId}/${action}`;
+      await fetch(url, { method });
       queryClient.invalidateQueries({ queryKey: ['task', taskId] });
-      queryClient.invalidateQueries({ queryKey: ['tasks'] });
+      queryClient.invalidateQueries({ queryKey: ['tasks-list'] });
       queryClient.invalidateQueries({ queryKey: ['task-traces', taskId] });
     } finally {
       setActing(null);
