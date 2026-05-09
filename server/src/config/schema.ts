@@ -132,7 +132,7 @@ export function resolveAgent(
   agentId: string,
   projectId: string,
   agentConfig: AgentConfig,
-  projectConfig: ProjectConfig,
+  projectConfig: { name?: string; directory?: string },
   companyConfig: z.infer<typeof CompanyConfig>,
 ): ResolvedAgent {
   return {

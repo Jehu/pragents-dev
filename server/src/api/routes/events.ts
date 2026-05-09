@@ -32,7 +32,7 @@ export function createEventsRoute(buffer: EventBuffer): Hono {
 
     // SSE requires raw stream access – use the Node http Response
     // that Hono wraps. We fall back gracefully if not available.
-    const nodeRes = (c.env?.outgoing ?? c.runtime) as any;
+    const nodeRes = ((c.env as any)?.outgoing ?? (c as any).runtime) as any;
 
     // Try to get the underlying Node response through different Hono versions
     const res = c.req.raw;

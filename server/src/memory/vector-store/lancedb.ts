@@ -20,16 +20,17 @@ async function getEmbedding(text: string, config: EmbeddingConfig): Promise<numb
 
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 15000);
+  let response: any;
   try {
-    const response = await fetch(`${baseUrl}/embeddings`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({ model, input: text }),
-    signal: ctrl.signal,
-  });
+    response = await fetch(`${baseUrl}/embeddings`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({ model, input: text }),
+      signal: ctrl.signal,
+    });
   } finally { clearTimeout(timer); }
 
   if (!response.ok) {
@@ -121,8 +122,8 @@ export class LanceDbVectorStore implements VectorStore {
         agentId: '',
         vector: new Array(this.config.dimensions || 384).fill(0),
       };
-      this.table = await this.db!.createTable(this.tableName, [seedRecord]);
-      await this.table.delete('id = \'__seed__\'');
+      this.table = await (this.db as any).createTable(this.tableName, [seedRecord]) as any;
+      await (this.table as any).delete('id = \'__seed__\'');
     }
     return this.table!;
   }
@@ -147,7 +148,7 @@ export class LanceDbVectorStore implements VectorStore {
       vector,
     };
 
-    await table.add([record]);
+    await (table as any).add([record] as any);
   }
 
   async search(query: string, filter?: Record<string, string>, limit: number = 10): Promise<ScoredDoc[]> {
@@ -205,3 +206,4 @@ export class LanceDbVectorStore implements VectorStore {
     }
   }
 }
+

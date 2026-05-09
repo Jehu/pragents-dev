@@ -165,7 +165,7 @@ export class AgentSessionManager {
         if (event.type === 'agent_end') {
           unsubscribe();
           // Read last assistant message, filtering out thinking blocks
-          const msgs = handle.session.agent?.state?.messages || [];
+          const msgs = (handle.session.agent as any)?.state?.messages || [];
           let responseText = '';
           for (let i = msgs.length - 1; i >= 0; i--) {
             if (msgs[i].role === 'assistant' && msgs[i].content) {
@@ -186,9 +186,9 @@ export class AgentSessionManager {
         // Handle custom tool calls from the agent
         if (event.type === 'custom_tool_call' && this.toolExecutor) {
           this.toolExecutor.execute(event.name, event.args || {}).then((result) => {
-            try { handle.session.sendToolResult?.(event.callId, result); } catch {}
+            try { (handle.session as any).sendToolResult?.(event.callId, result); } catch {}
           }).catch((err) => {
-            try { handle.session.sendToolResult?.(event.callId, `Error: ${err?.message || String(err)}`); } catch {}
+            try { (handle.session as any).sendToolResult?.(event.callId, `Error: ${err?.message || String(err)}`); } catch {}
           });
         }
       });

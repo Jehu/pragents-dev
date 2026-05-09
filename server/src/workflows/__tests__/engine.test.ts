@@ -22,15 +22,15 @@ const agents = [
 const simpleWf: WorkflowDef = {
   name: 'simple-test',
   steps: [
-    { id: 'step1', agent: 'dev@test-project', prompt: 'Do step 1' },
+    { type: 'agent' as const, id: 'step1', agent: 'dev@test-project', prompt: 'Do step 1' },
   ],
 };
 
 const twoStepWf: WorkflowDef = {
   name: 'two-step',
   steps: [
-    { id: 'step1', agent: 'dev@test-project', prompt: 'Do step 1' },
-    { id: 'step2', agent: 'seo@test-project', prompt: 'Do step 2' },
+    { type: 'agent' as const, id: 'step1', agent: 'dev@test-project', prompt: 'Do step 1' },
+    { type: 'agent' as const, id: 'step2', agent: 'seo@test-project', prompt: 'Do step 2' },
   ],
 };
 
@@ -38,7 +38,7 @@ const parallelWf: WorkflowDef = {
   name: 'parallel-test',
   steps: [
     {
-      id: 'group1', parallel: [
+      type: 'agent' as const, id: 'group1', parallel: [
         { id: 'p1', agent: 'dev@test-project', prompt: 'Parallel 1' },
         { id: 'p2', agent: 'seo@test-project', prompt: 'Parallel 2' },
       ],
@@ -49,8 +49,8 @@ const parallelWf: WorkflowDef = {
 const conditionalWf: WorkflowDef = {
   name: 'conditional-test',
   steps: [
-    { id: 'step1', agent: 'dev@test-project', prompt: 'Do step 1', output: 'result1' },
-    { id: 'step2', agent: 'seo@test-project', prompt: 'Do step 2', condition: "result1.output includes 'done'" },
+    { type: 'agent' as const, id: 'step1', agent: 'dev@test-project', prompt: 'Do step 1', output: 'result1' },
+    { type: 'agent' as const, id: 'step2', agent: 'seo@test-project', prompt: 'Do step 2', condition: "result1.output includes 'done'" },
   ],
 };
 
@@ -96,7 +96,7 @@ describe('WorkflowEngine', () => {
   it('executes conditional step when condition passes', async () => {
     const mockWithResult = {
       dispatch: vi.fn().mockResolvedValue('Task done successfully'),
-    };
+    } as any;
     const engine = new WorkflowEngine(tracker, router, mockWithResult, agents, eventBuffer, 'test-project');
     await engine.execute(conditionalWf);
     // Condition matches → both steps execute
@@ -106,7 +106,7 @@ describe('WorkflowEngine', () => {
   it('skips conditional step when condition fails', async () => {
     const mockWithResult = {
       dispatch: vi.fn().mockResolvedValue('Step 1 result: failure'),
-    };
+    } as any;
     const engine = new WorkflowEngine(tracker, router, mockWithResult, agents, eventBuffer, 'test-project');
     await engine.execute(conditionalWf);
     // Condition $result1 contains 'done' fails → step2 skipped
@@ -116,7 +116,7 @@ describe('WorkflowEngine', () => {
   it('failRun on step failure', async () => {
     const failing = {
       dispatch: vi.fn().mockRejectedValue(new Error('Boom')),
-    };
+    } as any;
     const engine = new WorkflowEngine(tracker, router, failing, agents, eventBuffer, 'test-project');
     await expect(engine.execute(simpleWf)).rejects.toThrow('Boom');
   });

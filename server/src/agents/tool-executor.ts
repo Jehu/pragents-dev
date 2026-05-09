@@ -89,12 +89,7 @@ export class ToolExecutor {
         }
         case 'remember_fact': {
           const { content, category, scope } = args as { content: string; category: string; scope: string };
-          const id = await this.deps.memory.remember({
-            content,
-            category,
-            scope: scope || 'project',
-            agentId: 'tool',
-          } as any);
+          const id = await (this.deps.memory.remember as any)(scope || 'project', category, content, 'tool');
           return JSON.stringify({ id, status: 'remembered' });
         }
         case 'list_skills': {

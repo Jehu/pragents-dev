@@ -7,6 +7,12 @@ import type { EventBuffer } from '../events/buffer.js';
 import { getDb } from '../db/sqlite.js';
 import { randomUUID } from 'node:crypto';
 
+/**
+ * Minimal step shape accepted by resolveAgent/buildPrompt.
+ * Both WorkflowStep and ParallelStep share these fields.
+ */
+type StepLike = { agent?: WorkflowStep['agent']; prompt?: string; input?: string; output?: string; timeout?: number; condition?: string };
+
 export class WorkflowEngine {
   private projectId: string;
 
@@ -126,13 +132,13 @@ export class WorkflowEngine {
     }
   }
 
-  private async resolveAgent(step: WorkflowStep): Promise<string> {
-    if (!step.agent) throw new Error(`Step "${step.id}" has no agent configured`);
+  private async resolveAgent(step: StepLike): Promise<string> {
+    if (!step.agent) throw new Error('Step has no agent configured');
     if (typeof step.agent === 'string') return step.agent;
     return this.router.resolveAgent(step.prompt || '', this.projectId, step.agent.prefer);
   }
 
-  private buildPrompt(step: WorkflowStep, outputs: Record<string, string>): string {
+  private buildPrompt(step: StepLike, outputs: Record<string, string>): string {
     let prompt = step.prompt || '';
     if (step.input && outputs[step.input]) {
       prompt = `Context from previous step:\n${outputs[step.input]}\n\n---\n\nTask:\n${prompt}`;
@@ -152,9 +158,8 @@ export class WorkflowEngine {
       const gate = db.prepare('SELECT status FROM human_gates WHERE id = ?').get(gateId) as any;
       if (gate?.status === 'approved' || gate?.status === 'rejected') return;
       await new Promise(resolve => setTimeout(resolve, delay));
-      delay = Math.min(delay * 1.5, 30000); // backoff with jitter: 2s → 3s → 4.5s → ... → 30s
+      delay = Math.min(delay * 1.5, 30000);
     }
-    // Timed out
     db.prepare("UPDATE human_gates SET status = 'timed_out' WHERE id = ?").run(gateId);
     this.emit('gate.timed_out', { gateId, workflowRunId: runId, stepId, projectId: this.projectId });
   }
