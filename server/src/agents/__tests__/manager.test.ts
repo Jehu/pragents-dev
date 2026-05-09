@@ -50,9 +50,9 @@ describe('AgentSessionManager', () => {
       isStreaming: false,
     };
     (createAgentSession as any).mockResolvedValue({ session: mockSession });
-    (DefaultResourceLoader as any).mockImplementation(() => ({
-      reload: vi.fn().mockResolvedValue(undefined),
-    }));
+    (DefaultResourceLoader as any).mockImplementation(function () {
+      return { reload: vi.fn().mockResolvedValue(undefined) };
+    });
 
     const memory = new MemoryEngine(10);
     const mgr = new AgentSessionManager(memory);
@@ -83,9 +83,9 @@ describe('AgentSessionManager', () => {
       },
     };
     (createAgentSession as any).mockResolvedValue({ session: mockSession });
-    (DefaultResourceLoader as any).mockImplementation(() => ({
-      reload: vi.fn().mockResolvedValue(undefined),
-    }));
+    (DefaultResourceLoader as any).mockImplementation(function () {
+      return { reload: vi.fn().mockResolvedValue(undefined) };
+    });
 
     const memory = new MemoryEngine(10);
     const mgr = new AgentSessionManager(memory);
@@ -193,9 +193,9 @@ describe('Auto-fact collection in dispatch', () => {
       },
     };
     (createAgentSession as any).mockResolvedValue({ session: mockSession });
-    (DefaultResourceLoader as any).mockImplementation(() => ({
-      reload: vi.fn().mockResolvedValue(undefined),
-    }));
+    (DefaultResourceLoader as any).mockImplementation(function () {
+      return { reload: vi.fn().mockResolvedValue(undefined) };
+    });
 
     const memory = new MemoryEngine(100);
     const mgr = new AgentSessionManager(memory);
