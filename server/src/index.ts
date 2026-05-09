@@ -113,7 +113,7 @@ export async function startServer() {
   const { loaded: skillsLoaded, warnings: skillWarnings } = skillRegistry.load();
   console.log(`Skills loaded: ${skillsLoaded.join(', ') || 'none'}`);
   for (const w of skillWarnings) console.warn(`Skill warning: ${w}`);
-  const skillExtractor = new SkillExtractor();
+  const skillExtractor = new SkillExtractor(sessionMgr, agents);
 
   // Hot-reload: watch file changes and reload registries
   let reloadTimer: ReturnType<typeof setTimeout> | null = null;
@@ -180,7 +180,7 @@ export async function startServer() {
   app.route('/api/v1/gates', createGatesRoute(eventBuffer));
   app.route('/api/v1/feed', createFeedRoute(tracker, eventBuffer));
   app.route('/api/v1/memory', createMemoryRoute(memory));
-  app.route('/api/v1/skills', createSkillsRoute(skillRegistry, skillExtractor));
+  app.route('/api/v1/skills', createSkillsRoute(skillRegistry, skillExtractor, eventBuffer));
   app.route('/api/v1/events', createEventsRoute(eventBuffer));
 
   // Traces

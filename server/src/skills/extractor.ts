@@ -1,209 +1,302 @@
-import { randomUUID } from 'node:crypto';
-import type { SkillDef, SkillStep } from './schema.js';
+import { createAgentSession, DefaultResourceLoader, SessionManager } from '@mariozechner/pi-coding-agent';
+import type { ResolvedAgent } from '../config/schema.js';
+import type { SkillDef } from './schema.js';
+import type { AgentSessionManager } from '../agents/manager.js';
+import { z } from 'zod';
+import { mkdtempSync, rmSync, mkdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 
 /**
- * Pattern heuristics used to detect repeatable steps in agent output.
+ * Zod schema for the JSON the LLM extraction prompt produces.
+ * Slightly looser than SkillDef — we validate and then map to SkillDef.
  */
-interface DetectedPattern {
-  stepType: string;
-  agentHint: string;
-  prompt: string;
-  output?: string;
-}
+const LLMSkillProposalSchema = z.object({
+  name: z.string().min(1),
+  description: z.string().optional(),
+  tags: z.array(z.string()).optional(),
+  steps: z.array(z.object({
+    id: z.string().optional(),
+    agent: z.string().optional(),
+    prompt: z.string(),
+    output: z.string().optional(),
+  })),
+  tools: z.array(z.string()).optional(),
+  parameters: z.array(z.object({
+    name: z.string(),
+    description: z.string(),
+    type: z.enum(['string', 'number', 'boolean', 'string[]']).optional().default('string'),
+    default: z.any().optional(),
+  })).optional(),
+  examples: z.array(z.object({
+    input: z.record(z.any()),
+    expected_output: z.any(),
+  })).optional(),
+  scope: z.enum(['company', 'project', 'agent']).optional().default('project'),
+  confidence: z.number().min(0).max(1).optional(),
+});
 
 /**
- * SkillExtractor analyzes completed session output to identify
- * repeatable patterns and extract them as skill templates.
+ * SkillExtractor analyzes completed agent session traces using an LLM
+ * to identify repeatable patterns and extract them as skill templates.
  *
- * The extraction works by:
- * 1. Looking for structured step indicators in the output
- *    (e.g., numbered steps, bullet-point plans, section headers)
- * 2. Detecting action verbs and agent-task patterns
- * 3. Packaging discovered patterns into SkillDef templates
+ * Replaces the old regex-based implementation (M1–M4) with the M5
+ * LLM pipeline: pattern detection → generalization → prompt distillation
+ * → proposal generation.
  */
 export class SkillExtractor {
+  private sessionMgr: AgentSessionManager;
+  private agents: ResolvedAgent[];
+
+  constructor(sessionMgr: AgentSessionManager, agents: ResolvedAgent[]) {
+    this.sessionMgr = sessionMgr;
+    this.agents = agents;
+  }
+
   /**
-   * Analyze a completed session's output and extract skill templates.
+   * Extract a skill template from a completed agent session trace.
    *
-   * @param sessionOutput - The full text response from a completed agent session
-   * @param agentId - The agent that produced the output (for provenance)
-   * @param sessionId - The session identifier (for provenance)
-   * @returns Array of extracted skill definitions (may be empty)
+   * @param sessionId - The session ID whose trace to analyze
+   * @returns A SkillDef proposal ready for human review
+   * @throws If the session has no persisted messages or extraction fails
    */
-  extract(sessionOutput: string, agentId: string, sessionId: string): SkillDef[] {
-    const patterns = this.detectPatterns(sessionOutput);
-    if (patterns.length < 2) {
-      // Not enough structure to form a useful skill
-      return [];
+  async extract(sessionId: string): Promise<SkillDef> {
+    // 1. Load session messages
+    const messages = this.sessionMgr.getSessionMessages(sessionId);
+    if (!messages || messages.length === 0) {
+      throw new Error(`No messages found for session ${sessionId}`);
     }
 
-    const tags = this.inferTags(sessionOutput);
-    const steps: SkillStep[] = patterns.map((p, i) => ({
-      id: `step-${i + 1}`,
-      agent: p.agentHint || undefined,
-      prompt: p.prompt,
-      output: p.output,
-    }));
+    // 2. Prepare trace text (truncate large traces for context window)
+    const traceText = this.prepareTrace(messages);
 
-    const skillName = this.generateSkillName(sessionOutput, tags);
-    const skill: SkillDef = {
-      name: skillName,
-      description: this.generateDescription(sessionOutput),
-      source_session: sessionId,
-      source_agent: agentId,
-      extracted_at: new Date().toISOString(),
-      tags,
-      steps,
+    // 3. Select extraction model (cheapest capable, like NLDecomposer)
+    const model = this.selectModel();
+
+    // 4. Build the extraction prompt
+    const systemPrompt = this.buildExtractionPrompt();
+    const userMessage = `Session trace to analyze:\n\n${traceText}`;
+
+    // 5. Isolated pi SDK session (NLDecomposer pattern)
+    const tmpDir = mkdtempSync(join(tmpdir(), 'pragents-skill-extract-'));
+    mkdirSync(join(tmpDir, '.pi'), { recursive: true });
+
+    const loader = new DefaultResourceLoader({
+      cwd: tmpDir,
+      noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true,
+      systemPromptOverride: () => systemPrompt,
+    });
+    await loader.reload();
+
+    const { session } = await createAgentSession({
+      cwd: tmpDir,
+      resourceLoader: loader,
+      sessionManager: SessionManager.inMemory() as any,
+      model: model as any,
+    });
+
+    try {
+      // Collect response
+      let responseText = '';
+      const responsePromise = new Promise<string>((resolve) => {
+        const unsubscribe = session.subscribe((event: any) => {
+          if (event.type === 'assistant_message' && event.message?.content) {
+            const content = event.message.content;
+            responseText += typeof content === 'string'
+              ? content
+              : Array.isArray(content)
+                ? content.map((b: any) => b.text || '').join('')
+                : '';
+          }
+          if (event.type === 'agent_end') {
+            unsubscribe();
+            resolve(responseText);
+          }
+        });
+        // 120s timeout with cleanup
+        setTimeout(() => {
+          unsubscribe();
+          try { session.dispose(); } catch {}
+          resolve(responseText || '');
+        }, 120000);
+      });
+
+      await session.prompt(userMessage);
+      const raw = await responsePromise;
+
+      // 6. Parse JSON, with one retry on failure
+      const parsed = this.parseWithRetry(raw, userMessage, session);
+      const proposal = LLMSkillProposalSchema.parse(parsed);
+
+      // 7. Map to SkillDef
+      const skill: SkillDef = {
+        name: proposal.name,
+        description: proposal.description,
+        tags: proposal.tags,
+        steps: proposal.steps.map((s, i) => ({
+          id: s.id || `step-${i + 1}`,
+          agent: s.agent,
+          prompt: s.prompt,
+          output: s.output,
+        })),
+        tools: proposal.tools,
+        parameters: proposal.parameters?.map((p) => ({
+          name: p.name,
+          description: p.description,
+          type: p.type || 'string',
+          default: p.default,
+        })),
+        examples: proposal.examples,
+        scope: proposal.scope || 'project',
+        status: 'proposed',
+        version: 1,
+        extraction_metadata: {
+          source_session_id: sessionId,
+          extracted_at: new Date().toISOString(),
+          model_used: model,
+          confidence: proposal.confidence,
+        },
+      };
+
+      return skill;
+    } finally {
+      session.dispose();
+      try { rmSync(tmpDir, { recursive: true }); } catch {}
+    }
+  }
+
+  /**
+   * Prepare the message trace for the LLM context window.
+   * For large traces (>200 messages), keep first 50 and last 50,
+   * insert a placeholder for the middle.
+   */
+  private prepareTrace(messages: any[]): string {
+    const MAX_MESSAGES = 200;
+    const HEAD_COUNT = 50;
+    const TAIL_COUNT = 50;
+
+    if (messages.length <= MAX_MESSAGES) {
+      return JSON.stringify(messages, null, 2);
+    }
+
+    const head = messages.slice(0, HEAD_COUNT);
+    const tail = messages.slice(-TAIL_COUNT);
+    const skipped = messages.length - HEAD_COUNT - TAIL_COUNT;
+
+    const placeholder = {
+      role: 'system',
+      content: `[… ${skipped} messages omitted for brevity — contains intermediate tool calls, corrections, and revisions …]`,
     };
 
-    return [skill];
+    return JSON.stringify([...head, placeholder, ...tail], null, 2);
   }
 
   /**
-   * Detect repeatable action patterns in agent output.
-   *
-   * Looks for:
-   * - Numbered step patterns: "1. ..." or "Step 1: ..."
-   * - Bullet-point action items
-   * - Section headers followed by descriptions
-   * - Action-verb-led sentences that suggest distinct tasks
+   * Select the extraction model — prefer Haiku (cheapest), fall back to first agent's model.
    */
-  detectPatterns(text: string): DetectedPattern[] {
-    const patterns: DetectedPattern[] = [];
+  private selectModel(): string {
+    const haikuAgent = this.agents.find((a) => a.model?.includes('haiku'));
+    return haikuAgent?.model || this.agents[0]?.model || 'claude-sonnet';
+  }
 
-    // Strategy 1: Numbered steps (e.g., "1. Research...", "2. Draft...")
-    const numberedStepRegex = /(?:^|\n)\s*(?:step\s*)?(\d+)[.:)\]]\s+(.+)/gi;
-    let match: RegExpExecArray | null;
-    while ((match = numberedStepRegex.exec(text)) !== null) {
-      const prompt = match[2].trim();
-      if (prompt.length > 10) {
-        patterns.push({
-          stepType: 'numbered',
-          agentHint: this.detectAgentHint(prompt),
-          prompt,
-          output: `step-${match[1]}-output`,
+  /**
+   * Build the system prompt that instructs the LLM how to extract a skill.
+   */
+  private buildExtractionPrompt(): string {
+    return `You are a skill extraction specialist. Analyze the following agent session trace and extract a reusable skill template.
+
+A skill is a repeatable workflow pattern: a sequence of agent actions with prompts, detected tools, and parameters that generalize concrete session details.
+
+## Extraction Rules
+
+1. **Pattern Detection**: Identify the sequence of actions the agent performed. Look for structured steps (research, analysis, writing, review, deployment, etc.), tool calls, and output formats.
+
+2. **Generalization**: Replace concrete values from the session with parameters. For example, "Winterjacken" becomes "{product_category}", "https://example.com/page" becomes "{url}". Define each parameter with name, description, type, and default value.
+
+3. **Prompt Distillation**: For each step, extract the most effective prompt — the one that produced the final correct result, not early failed attempts. If the agent corrected itself, use the corrected version.
+
+4. **Tool Detection**: List all tools the agent actually called during the session (not all available tools).
+
+5. **Examples**: If the session includes specific input/output pairs that illustrate the pattern, include them as examples.
+
+6. **Scope**: Recommend a scope: "company" if the pattern applies across all projects, "project" if it's project-specific, "agent" if it's specific to one agent type.
+
+7. **Confidence**: Score your confidence in this extraction (0.0–1.0). High confidence: clear patterns, multiple iterations, well-defined output. Low confidence: ambiguous, single occurrence, unclear structure.
+
+## Output Format
+
+Return ONLY a valid JSON object with this structure — no markdown, no explanation:
+
+{
+  "name": "kebab-case-skill-name",
+  "description": "What this skill accomplishes",
+  "tags": ["tag1", "tag2"],
+  "steps": [
+    {
+      "id": "step-1",
+      "agent": "optional-agent-hint",
+      "prompt": "The distilled prompt for this step, with {parameters}",
+      "output": "optional-output-key"
+    }
+  ],
+  "tools": ["tool_name_1", "tool_name_2"],
+  "parameters": [
+    {
+      "name": "parameter_name",
+      "description": "What this parameter represents",
+      "type": "string",
+      "default": "optional default value"
+    }
+  ],
+  "examples": [
+    {
+      "input": {"param": "value"},
+      "expected_output": {"key": "value"}
+    }
+  ],
+  "scope": "project",
+  "confidence": 0.85
+}
+
+If no clear pattern is extractable, return:
+{"name":"no-pattern","description":"No extractable pattern found","steps":[],"confidence":0.0}`;
+  }
+
+  /**
+   * Parse JSON from LLM response, with one retry on failure.
+   */
+  private async parseWithRetry(raw: string, originalPrompt: string, session: any): Promise<any> {
+    const jsonMatch = raw.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) throw new Error('No JSON found in LLM response');
+
+    try {
+      return JSON.parse(jsonMatch[0]);
+    } catch {
+      // One retry
+      await session.prompt('Invalid JSON. Return ONLY the JSON object specified in the system prompt — no markdown, no explanation, no surrounding text.');
+
+      let retryText = '';
+      await new Promise<void>((resolve) => {
+        const unsubscribe = session.subscribe((event: any) => {
+          if (event.type === 'assistant_message' && event.message?.content) {
+            const content = event.message.content;
+            retryText += typeof content === 'string'
+              ? content
+              : Array.isArray(content)
+                ? content.map((b: any) => b.text || '').join('')
+                : '';
+          }
+          if (event.type === 'agent_end') {
+            unsubscribe();
+            resolve();
+          }
         });
-      }
+        setTimeout(() => { unsubscribe(); resolve(); }, 60000);
+      });
+
+      const retryMatch = retryText.match(/\{[\s\S]*\}/);
+      if (!retryMatch) throw new Error('LLM failed to produce valid JSON after retry');
+      return JSON.parse(retryMatch[0]);
     }
-
-    if (patterns.length >= 2) return patterns;
-
-    // Strategy 2: Bullet-point action items
-    const bulletRegex = /(?:^|\n)\s*[-*•]\s+(.+)/gi;
-    patterns.length = 0;
-    while ((match = bulletRegex.exec(text)) !== null) {
-      const prompt = match[1].trim();
-      if (prompt.length > 10 && this.isActionable(prompt)) {
-        patterns.push({
-          stepType: 'bullet',
-          agentHint: this.detectAgentHint(prompt),
-          prompt,
-        });
-      }
-    }
-
-    if (patterns.length >= 2) return patterns;
-
-    // Strategy 3: Section headers (## or ### followed by content)
-    const sectionRegex = /(?:^|\n)#{1,3}\s+(.+)\n([^\n#]+(?:\n(?![#])[^\n]+)*)/gi;
-    patterns.length = 0;
-    while ((match = sectionRegex.exec(text)) !== null) {
-      const title = match[1].trim();
-      const body = match[2].trim();
-      if (body.length > 10) {
-        patterns.push({
-          stepType: 'section',
-          agentHint: this.detectAgentHint(title + ' ' + body),
-          prompt: `${title}: ${body.substring(0, 200)}`,
-        });
-      }
-    }
-
-    return patterns;
-  }
-
-  /**
-   * Detect if a prompt suggests a specific agent type.
-   */
-  private detectAgentHint(text: string): string {
-    const lower = text.toLowerCase();
-    if (/\b(seo|keyword|meta|search rank| SERP)\b/i.test(text)) return 'seo';
-    if (/\b(write|draft|article|blog|content|copy)\b/i.test(text)) return 'content';
-    if (/\b(review|feedback|quality|check)\b/i.test(text)) return 'pm';
-    if (/\b(code|implement|debug|build|deploy|test)\b/i.test(text)) return 'dev';
-    return '';
-  }
-
-  /**
-   * Check if a sentence is action-oriented (starts with a verb or contains
-   * action-oriented language).
-   */
-  private isActionable(text: string): boolean {
-    const actionVerbs = /^(?:create|write|build|implement|review|analyze|research|design|test|deploy|optimize|generate|draft|check|fix|update|refactor|configure|setup|install|run|execute|monitor|track|collect|extract|transform|process|validate|verify|document|plan|schedule|notify|send|prepare|organize|structure|compile|package|publish|release)/i;
-    return actionVerbs.test(text.trim());
-  }
-
-  /**
-   * Infer tags from the session output content.
-   */
-  private inferTags(text: string): string[] {
-    const tags: string[] = [];
-    const lower = text.toLowerCase();
-
-    const tagPatterns: Record<string, RegExp> = {
-      testing: /\b(tests?|spec|vitest|jest|coverage)\b/i,
-      deployment: /\b(deploy|release|ci\/?cd|pipeline)\b/i,
-      documentation: /\b(doc|readme|guide|tutorial|apidoc)\b/i,
-      code_review: /\b(review|pr|pull request|feedback)\b/i,
-      debugging: /\b(debug|error|bug|fix|stack trace)\b/i,
-      research: /\b(research|investigate|analyze|explore)\b/i,
-      content: /\b(blog|article|content|draft|writing)\b/i,
-      seo: /\b(seo|keyword|meta|ranking)\b/i,
-      refactoring: /\b(refactor|clean|simplify|restructure)\b/i,
-      security: /\b(security|vulnerability|auth|permission)\b/i,
-      performance: /\b(performance|optimize|speed|latency|benchmark)\b/i,
-    };
-
-    for (const [tag, regex] of Object.entries(tagPatterns)) {
-      if (regex.test(text)) {
-        tags.push(tag);
-      }
-    }
-
-    if (tags.length === 0) {
-      tags.push('general');
-    }
-
-    return tags;
-  }
-
-  /**
-   * Generate a descriptive skill name from the session output.
-   */
-  private generateSkillName(text: string, tags: string[]): string {
-    // Take first meaningful line or first 60 chars
-    const firstLine = text.split('\n').find((l) => l.trim().length > 10)?.trim() || text.substring(0, 60);
-    // Clean up for use as a name
-    let name = firstLine
-      .replace(/[^a-zA-Z0-9\s-]/g, '')
-      .replace(/\s+/g, '-')
-      .substring(0, 50)
-      .toLowerCase()
-      .replace(/^-+|-+$/g, '');
-
-    if (!name) {
-      name = `skill-${tags.join('-')}-${randomUUID().substring(0, 8)}`;
-    }
-
-    return name;
-  }
-
-  /**
-   * Generate a short description from the output text.
-   */
-  private generateDescription(text: string): string {
-    const firstParagraph = text.split('\n\n')[0]?.trim() || '';
-    if (firstParagraph.length <= 200) return firstParagraph;
-    return firstParagraph.substring(0, 197) + '...';
   }
 }

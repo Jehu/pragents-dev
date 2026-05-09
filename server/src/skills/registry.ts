@@ -77,7 +77,7 @@ export class SkillRegistry {
       validated.scope || 'project',
       validated.status || 'draft',
       validated.version || 1,
-      validated.extraction_metadata ? stringifyYaml(validated.extraction_metadata) : null,
+      validated.extraction_metadata ? JSON.stringify(validated.extraction_metadata) : null,
     );
   }
 

@@ -36,6 +36,28 @@ export function createFeedRoute(tracker: TaskTracker, eventBuffer: EventBuffer) 
       result.gates = db.prepare(gatesSql).all();
     }
 
+    // --- Pending Skills (M5: extracted proposals waiting for approval) ---
+    if (!intent || intent === 'gates') {
+      const pendingSkillsSql = `
+        SELECT name, description, source_session as extractedFromSession,
+               source_agent as sourceAgent, extracted_at as extractedAt,
+               tags, tools, extraction_metadata_yaml as extractionMetadata
+        FROM skills
+        WHERE status = 'proposed'
+        ORDER BY extracted_at DESC
+        LIMIT 20
+      `;
+      const skills = db.prepare(pendingSkillsSql).all() as any[];
+      result.pendingSkills = skills.map((s: any) => ({
+        ...s,
+        tags: s.tags ? JSON.parse(s.tags) : [],
+        tools: s.tools ? JSON.parse(s.tools) : [],
+        extractionMetadata: s.extractionMetadata ? (() => {
+          try { return JSON.parse(s.extractionMetadata); } catch { return s.extractionMetadata; }
+        })() : null,
+      }));
+    }
+
     // --- Needs Review Tasks ---
     if (!intent || intent === 'review') {
       const reviewTaskParams = [...queryParams];
