@@ -55,7 +55,7 @@ function App() {
   const { data: events } = useQuery({ queryKey: ['events'], queryFn: () => fetch(`${API}/api/v1/traces?limit=50`).then(r => r.json()), refetchInterval: 2000 });
 
   const agentList = Array.isArray(agents) ? agents : [];
-  const taskList = Array.isArray(tasks) ? tasks : [];
+  const taskList = Array.isArray(tasks?.tasks) ? tasks.tasks : Array.isArray(tasks) ? tasks : [];
   const eventList = Array.isArray(events) ? events : [];
 
   const dispatch = async () => {

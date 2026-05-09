@@ -24,12 +24,7 @@ export interface SSEOptions {
 }
 
 function buildURL(project?: string): string {
-  const protocol = location.protocol === 'https:' ? 'https:' : 'http:';
-  // In dev (Vite), connect directly to pragents server
-  const host = location.hostname === 'localhost' && location.port !== '3000'
-    ? 'localhost:3000'
-    : location.host;
-  const base = `${protocol}//${host}/api/v1/events/stream`;
+  const base = `${location.protocol}//${location.host}/api/v1/events/stream`;
   if (project) {
     return `${base}?project=${encodeURIComponent(project)}`;
   }
