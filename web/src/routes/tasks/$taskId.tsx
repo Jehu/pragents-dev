@@ -1,31 +1,79 @@
-import { createFileRoute } from '@tanstack/react-router';
-import { useQuery } from '@tanstack/react-query';
-
-const API = '';
+import { createFileRoute, Link } from '@tanstack/react-router';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useState } from 'react';
 
 export const Route = createFileRoute('/tasks/$taskId')({
   component: TaskDetail,
 });
 
+const API = '';
+
 function TaskDetail() {
   const { taskId } = Route.useParams();
+  const queryClient = useQueryClient();
+  const [acting, setActing] = useState<string | null>(null);
+
   const { data } = useQuery({
     queryKey: ['task', taskId],
     queryFn: () => fetch(`${API}/api/v1/tasks/${taskId}`).then((r) => r.json()),
   });
 
+  // Task timeline
+  const { data: traces } = useQuery({
+    queryKey: ['task-traces', taskId],
+    queryFn: () => fetch(`${API}/api/v1/traces?taskId=${taskId}&limit=50`).then((r) => r.json()),
+  });
+
+  const handleAction = async (action: string) => {
+    setActing(action);
+    try {
+      const method = action === 'delete' ? 'DELETE' : 'POST';
+      await fetch(`${API}/api/v1/tasks/${taskId}/${action}`, { method });
+      queryClient.invalidateQueries({ queryKey: ['task', taskId] });
+      queryClient.invalidateQueries({ queryKey: ['tasks'] });
+      queryClient.invalidateQueries({ queryKey: ['task-traces', taskId] });
+    } finally {
+      setActing(null);
+    }
+  };
+
   if (!data) return <p className="text-gray-400">Loading task...</p>;
   if (data.error) return <p className="text-red-500">{data.error}</p>;
 
   const task = data as any;
+  const traceList = Array.isArray(traces) ? traces : [];
 
   return (
     <div className="max-w-3xl">
-      <a href="/tasks" className="text-blue-600 text-sm mb-4 inline-block">← Back to tasks</a>
+      <Link to="/tasks" className="text-blue-600 text-sm mb-4 inline-block">← Back to tasks</Link>
       <div className="bg-white rounded-xl border border-gray-200 p-6 mt-2">
         {task.status === 'needs_review' && (
-          <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4 text-sm text-amber-800">
-            This task was interrupted. Review the partial results or re-dispatch.
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-4">
+            <div className="text-sm font-medium text-amber-800 mb-2">
+              ⚠️ This task was interrupted and needs review.
+            </div>
+            {task.reason && (
+              <div className="text-sm text-amber-700 mb-3">
+                <span className="font-medium">Reason:</span> {task.reason}
+              </div>
+            )}
+            <div className="flex gap-2">
+              <button
+                onClick={() => handleAction('retry')}
+                disabled={acting !== null}
+                className="bg-blue-600 text-white px-4 py-1.5 rounded text-sm font-medium hover:bg-blue-700 disabled:opacity-40"
+              >{acting === 'retry' ? 'Retrying...' : 'Retry Task'}</button>
+              <button
+                onClick={() => handleAction('complete')}
+                disabled={acting !== null}
+                className="bg-green-600 text-white px-4 py-1.5 rounded text-sm font-medium hover:bg-green-700 disabled:opacity-40"
+              >{acting === 'complete' ? '...' : 'Mark Complete'}</button>
+              <button
+                onClick={() => handleAction('delete')}
+                disabled={acting !== null}
+                className="bg-red-100 text-red-700 px-4 py-1.5 rounded text-sm font-medium hover:bg-red-200 disabled:opacity-40"
+              >{acting === 'delete' ? '...' : 'Delete'}</button>
+            </div>
           </div>
         )}
 
@@ -53,8 +101,31 @@ function TaskDetail() {
           </div>
         )}
 
-        <div className="border-t border-gray-200 pt-4 mt-4 flex gap-3">
-          <a href="/traces" className="text-blue-600 text-sm hover:underline">View related traces →</a>
+        {/* Task Timeline */}
+        {traceList.length > 0 && (
+          <div className="border-t border-gray-200 pt-4 mt-4">
+            <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Event Timeline</h3>
+            <div className="space-y-1">
+              {traceList.map((e: any) => (
+                <div key={e.id} className="flex items-center gap-3 text-sm py-1.5 border-b border-gray-100 last:border-0">
+                  <span className="text-xs text-gray-400 w-16 flex-shrink-0">
+                    {new Date(e.timestamp).toLocaleTimeString()}
+                  </span>
+                  <span className="text-gray-600">{e.type}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="border-t border-gray-200 pt-4 mt-4">
+          <Link
+            to="/traces"
+            search={{ taskId }}
+            className="text-blue-600 text-sm hover:underline"
+          >
+            View all traces for this task →
+          </Link>
         </div>
       </div>
     </div>
