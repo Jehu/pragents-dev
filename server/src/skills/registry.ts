@@ -60,8 +60,9 @@ export class SkillRegistry {
     const db = getDb();
     const id = randomUUID();
     db.prepare(
-      `INSERT OR REPLACE INTO skills (id, name, description, source_session, source_agent, tags, steps_yaml)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT OR REPLACE INTO skills (id, name, description, source_session, source_agent, tags, steps_yaml,
+       parameters_yaml, tools, examples_yaml, scope, status, version, extraction_metadata_yaml)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       id,
       validated.name,
@@ -70,6 +71,13 @@ export class SkillRegistry {
       validated.source_agent || null,
       JSON.stringify(validated.tags || []),
       stringifyYaml(validated.steps),
+      validated.parameters ? stringifyYaml(validated.parameters) : null,
+      validated.tools ? JSON.stringify(validated.tools) : null,
+      validated.examples ? stringifyYaml(validated.examples) : null,
+      validated.scope || 'project',
+      validated.status || 'draft',
+      validated.version || 1,
+      validated.extraction_metadata ? JSON.stringify(validated.extraction_metadata) : null,
     );
   }
 

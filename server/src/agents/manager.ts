@@ -5,8 +5,10 @@ import { MemoryEngine } from '../memory/engine.js';
 import type { CostTracker } from '../tracking/cost-tracker.js';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import type { ToolExecutor } from './tool-executor.js';
 import { TOOL_DEFINITIONS } from './tool-definitions.js';
+import { getDb } from '../db/sqlite.js';
 
 export interface SessionHandle {
   agentId: string;
@@ -163,7 +165,7 @@ export class AgentSessionManager {
         if (event.type === 'agent_end') {
           unsubscribe();
           // Read last assistant message, filtering out thinking blocks
-          const msgs = handle.session.agent?.state?.messages || [];
+          const msgs = (handle.session.agent as any)?.state?.messages || [];
           let responseText = '';
           for (let i = msgs.length - 1; i >= 0; i--) {
             if (msgs[i].role === 'assistant' && msgs[i].content) {
@@ -184,9 +186,9 @@ export class AgentSessionManager {
         // Handle custom tool calls from the agent
         if (event.type === 'custom_tool_call' && this.toolExecutor) {
           this.toolExecutor.execute(event.name, event.args || {}).then((result) => {
-            try { handle.session.sendToolResult?.(event.callId, result); } catch {}
+            try { (handle.session as any).sendToolResult?.(event.callId, result); } catch {}
           }).catch((err) => {
-            try { handle.session.sendToolResult?.(event.callId, `Error: ${err?.message || String(err)}`); } catch {}
+            try { (handle.session as any).sendToolResult?.(event.callId, `Error: ${err?.message || String(err)}`); } catch {}
           });
         }
       });
@@ -263,12 +265,53 @@ export class AgentSessionManager {
     return facts;
   }
 
+  /**
+   * Persist the full message history for a session before it is disposed.
+   * Called from disposeIdle() and disposeAll() before session.dispose().
+   */
+  private persistSessionMessages(sessionId: string, handle: SessionHandle): void {
+    try {
+      const messages = (handle.session.agent as any)?.state?.messages;
+      if (!messages || messages.length === 0) return;
+
+      const db = getDb();
+      const id = randomUUID();
+      db.prepare(
+        `INSERT INTO session_messages (id, session_id, messages_json, message_count)
+         VALUES (?, ?, ?, ?)`,
+      ).run(id, sessionId, JSON.stringify(messages), messages.length);
+    } catch (err) {
+      // Best-effort: log and continue — don't block dispose on persistence failure
+      console.error(`[pragents] Failed to persist messages for session ${sessionId}:`, err);
+    }
+  }
+
+  /**
+   * Retrieve persisted session messages by session ID.
+   * Returns the parsed message array, or null if not found.
+   */
+  getSessionMessages(sessionId: string): any[] | null {
+    try {
+      const db = getDb();
+      const row = db.prepare(
+        'SELECT messages_json FROM session_messages WHERE session_id = ? ORDER BY created_at DESC LIMIT 1',
+      ).get(sessionId) as { messages_json: string } | undefined;
+
+      if (!row) return null;
+      return JSON.parse(row.messages_json);
+    } catch (err) {
+      console.error(`[pragents] Failed to read messages for session ${sessionId}:`, err);
+      return null;
+    }
+  }
+
   async disposeIdle(): Promise<string[]> {
     const now = Date.now();
     const disposed: string[] = [];
 
     for (const [id, handle] of this.sessions) {
       if (!handle.session.isStreaming && now - handle.lastActivityAt > this.idleTimeoutMs) {
+        this.persistSessionMessages(id, handle);
         handle.session.dispose();
         this.sessions.delete(id);
         this.memory.compress(id, id);
@@ -285,6 +328,7 @@ export class AgentSessionManager {
         // Wait briefly for current turn to finish
         await new Promise((resolve) => setTimeout(resolve, 5000));
       }
+      this.persistSessionMessages(id, handle);
       handle.session.dispose();
       this.memory.compress(id, id);
     }

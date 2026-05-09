@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { serve } from '@hono/node-server';
 import { loadConfig } from './config/loader.js';
-import { initDb, closeDb } from './db/sqlite.js';
+import { initDb, closeDb, getDb } from './db/sqlite.js';
 import { MemoryEngine } from './memory/engine.js';
 import { AgentSessionManager } from './agents/manager.js';
 import { ToolExecutor } from './agents/tool-executor.js';
@@ -113,7 +113,7 @@ export async function startServer() {
   const { loaded: skillsLoaded, warnings: skillWarnings } = skillRegistry.load();
   console.log(`Skills loaded: ${skillsLoaded.join(', ') || 'none'}`);
   for (const w of skillWarnings) console.warn(`Skill warning: ${w}`);
-  const skillExtractor = new SkillExtractor();
+  const skillExtractor = new SkillExtractor(sessionMgr, agents);
 
   // Hot-reload: watch file changes and reload registries
   let reloadTimer: ReturnType<typeof setTimeout> | null = null;
@@ -180,7 +180,7 @@ export async function startServer() {
   app.route('/api/v1/gates', createGatesRoute(eventBuffer));
   app.route('/api/v1/feed', createFeedRoute(tracker, eventBuffer));
   app.route('/api/v1/memory', createMemoryRoute(memory));
-  app.route('/api/v1/skills', createSkillsRoute(skillRegistry, skillExtractor));
+  app.route('/api/v1/skills', createSkillsRoute(skillRegistry, skillExtractor, eventBuffer));
   app.route('/api/v1/events', createEventsRoute(eventBuffer));
 
   // Traces
@@ -226,6 +226,19 @@ export async function startServer() {
 
   // Periodic idle session cleanup
   setInterval(() => { sessionMgr.disposeIdle(); }, 60000);
+
+  // Periodic session_messages TTL cleanup (30 days)
+  setInterval(() => {
+    try {
+      const db = getDb();
+      const result = db.prepare(
+        "DELETE FROM session_messages WHERE created_at < datetime('now', '-30 days')",
+      ).run();
+      if (result.changes > 0) {
+        logger.info({ deleted: result.changes }, 'Session messages TTL cleanup');
+      }
+    } catch {}
+  }, 6 * 60 * 60 * 1000);
 
   return { app, config, agents, tracker, sessionMgr, memory, eventBuffer, wfRegistry, wfEngine };
 }

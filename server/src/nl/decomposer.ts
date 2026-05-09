@@ -42,6 +42,7 @@ Rules: Use agentId from the provided list. Order steps logically. Keep descripti
 
     const loader = new DefaultResourceLoader({
       cwd: tmpDir,
+      agentDir: join(tmpDir, '.pi'),
       noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true,
       systemPromptOverride: () => systemPrompt,
     });
