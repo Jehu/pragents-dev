@@ -23,6 +23,7 @@ export const Route = createRootRoute({
           <nav className="flex gap-4 text-sm">
             <Link to="/" className="hover:text-blue-600 transition-colors">Dashboard</Link>
             <Link to="/feed" className="hover:text-blue-600 transition-colors">Feed</Link>
+            <Link to="/workflows" className="hover:text-blue-600 transition-colors">Workflows</Link>
             <Link to="/memory" className="hover:text-blue-600 transition-colors">Memory</Link>
             <Link to="/traces" className="hover:text-blue-600 transition-colors">Traces</Link>
             <Link to="/tasks" className="hover:text-blue-600 transition-colors">Tasks</Link>
