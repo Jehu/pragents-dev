@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as WorkflowsIndexRouteImport } from './routes/workflows/index'
 import { Route as TracesIndexRouteImport } from './routes/traces/index'
 import { Route as TasksIndexRouteImport } from './routes/tasks/index'
 import { Route as MemoryIndexRouteImport } from './routes/memory/index'
@@ -20,6 +21,11 @@ import { Route as TasksTaskIdRouteImport } from './routes/tasks/$taskId'
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const WorkflowsIndexRoute = WorkflowsIndexRouteImport.update({
+  id: '/workflows/',
+  path: '/workflows/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const TracesIndexRoute = TracesIndexRouteImport.update({
@@ -61,6 +67,7 @@ export interface FileRoutesByFullPath {
   '/memory/': typeof MemoryIndexRoute
   '/tasks/': typeof TasksIndexRoute
   '/traces/': typeof TracesIndexRoute
+  '/workflows/': typeof WorkflowsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -70,6 +77,7 @@ export interface FileRoutesByTo {
   '/memory': typeof MemoryIndexRoute
   '/tasks': typeof TasksIndexRoute
   '/traces': typeof TracesIndexRoute
+  '/workflows': typeof WorkflowsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -80,6 +88,7 @@ export interface FileRoutesById {
   '/memory/': typeof MemoryIndexRoute
   '/tasks/': typeof TasksIndexRoute
   '/traces/': typeof TracesIndexRoute
+  '/workflows/': typeof WorkflowsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -91,6 +100,7 @@ export interface FileRouteTypes {
     | '/memory/'
     | '/tasks/'
     | '/traces/'
+    | '/workflows/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -100,6 +110,7 @@ export interface FileRouteTypes {
     | '/memory'
     | '/tasks'
     | '/traces'
+    | '/workflows'
   id:
     | '__root__'
     | '/'
@@ -109,6 +120,7 @@ export interface FileRouteTypes {
     | '/memory/'
     | '/tasks/'
     | '/traces/'
+    | '/workflows/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -119,6 +131,7 @@ export interface RootRouteChildren {
   MemoryIndexRoute: typeof MemoryIndexRoute
   TasksIndexRoute: typeof TasksIndexRoute
   TracesIndexRoute: typeof TracesIndexRoute
+  WorkflowsIndexRoute: typeof WorkflowsIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -128,6 +141,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/workflows/': {
+      id: '/workflows/'
+      path: '/workflows'
+      fullPath: '/workflows/'
+      preLoaderRoute: typeof WorkflowsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/traces/': {
@@ -183,6 +203,7 @@ const rootRouteChildren: RootRouteChildren = {
   MemoryIndexRoute: MemoryIndexRoute,
   TasksIndexRoute: TasksIndexRoute,
   TracesIndexRoute: TracesIndexRoute,
+  WorkflowsIndexRoute: WorkflowsIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
