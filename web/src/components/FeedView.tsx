@@ -30,11 +30,13 @@ function statusBadge(status: string) {
   return map[status] || 'bg-gray-100 text-gray-400';
 }
 
-function GateCard({ gate, onAction }: { gate: any; onAction: (id: string, action: 'approve' | 'reject') => void }) {
+function GateCard({ gate, onAction }: { gate: any; onAction: (id: string, action: 'approve' | 'reject' | 'revision') => void }) {
   const [acting, setActing] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [confirmed, setConfirmed] = useState<string | null>(null); // 'approved' | 'rejected'
+  const [confirmed, setConfirmed] = useState<string | null>(null); // 'approved' | 'rejected' | 'revision'
+  const [revisionFeedback, setRevisionFeedback] = useState('');
+  const [showRevisionInput, setShowRevisionInput] = useState(false);
 
   const handle = async (action: 'approve' | 'reject') => {
     setActing(action);
@@ -45,6 +47,28 @@ function GateCard({ gate, onAction }: { gate: any; onAction: (id: string, action
       setTimeout(() => onAction(gate.id, action), 1200);
     } catch {
       setError(`Failed to ${action} — try again`);
+      setActing(null);
+    }
+  };
+
+  const handleRevision = async () => {
+    const trimmed = revisionFeedback.trim();
+    if (!trimmed) {
+      setError('Please enter feedback before requesting a revision');
+      return;
+    }
+    setActing('revision');
+    setError(null);
+    try {
+      await fetch(`${API}/api/v1/gates/${gate.id}/revision`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ feedback: trimmed }),
+      });
+      setConfirmed('revision');
+      setTimeout(() => onAction(gate.id, 'revision'), 1200);
+    } catch {
+      setError('Failed to request revision — try again');
       setActing(null);
     }
   };
@@ -70,11 +94,14 @@ function GateCard({ gate, onAction }: { gate: any; onAction: (id: string, action
   };
 
   if (confirmed) {
+    const isRevision = confirmed === 'revision';
     return (
-      <div className="bg-green-50 rounded-lg border border-green-200 p-3 flex items-center gap-2">
-        <span className="text-sm">{confirmed === 'approved' ? '✅' : '❌'}</span>
-        <span className="text-sm font-medium text-green-700">
-          {confirmed === 'approved' ? 'Approved — continuing workflow' : 'Rejected — workflow stopped'}
+      <div className={`rounded-lg border p-3 flex items-center gap-2 ${isRevision ? 'bg-blue-50 border-blue-200' : 'bg-green-50 border-green-200'}`}>
+        <span className="text-sm">{confirmed === 'approved' ? '✅' : confirmed === 'revision' ? '🔄' : '❌'}</span>
+        <span className={`text-sm font-medium ${isRevision ? 'text-blue-700' : 'text-green-700'}`}>
+          {confirmed === 'approved' ? 'Approved — continuing workflow' :
+           confirmed === 'revision' ? 'Revision requested — agent is revising' :
+           'Rejected — workflow stopped'}
         </span>
       </div>
     );
@@ -218,6 +245,14 @@ function GateCard({ gate, onAction }: { gate: any; onAction: (id: string, action
             </div>
           )}
 
+          {/* Feedback context from previous revision */}
+          {gate.feedback && (
+            <div className="mb-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+              <div className="text-xs font-semibold text-blue-700 uppercase tracking-wide mb-1">Your Last Feedback</div>
+              <div className="text-sm text-blue-800 whitespace-pre-wrap">{gate.feedback}</div>
+            </div>
+          )}
+
           {/* Consequence labels + full-size action buttons */}
           <div className="border-t border-gray-200 pt-3 mt-3">
             <div className="flex gap-3" onClick={(e) => e.stopPropagation()}>
@@ -236,6 +271,47 @@ function GateCard({ gate, onAction }: { gate: any; onAction: (id: string, action
                 {acting === 'reject' ? 'Rejecting...' : rejectLabel}
               </button>
             </div>
+
+            {/* Revision section */}
+            <div className="mt-3" onClick={(e) => e.stopPropagation()}>
+              {!showRevisionInput ? (
+                <button
+                  onClick={() => { setShowRevisionInput(true); setError(null); }}
+                  disabled={acting !== null}
+                  className="w-full bg-blue-50 text-blue-700 px-4 py-2 rounded text-sm font-medium hover:bg-blue-100 disabled:opacity-40 text-center border border-blue-200"
+                >
+                  🔄 Request Revision
+                </button>
+              ) : (
+                <div className="space-y-2">
+                  <textarea
+                    value={revisionFeedback}
+                    onChange={(e) => setRevisionFeedback(e.target.value)}
+                    placeholder="What needs to change? Be specific..."
+                    className="w-full border border-blue-200 rounded-lg p-3 text-sm text-gray-700 placeholder-gray-400 resize-y min-h-[80px] focus:border-blue-400 focus:ring-1 focus:ring-blue-200 outline-none"
+                    rows={3}
+                    autoFocus
+                  />
+                  <div className="flex gap-2">
+                    <button
+                      onClick={handleRevision}
+                      disabled={acting !== null || !revisionFeedback.trim()}
+                      className="flex-1 bg-blue-600 text-white px-4 py-2 rounded text-sm font-medium hover:bg-blue-700 disabled:opacity-40 text-center"
+                    >
+                      {acting === 'revision' ? 'Sending...' : 'Send Revision Request'}
+                    </button>
+                    <button
+                      onClick={() => { setShowRevisionInput(false); setRevisionFeedback(''); setError(null); }}
+                      disabled={acting !== null}
+                      className="px-3 py-2 text-sm text-gray-500 hover:text-gray-700 disabled:opacity-40"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
             {error && (
               <div className="mt-2 text-xs text-red-600">{error}</div>
             )}

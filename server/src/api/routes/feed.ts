@@ -34,7 +34,7 @@ export function createFeedRoute(
     if (!intent || intent === 'gates') {
       const gatesSql = `
         SELECT h.id, h.workflow_run_id as workflowRunId, h.step_id as stepId,
-               h.label, h.created_at as createdAt, h.timeout_at as timeoutAt
+               h.label, h.created_at as createdAt, h.timeout_at as timeoutAt, h.feedback
         FROM human_gates h
         WHERE h.status = 'pending'
         ORDER BY h.created_at DESC
