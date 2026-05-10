@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { getDb } from '../../db/sqlite.js';
 import type { WorkflowRegistry } from '../../workflows/loader.js';
 import type { WorkflowEngine } from '../../workflows/engine.js';
 import type { WorkflowTracker } from '../../workflows/tracker.js';
@@ -21,7 +22,21 @@ export function createWorkflowsRoute(registry: WorkflowRegistry, engine: Workflo
     const run = tracker.getRun(c.req.param('id'));
     if (!run) return c.json({ error: 'Run not found' }, 404);
     const steps = tracker.getSteps(run.id);
-    return c.json({ ...run, steps });
+
+    // Enrich steps with gate status from human_gates
+    const db = getDb();
+    const stepsWithGates = steps.map((step: any) => {
+      const gate = db.prepare(
+        'SELECT status as gateStatus, feedback as gateFeedback FROM human_gates WHERE workflow_run_id = ? AND step_id = ? ORDER BY created_at DESC LIMIT 1',
+      ).get(run.id, step.stepId) as any;
+      return {
+        ...step,
+        gateStatus: gate?.gateStatus || null,
+        gateFeedback: gate?.gateFeedback || null,
+      };
+    });
+
+    return c.json({ ...run, steps: stepsWithGates });
   });
 
   r.get('/:name', (c) => {
