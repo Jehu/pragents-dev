@@ -66,4 +66,19 @@ describe('Gates Route with EventBuffer', () => {
     const res = await app.request('/nonexistent/approve', { method: 'POST' });
     expect(res.status).toBe(404);
   });
+
+  // U1: Migration verification — feedback column
+  it('human_gates has feedback column after migration', () => {
+    const columns = getDb().prepare("PRAGMA table_info('human_gates')").all() as any[];
+    const feedbackCol = columns.find((c: any) => c.name === 'feedback');
+    expect(feedbackCol).toBeDefined();
+    expect(feedbackCol.type).toMatch(/TEXT/i);
+  });
+
+  it('existing gates have feedback = NULL after migration', () => {
+    const gates = getDb().prepare('SELECT id, feedback FROM human_gates').all() as any[];
+    for (const gate of gates) {
+      expect(gate.feedback).toBeNull();
+    }
+  });
 });
