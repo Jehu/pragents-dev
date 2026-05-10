@@ -66,4 +66,109 @@ describe('Gates Route with EventBuffer', () => {
     const res = await app.request('/nonexistent/approve', { method: 'POST' });
     expect(res.status).toBe(404);
   });
+
+  // U1: Migration verification — feedback column
+  it('human_gates has feedback column after migration', () => {
+    const columns = getDb().prepare("PRAGMA table_info('human_gates')").all() as any[];
+    const feedbackCol = columns.find((c: any) => c.name === 'feedback');
+    expect(feedbackCol).toBeDefined();
+    expect(feedbackCol.type).toMatch(/TEXT/i);
+  });
+
+  it('existing gates have feedback = NULL after migration', () => {
+    const gates = getDb().prepare('SELECT id, feedback FROM human_gates').all() as any[];
+    for (const gate of gates) {
+      expect(gate.feedback).toBeNull();
+    }
+  });
+
+  // --- U3: Revision API endpoint ---
+
+  it('POST /:id/revision sets gate to revision_requested with feedback', async () => {
+    // Seed a fresh pending gate
+    getDb().prepare(
+      "INSERT INTO human_gates (id, workflow_run_id, step_id, label, timeout_at, status) VALUES (?, ?, ?, ?, ?, 'pending')",
+    ).run('gate-rev-api-1', 'run-rev-api-1', 'step-review', 'Review draft', new Date(Date.now() + 3600000).toISOString());
+
+    const app = createGatesRoute(eventBuffer);
+    const res = await app.request('/gate-rev-api-1/revision', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ feedback: 'Please improve the introduction' }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.status).toBe('revision_requested');
+
+    // Verify DB state
+    const gate = getDb().prepare('SELECT status, feedback FROM human_gates WHERE id = ?').get('gate-rev-api-1') as any;
+    expect(gate.status).toBe('revision_requested');
+    expect(gate.feedback).toBe('Please improve the introduction');
+  });
+
+  it('POST /:id/revision emits gate.revision_requested event', async () => {
+    getDb().prepare(
+      "INSERT INTO human_gates (id, workflow_run_id, step_id, label, timeout_at, status) VALUES (?, ?, ?, ?, ?, 'pending')",
+    ).run('gate-rev-api-2', 'run-rev-api-2', 'step-review', 'Review draft', new Date(Date.now() + 3600000).toISOString());
+
+    const app = createGatesRoute(eventBuffer);
+    await app.request('/gate-rev-api-2/revision', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ feedback: 'Add more examples' }),
+    });
+
+    const events = eventBuffer.getSince(0);
+    const revEvents = events.filter(e => e.type === 'gate.revision_requested');
+    const ourEvent = revEvents.find(e => e.data.gateId === 'gate-rev-api-2');
+    expect(ourEvent).toBeDefined();
+    expect(ourEvent?.data.workflowRunId).toBe('run-rev-api-2');
+    expect(ourEvent?.data.feedback).toBe('Add more examples');
+  });
+
+  it('POST /:id/revision on nonexistent gate returns 404', async () => {
+    const app = createGatesRoute(eventBuffer);
+    const res = await app.request('/nonexistent/revision', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ feedback: 'test' }),
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it('POST /:id/revision on already approved gate returns 400', async () => {
+    getDb().prepare(
+      "INSERT INTO human_gates (id, workflow_run_id, step_id, label, timeout_at, status) VALUES (?, ?, ?, ?, ?, 'approved')",
+    ).run('gate-rev-api-3', 'run-rev-api-3', 'step-review', 'Review draft', new Date(Date.now() + 3600000).toISOString());
+
+    const app = createGatesRoute(eventBuffer);
+    const res = await app.request('/gate-rev-api-3/revision', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ feedback: 'test' }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('POST /:id/revision with empty feedback returns 400', async () => {
+    getDb().prepare(
+      "INSERT INTO human_gates (id, workflow_run_id, step_id, label, timeout_at, status) VALUES (?, ?, ?, ?, ?, 'pending')",
+    ).run('gate-rev-api-4', 'run-rev-api-4', 'step-review', 'Review draft', new Date(Date.now() + 3600000).toISOString());
+
+    const app = createGatesRoute(eventBuffer);
+    const res = await app.request('/gate-rev-api-4/revision', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ feedback: '' }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('POST /:id/revision without JSON body returns 400', async () => {
+    const app = createGatesRoute(eventBuffer);
+    const res = await app.request('/gate-rev-api-1/revision', {
+      method: 'POST',
+    });
+    expect(res.status).toBe(400);
+  });
 });

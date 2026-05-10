@@ -178,7 +178,7 @@ export async function startServer() {
   app.route('/api/v1/cost', createCostRoute(costTracker));
   app.route('/api/v1/goals', createGoalsRoute(goalRegistry));
   app.route('/api/v1/gates', createGatesRoute(eventBuffer));
-  app.route('/api/v1/feed', createFeedRoute(tracker, eventBuffer));
+  app.route('/api/v1/feed', createFeedRoute(tracker, eventBuffer, wfTracker, wfRegistry));
   app.route('/api/v1/memory', createMemoryRoute(memory));
   app.route('/api/v1/skills', createSkillsRoute(skillRegistry, skillExtractor, eventBuffer));
   app.route('/api/v1/events', createEventsRoute(eventBuffer));

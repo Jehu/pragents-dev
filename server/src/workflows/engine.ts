@@ -32,7 +32,7 @@ export class WorkflowEngine {
     this.emit('workflow.step_started', { runId: run.id, workflow: def.name });
 
     try {
-      await this.executeSteps(def.steps, run.id, {});
+      await this.executeSteps(def, run.id, {});
       this.tracker.completeRun(run.id);
       this.emit('workflow.completed', { runId: run.id, workflow: def.name });
       return run.id;
@@ -43,7 +43,8 @@ export class WorkflowEngine {
     }
   }
 
-  private async executeSteps(steps: WorkflowStep[], runId: string, outputs: Record<string, string>): Promise<void> {
+  private async executeSteps(def: WorkflowDef, runId: string, outputs: Record<string, string>): Promise<void> {
+    const steps = def.steps;
     for (const step of steps) {
       // Conditional step
       if (step.condition) {
@@ -86,10 +87,12 @@ export class WorkflowEngine {
 
       // Human gate
       if (step.type === 'human_gate') {
-        const gateId = randomUUID();
         const db = getDb();
         const timeoutMs = (step.timeout || 14400) * 1000;
-        const timeoutAt = new Date(Date.now() + timeoutMs).toISOString();
+
+        // Create initial gate
+        let gateId = randomUUID();
+        let timeoutAt = new Date(Date.now() + timeoutMs).toISOString();
         db.prepare(
           'INSERT INTO human_gates (id, workflow_run_id, step_id, label, timeout_at) VALUES (?, ?, ?, ?, ?)',
         ).run(gateId, runId, step.id, step.label || 'Approval required', timeoutAt);
@@ -98,14 +101,61 @@ export class WorkflowEngine {
         const stepRow = this.tracker.createStep(runId, step.id);
         this.tracker.startStep(stepRow.id);
 
-        // Wait for gate resolution (polled via API)
-        await this.waitForGate(gateId, timeoutMs, step.id, runId);
-        const gate = db.prepare('SELECT status FROM human_gates WHERE id = ?').get(gateId) as any;
-        if (gate?.status === 'approved') {
-          this.tracker.completeStep(stepRow.id, 'approved');
-        } else {
-          this.tracker.failStep(stepRow.id, 'rejected or timed out');
-          throw new Error(`Human gate "${step.label}" was rejected or timed out`);
+        // Gate resolution loop — supports revision_requested for feedback loops
+        while (true) {
+          const resolution = await this.waitForGate(gateId, timeoutMs, step.id, runId);
+
+          if (resolution === 'approved') {
+            this.tracker.completeStep(stepRow.id, 'approved');
+            break;
+          }
+
+          if (resolution === 'revision_requested') {
+            // Get feedback from the gate
+            const gate = db.prepare('SELECT feedback FROM human_gates WHERE id = ?').get(gateId) as any;
+            const feedback = gate?.feedback || '';
+
+            // Find previous step's agent to re-dispatch
+            const stepIndex = def.steps.findIndex(s => s.id === step.id);
+            const prevStep = stepIndex > 0 ? def.steps[stepIndex - 1] : null;
+
+            if (!prevStep || prevStep.type === 'human_gate') {
+              // Cannot revise — no previous agent step
+              this.tracker.failStep(stepRow.id, 'revision requested but no previous agent step to re-dispatch');
+              throw new Error(`Human gate "${step.label}" revision failed: no previous agent step`);
+            }
+
+            // Build revision prompt with feedback and previous output
+            const revisionPrompt = this.buildRevisionPrompt(prevStep, feedback, outputs);
+
+            // Re-dispatch the previous step's agent
+            const prevAgentId = await this.resolveAgent(prevStep);
+            const prevAgent = this.agents.find(a => a.id === prevAgentId);
+            if (!prevAgent) {
+              this.tracker.failStep(stepRow.id, `Agent "${prevAgentId}" not found for revision`);
+              throw new Error(`Human gate "${step.label}" revision failed: agent "${prevAgentId}" not found`);
+            }
+
+            const revisedOutput = await this.sessionMgr.dispatch(prevAgent, revisionPrompt);
+
+            // Store revised output
+            if (prevStep.output) outputs[prevStep.output] = revisedOutput;
+
+            // Create a new gate for re-review (carry feedback forward for context)
+            gateId = randomUUID();
+            timeoutAt = new Date(Date.now() + timeoutMs).toISOString();
+            db.prepare(
+              'INSERT INTO human_gates (id, workflow_run_id, step_id, label, timeout_at, feedback) VALUES (?, ?, ?, ?, ?, ?)',
+            ).run(gateId, runId, step.id, step.label || 'Approval required', timeoutAt, feedback);
+
+            this.emit('workflow.human_gate_pending', { runId, stepId: step.id, gateId, label: step.label, timeoutAt });
+            // Loop continues — polls the new gate
+            continue;
+          }
+
+          // rejected or timed_out
+          this.tracker.failStep(stepRow.id, `gate ${resolution}`);
+          throw new Error(`Human gate "${step.label}" was ${resolution}`);
         }
         continue;
       }
@@ -146,22 +196,48 @@ export class WorkflowEngine {
     return prompt;
   }
 
+  private buildRevisionPrompt(prevStep: StepLike, feedback: string, outputs: Record<string, string>): string {
+    const prevOutput = (prevStep.output && outputs[prevStep.output]) ? outputs[prevStep.output] : '(no previous output)';
+    return `## Revision Request
+
+Your previous output:
+${prevOutput}
+
+### Reviewer Feedback
+${feedback}
+
+---
+
+Please revise your work based on the feedback above.
+
+Original task:
+${prevStep.prompt || '(no original task)'}`;
+  }
+
   private emit(type: string, data: any): void {
     this.eventBuffer.push(data.projectId || 'workflow', data.agentId, type, data);
   }
 
-  private async waitForGate(gateId: string, timeoutMs: number, stepId: string, runId: string): Promise<void> {
+  private async waitForGate(
+    gateId: string,
+    timeoutMs: number,
+    stepId: string,
+    runId: string,
+  ): Promise<'approved' | 'rejected' | 'timed_out' | 'revision_requested'> {
     const db = getDb();
     const start = Date.now();
     let delay = 2000;
     while (Date.now() - start < timeoutMs) {
       const gate = db.prepare('SELECT status FROM human_gates WHERE id = ?').get(gateId) as any;
-      if (gate?.status === 'approved' || gate?.status === 'rejected') return;
+      if (gate?.status === 'approved' || gate?.status === 'rejected' || gate?.status === 'revision_requested') {
+        return gate.status;
+      }
       await new Promise(resolve => setTimeout(resolve, delay));
       delay = Math.min(delay * 1.5, 30000);
     }
     db.prepare("UPDATE human_gates SET status = 'timed_out' WHERE id = ?").run(gateId);
     this.emit('gate.timed_out', { gateId, workflowRunId: runId, stepId, projectId: this.projectId });
+    return 'timed_out';
   }
 }
 
