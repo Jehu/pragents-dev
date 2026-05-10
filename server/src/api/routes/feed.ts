@@ -2,8 +2,15 @@ import { Hono } from 'hono';
 import { getDb } from '../../db/sqlite.js';
 import type { TaskTracker } from '../../tasks/tracker.js';
 import type { EventBuffer } from '../../events/buffer.js';
+import type { WorkflowTracker } from '../../workflows/tracker.js';
+import type { WorkflowRegistry } from '../../workflows/loader.js';
 
-export function createFeedRoute(tracker: TaskTracker, eventBuffer: EventBuffer) {
+export function createFeedRoute(
+  tracker: TaskTracker,
+  eventBuffer: EventBuffer,
+  wfTracker: WorkflowTracker,
+  registry: WorkflowRegistry,
+) {
   const r = new Hono();
 
   r.get('/', (c) => {
@@ -33,7 +40,67 @@ export function createFeedRoute(tracker: TaskTracker, eventBuffer: EventBuffer) 
         ORDER BY h.created_at DESC
         LIMIT 20
       `;
-      result.gates = db.prepare(gatesSql).all();
+      const rawGates = db.prepare(gatesSql).all() as any[];
+
+      // Enrich gates with workflow context: name, previous step outputs, next steps
+      result.gates = rawGates.map((gate: any) => {
+        try {
+          const run = wfTracker.getRun(gate.workflowRunId);
+          const workflowName = run?.workflowName || null;
+          const steps = run ? wfTracker.getSteps(gate.workflowRunId) : [];
+
+          // Get workflow definition for step ordering
+          let previousStepOutputs: any[] = [];
+          let nextSteps: any[] = [];
+          if (workflowName) {
+            const def = registry.get(workflowName);
+            if (def) {
+              const gateIndex = def.steps.findIndex((s: any) => s.id === gate.stepId);
+              if (gateIndex >= 0) {
+                // Previous steps: all steps before the gate
+                previousStepOutputs = def.steps
+                  .slice(0, gateIndex)
+                  .map((s: any) => {
+                    const stepRow = steps.find((st: any) => st.stepId === s.id);
+                    return {
+                      stepId: s.id,
+                      type: s.type || 'agent',
+                      label: s.label || s.id,
+                      agentId: stepRow?.agentId || null,
+                      status: stepRow?.status || 'unknown',
+                      output: stepRow?.output || null,
+                      completedAt: stepRow?.completedAt || null,
+                    };
+                  });
+
+                // Next steps: steps after the gate
+                nextSteps = def.steps
+                  .slice(gateIndex + 1)
+                  .map((s: any) => ({
+                    stepId: s.id,
+                    type: s.type || 'agent',
+                    label: s.label || s.id,
+                  }));
+              }
+            }
+          }
+
+          return {
+            ...gate,
+            workflowName,
+            previousStepOutputs,
+            nextSteps,
+          };
+        } catch {
+          // Graceful degradation: return gate without enrichment on any error
+          return {
+            ...gate,
+            workflowName: null,
+            previousStepOutputs: [],
+            nextSteps: [],
+          };
+        }
+      });
     }
 
     // --- Pending Skills (M5: extracted proposals waiting for approval) ---
