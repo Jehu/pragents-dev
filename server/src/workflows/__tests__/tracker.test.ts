@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { initDb, closeDb } from '../../db/sqlite.js';
+import { initDb, closeDb, getDb } from '../../db/sqlite.js';
 import { WorkflowTracker } from '../../workflows/tracker.js';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -77,6 +77,42 @@ describe('WorkflowTracker', () => {
     const run = tracker.createRun('stale');
     const recovered = tracker.recoverStaleRuns();
     expect(recovered).toBeGreaterThanOrEqual(1);
+    const final = tracker.getRun(run.id);
+    expect(final?.status).toBe('interrupted');
+  });
+
+  it('recoverStaleRuns skips runs waiting on a pending gate', () => {
+    const run = tracker.createRun('gate-waiting');
+    const db = getDb();
+    db.prepare(
+      "INSERT INTO human_gates (id, workflow_run_id, step_id, label, timeout_at) VALUES (?, ?, ?, ?, ?)",
+    ).run('gate-skip-1', run.id, 'review', 'Review please', new Date(Date.now() + 3600000).toISOString());
+
+    tracker.recoverStaleRuns();
+    const final = tracker.getRun(run.id);
+    expect(final?.status).toBe('running');
+  });
+
+  it('recoverStaleRuns skips runs waiting on a revision_requested gate', () => {
+    const run = tracker.createRun('gate-rev-waiting');
+    const db = getDb();
+    db.prepare(
+      "INSERT INTO human_gates (id, workflow_run_id, step_id, label, status, timeout_at) VALUES (?, ?, ?, ?, ?, ?)",
+    ).run('gate-skip-2', run.id, 'review', 'Review please', 'revision_requested', new Date(Date.now() + 3600000).toISOString());
+
+    tracker.recoverStaleRuns();
+    const final = tracker.getRun(run.id);
+    expect(final?.status).toBe('running');
+  });
+
+  it('recoverStaleRuns interrupts runs with only resolved gates', () => {
+    const run = tracker.createRun('gate-resolved');
+    const db = getDb();
+    db.prepare(
+      "INSERT INTO human_gates (id, workflow_run_id, step_id, label, status, timeout_at) VALUES (?, ?, ?, ?, ?, ?)",
+    ).run('gate-skip-3', run.id, 'review', 'Review please', 'approved', new Date(Date.now() + 3600000).toISOString());
+
+    tracker.recoverStaleRuns();
     const final = tracker.getRun(run.id);
     expect(final?.status).toBe('interrupted');
   });

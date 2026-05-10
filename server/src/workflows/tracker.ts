@@ -104,9 +104,17 @@ export class WorkflowTracker {
 
   recoverStaleRuns(): number {
     const db = getDb();
-    const result = db.prepare(
-      "UPDATE workflow_runs SET status = 'interrupted' WHERE status = 'running'",
-    ).run();
+    // Exclude runs that are waiting on a human gate — those are intentionally
+    // blocked on human input, not stale. A run with a pending or revision_requested
+    // gate will resume once the gate is resolved (approved/rejected/revisioned).
+    const result = db.prepare(`
+      UPDATE workflow_runs SET status = 'interrupted'
+      WHERE status = 'running'
+        AND id NOT IN (
+          SELECT DISTINCT workflow_run_id FROM human_gates
+          WHERE status IN ('pending', 'revision_requested')
+        )
+    `).run();
     db.prepare(
       "UPDATE workflow_steps SET status = 'failed' WHERE status = 'running'",
     ).run();
