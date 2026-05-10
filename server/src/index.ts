@@ -108,7 +108,7 @@ export async function startServer() {
   for (const w of warnings) console.warn(`Workflow warning: ${w}`);
 
   // Skills system
-  const skillsDir = join(__dirname, '..', '..', 'skills');
+  const skillsDir = process.env.PRAGENTS_SKILLS_DIR || join(homedir(), '.pragents', 'skills');
   const skillRegistry = new SkillRegistry(skillsDir);
   const { loaded: skillsLoaded, warnings: skillWarnings } = skillRegistry.load();
   console.log(`Skills loaded: ${skillsLoaded.join(', ') || 'none'}`);
