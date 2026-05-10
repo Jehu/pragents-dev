@@ -55,6 +55,93 @@ export type ExtractionMetadata = z.infer<typeof ExtractionMetadata>;
  * Similar in structure to WorkflowDef but focused on
  * repeatable patterns discovered from agent behavior.
  */
+/**
+ * agentskills.io-compatible skill frontmatter schema.
+ *
+ * Standard fields: name, description (required), license, compatibility, allowed-tools (optional).
+ * Pi-specific: argument-hint, disable-model-invocation.
+ * Pragents extensions: x-pragents-* prefixed fields (ignored by pi and other clients).
+ * Uses .passthrough() for forward-compat with unknown fields.
+ */
+export const PragentsSkillFrontmatter = z.object({
+  // === agentskills.io required ===
+  name: z
+    .string()
+    .min(1, 'name is required')
+    .max(64, 'name must be at most 64 characters')
+    .regex(
+      /^[a-z0-9]+(-[a-z0-9]+)*$/,
+      'name must be lowercase letters, digits, and hyphens only; no leading/trailing/consecutive hyphens',
+    ),
+  description: z
+    .string()
+    .min(1, 'description is required')
+    .max(1024, 'description must be at most 1024 characters'),
+
+  // === agentskills.io optional ===
+  license: z.string().optional(),
+  compatibility: z.string().max(500, 'compatibility must be at most 500 characters').optional(),
+  'allowed-tools': z.string().optional(),
+
+  // === pi-specific ===
+  'argument-hint': z.string().optional(),
+  'disable-model-invocation': z.boolean().optional(),
+
+  // === pragents extensions (x-pragents-*) ===
+  'x-pragents-scope': z.enum(['company', 'project', 'agent']).optional().default('project'),
+  'x-pragents-status': z
+    .enum(['draft', 'proposed', 'approved', 'active', 'rejected'])
+    .optional()
+    .default('draft'),
+  'x-pragents-version': z.number().int().positive().optional().default(1),
+  'x-pragents-tags': z.array(z.string()).optional().default([]),
+  'x-pragents-agent-types': z.array(z.string()).optional().default([]),
+
+  'x-pragents-parameters': z
+    .array(
+      z.object({
+        name: z.string().min(1),
+        description: z.string(),
+        type: z.enum(['string', 'number', 'boolean', 'string[]']).default('string'),
+        default: z.any().optional(),
+      }),
+    )
+    .optional(),
+
+  'x-pragents-extraction': z
+    .object({
+      source: z.enum(['manual', 'extracted']),
+      source_session_id: z.string().optional(),
+      source_agent_id: z.string().optional(),
+      extracted_at: z.string().optional(),
+      model_used: z.string().optional(),
+      confidence: z.number().min(0).max(1).optional(),
+    })
+    .optional(),
+
+  'x-pragents-changelog': z
+    .array(
+      z.object({
+        version: z.number().int().positive(),
+        date: z.string(),
+        change: z.string(),
+      }),
+    )
+    .optional(),
+
+  'x-pragents-examples': z
+    .array(
+      z.object({
+        input: z.record(z.any()),
+        expected_output: z.any(),
+        expected_output_format: z.string().optional(),
+      }),
+    )
+    .optional(),
+}).passthrough(); // forward-compat: unknown fields pass through silently
+
+export type PragentsSkillFrontmatter = z.infer<typeof PragentsSkillFrontmatter>;
+
 export const SkillDef = z.object({
   name: z.string().min(1),
   description: z.string().optional(),
