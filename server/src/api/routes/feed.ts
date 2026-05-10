@@ -4,12 +4,14 @@ import type { TaskTracker } from '../../tasks/tracker.js';
 import type { EventBuffer } from '../../events/buffer.js';
 import type { WorkflowTracker } from '../../workflows/tracker.js';
 import type { WorkflowRegistry } from '../../workflows/loader.js';
+import type { SkillRegistry } from '../../skills/registry.js';
 
 export function createFeedRoute(
   tracker: TaskTracker,
   eventBuffer: EventBuffer,
   wfTracker: WorkflowTracker,
   registry: WorkflowRegistry,
+  skillRegistry?: SkillRegistry,
 ) {
   const r = new Hono();
 
@@ -105,24 +107,26 @@ export function createFeedRoute(
 
     // --- Pending Skills (M5: extracted proposals waiting for approval) ---
     if (!intent || intent === 'gates') {
-      const pendingSkillsSql = `
-        SELECT name, description, source_session as extractedFromSession,
-               source_agent as sourceAgent, created_at as extractedAt,
-               tags, tools, extraction_metadata_yaml as extractionMetadata
-        FROM skills
-        WHERE status = 'proposed'
-        ORDER BY created_at DESC
-        LIMIT 20
-      `;
-      const skills = db.prepare(pendingSkillsSql).all() as any[];
-      result.pendingSkills = skills.map((s: any) => ({
-        ...s,
-        tags: s.tags ? JSON.parse(s.tags) : [],
-        tools: s.tools ? JSON.parse(s.tools) : [],
-        extractionMetadata: s.extractionMetadata ? (() => {
-          try { return JSON.parse(s.extractionMetadata); } catch { return s.extractionMetadata; }
-        })() : null,
-      }));
+      if (skillRegistry) {
+        const proposedSkills = skillRegistry.list().filter(
+          (s) => s['x-pragents-status'] === 'proposed',
+        );
+        result.pendingSkills = proposedSkills.map((s) => {
+          const extraction = s['x-pragents-extraction'];
+          return {
+            name: s.name,
+            description: s.description,
+            extractedFromSession: extraction?.source_session_id || null,
+            sourceAgent: extraction?.source_agent_id || null,
+            extractedAt: extraction?.extracted_at || null,
+            tags: s['x-pragents-tags'] || [],
+            tools: (s['allowed-tools'] || '').split(' ').filter(Boolean),
+            extractionMetadata: extraction || null,
+          };
+        });
+      } else {
+        result.pendingSkills = [];
+      }
     }
 
     // --- Needs Review Tasks ---

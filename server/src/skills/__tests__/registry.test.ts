@@ -110,7 +110,7 @@ describe('SkillRegistry (SKILL.md format)', () => {
       const frontmatter = {
         name: 'tagged-skill',
         description: 'Skill with tags.',
-        'x-pragents-tags': ['seo', 'testing'] as string[],
+        'x-pragents-tags': ['seo', 'testing'],
         'x-pragents-scope': 'project' as const,
       };
       registry.save(frontmatter);
@@ -145,9 +145,30 @@ describe('SkillRegistry (SKILL.md format)', () => {
       const body = '# Instructions\n\n1. Do this\n2. Do that';
       registry.save(frontmatter, body);
       registry.load();
-      // Verify that the body was saved (registry.load() re-reads and should find it)
-      const skill = registry.get('body-skill');
-      expect(skill).toBeDefined();
+      const full = registry.getFullSkill('body-skill');
+      expect(full).toBeDefined();
+      expect(full!.body.trim()).toBe(body.trim());
+    });
+
+    it('preserves body on partial update (approve without body)', () => {
+      const frontmatter = {
+        name: 'approve-skill',
+        description: 'Skill to approve.',
+        'x-pragents-status': 'proposed' as const,
+      };
+      const body = '# Original instructions';
+      registry.save(frontmatter, body);
+      registry.load();
+
+      // Simulate approve: save with updated status, no body
+      const updated = { ...registry.get('approve-skill')!, 'x-pragents-status': 'active' as const };
+      registry.save(updated);
+      registry.load();
+
+      const full = registry.getFullSkill('approve-skill');
+      expect(full).toBeDefined();
+      expect(full!.frontmatter['x-pragents-status']).toBe('active');
+      expect(full!.body.trim()).toBe(body.trim()); // Body preserved!
     });
   });
 

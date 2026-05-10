@@ -24,49 +24,61 @@ export function createSkillsRoute(
       skills = skills.filter((s) => s['x-pragents-status'] === status);
     }
     return c.json(
-      skills.map((s) => ({
-        name: s.name,
-        description: s.description,
-        tags: s['x-pragents-tags'],
-        tools: s['allowed-tools']?.split(' ') || [],
-        parameters: s['x-pragents-parameters']?.length || 0,
-        scope: s['x-pragents-scope'],
-        status: s['x-pragents-status'],
-        version: s['x-pragents-version'],
-        extraction_metadata: s['x-pragents-extraction'],
-      })),
+      skills.map((s) => {
+        const extraction = s['x-pragents-extraction'];
+        const tools = (s['allowed-tools'] || '').split(' ').filter(Boolean);
+        return {
+          name: s.name,
+          description: s.description,
+          tags: s['x-pragents-tags'],
+          source_agent: extraction?.source_agent_id || null,
+          extracted_at: extraction?.extracted_at || null,
+          tools,
+          parameters: s['x-pragents-parameters']?.length || 0,
+          scope: s['x-pragents-scope'],
+          status: s['x-pragents-status'],
+          version: s['x-pragents-version'],
+          extraction_metadata: extraction || null,
+        };
+      }),
     );
   });
 
-  // Get a specific skill (frontmatter + body from SKILL.md)
+  // Get a specific skill (frontmatter + body)
   r.get('/:name', (c) => {
-    const skill = registry.get(c.req.param('name'));
-    if (!skill) return c.json({ error: 'Skill not found' }, 404);
+    const full = registry.getFullSkill(c.req.param('name'));
+    if (!full) return c.json({ error: 'Skill not found' }, 404);
     return c.json({
-      frontmatter: skill,
-      // body is not stored in the registry Map — only in SKILL.md files
-      body: null,
+      frontmatter: full.frontmatter,
+      body: full.body,
     });
   });
 
-  // Create a skill manually (POST with full frontmatter definition)
+  // Create a skill manually
   r.post('/', async (c) => {
     const body = await c.req.json();
-    const parseResult = PragentsSkillFrontmatter.safeParse(body);
+    // Strip 'body' from frontmatter — it's markdown content, not a frontmatter field
+    const { body: mdBody, ...frontmatterRaw } = body;
+    const parseResult = PragentsSkillFrontmatter.safeParse(frontmatterRaw);
     if (!parseResult.success) {
       return c.json({ error: 'Invalid skill definition', details: parseResult.error.issues }, 400);
     }
     const frontmatter = parseResult.data;
-    // Prevent overwriting active skills via manual creation with same name
+    // Enforce body size limit
+    const bodyStr = typeof mdBody === 'string' ? mdBody : undefined;
+    if (bodyStr && bodyStr.length > 1_000_000) {
+      return c.json({ error: 'Body exceeds maximum size of 1MB' }, 400);
+    }
+    // Prevent overwriting active skills
     const existing = registry.get(frontmatter.name);
     if (existing && existing['x-pragents-status'] === 'active') {
       return c.json({ error: `Skill "${frontmatter.name}" already exists and is active. Use a different name or reject it first.` }, 409);
     }
-    registry.save(frontmatter, body.body);
+    registry.save(frontmatter, bodyStr);
     return c.json({ created: frontmatter.name, status: 'ok' }, 201);
   });
 
-  // Extract skills from a completed session trace (LLM-powered, M5)
+  // Extract skills from a completed session trace
   r.post('/extract', async (c) => {
     const body = await c.req.json();
     const { sessionId } = body;
@@ -101,8 +113,14 @@ export function createSkillsRoute(
     // Check for name collision with an active skill
     const existingSkill = registry.get(frontmatter.name);
     if (existingSkill && existingSkill['x-pragents-status'] === 'active') {
-      // Append a suffix to avoid silent overwrite
-      (frontmatter as any).name = `${frontmatter.name}-${sessionId.substring(0, 8)}`;
+      // Normalize session ID suffix to valid kebab-case
+      const suffix = sessionId
+        .substring(0, 8)
+        .toLowerCase()
+        .replace(/[^a-z0-9-]/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^-|-$/g, '');
+      (frontmatter as any).name = `${frontmatter.name}-${suffix}`;
     }
 
     registry.save(frontmatter, skillBody);
@@ -116,12 +134,13 @@ export function createSkillsRoute(
       { name: frontmatter.name, description: frontmatter.description, sessionId },
     );
 
+    const tools = (frontmatter['allowed-tools'] || '').split(' ').filter(Boolean);
     return c.json({
       extracted: 1,
       skill: {
         name: frontmatter.name,
         description: frontmatter.description,
-        tools: frontmatter['allowed-tools']?.split(' ') || [],
+        tools,
         parameters: frontmatter['x-pragents-parameters']?.length,
         confidence: extraction?.confidence,
         status: frontmatter['x-pragents-status'],
@@ -139,6 +158,7 @@ export function createSkillsRoute(
     }
 
     const updated: SkillFM = { ...skill, 'x-pragents-status': 'active' };
+    // Body is preserved from stored body in registry (no need to pass explicitly)
     registry.save(updated);
 
     const extraction = skill['x-pragents-extraction'];

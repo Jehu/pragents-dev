@@ -10,12 +10,13 @@ import {
   rmSync,
   existsSync,
 } from 'node:fs';
-import { join, basename } from 'node:path';
+import { join, basename, resolve } from 'node:path';
 import { PragentsSkillFrontmatter, type PragentsSkillFrontmatter as SkillFM, type PragentsSkillFrontmatterInput } from './schema.js';
 
 export class SkillRegistry {
   private skillsDir: string;
   private skills: Map<string, SkillFM> = new Map();
+  private skillBodies: Map<string, string> = new Map();
 
   constructor(skillsDir: string) {
     this.skillsDir = skillsDir;
@@ -30,6 +31,7 @@ export class SkillRegistry {
     const loaded: string[] = [];
     const warnings: string[] = [];
     this.skills.clear();
+    this.skillBodies.clear();
 
     try {
       const entries = readdirSync(this.skillsDir, { withFileTypes: true });
@@ -43,6 +45,7 @@ export class SkillRegistry {
         try {
           const raw = matter.read(skillMdPath);
           const frontmatter = raw.data;
+          const body = raw.content || '';
 
           // Validate with Zod
           const parsed = PragentsSkillFrontmatter.safeParse(frontmatter);
@@ -53,6 +56,7 @@ export class SkillRegistry {
           }
 
           this.skills.set(parsed.data.name, parsed.data);
+          this.skillBodies.set(parsed.data.name, body);
           loaded.push(parsed.data.name);
         } catch (err: any) {
           warnings.push(`${entry.name}: ${err.message}`);
@@ -79,9 +83,10 @@ export class SkillRegistry {
     const skillDir = join(this.skillsDir, dirName);
     mkdirSync(skillDir, { recursive: true });
 
-    // Build frontmatter for gray-matter (exclude undefined values)
+    // Build frontmatter for gray-matter (exclude undefined values and 'body' key)
     const frontmatterObj: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(validated)) {
+      if (key === 'body') continue; // body is markdown content, not frontmatter
       if (value !== undefined && value !== null) {
         // Skip empty arrays/objects
         if (Array.isArray(value) && value.length === 0) continue;
@@ -90,13 +95,15 @@ export class SkillRegistry {
       }
     }
 
-    // Write SKILL.md via gray-matter
-    const mdBody = body || '';
+    // Preserve existing body if not provided (partial update like approve/reject)
+    const existingBody = this.skillBodies.get(validated.name);
+    const mdBody = body !== undefined ? body : (existingBody || '');
     const fileContent = matter.stringify(mdBody, frontmatterObj);
     writeFileSync(join(skillDir, 'SKILL.md'), fileContent, 'utf-8');
 
     // Update in-memory
     this.skills.set(validated.name, validated);
+    this.skillBodies.set(validated.name, mdBody);
 
     // Persist to SQLite for query support (gracefully skip if DB not initialized)
     try {
@@ -141,9 +148,15 @@ export class SkillRegistry {
     if (!skill) return false;
 
     this.skills.delete(name);
+    this.skillBodies.delete(name);
 
-    // Remove skill subdirectory
+    // Remove skill subdirectory (with path traversal protection)
     const skillDir = join(this.skillsDir, name);
+    const resolvedSkillsDir = resolve(this.skillsDir);
+    if (!resolve(skillDir).startsWith(resolvedSkillsDir + '/') && resolve(skillDir) !== resolvedSkillsDir) {
+      // Path traversal attempted — skip file deletion but still remove from memory
+      return true;
+    }
     try {
       rmSync(skillDir, { recursive: true, force: true });
     } catch {}
@@ -159,6 +172,22 @@ export class SkillRegistry {
 
   get(name: string): SkillFM | undefined {
     return this.skills.get(name);
+  }
+
+  /**
+   * Get the markdown body for a skill.
+   */
+  getBody(name: string): string | undefined {
+    return this.skillBodies.get(name);
+  }
+
+  /**
+   * Get both frontmatter and body for a skill.
+   */
+  getFullSkill(name: string): { frontmatter: SkillFM; body: string } | undefined {
+    const frontmatter = this.skills.get(name);
+    if (!frontmatter) return undefined;
+    return { frontmatter, body: this.skillBodies.get(name) || '' };
   }
 
   list(): SkillFM[] {

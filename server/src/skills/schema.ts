@@ -81,7 +81,7 @@ export const PragentsSkillFrontmatter = z.object({
   // === agentskills.io optional ===
   license: z.string().optional(),
   compatibility: z.string().max(500, 'compatibility must be at most 500 characters').optional(),
-  'allowed-tools': z.string().optional(),
+  'allowed-tools': z.string().max(2000).optional(),
 
   // === pi-specific ===
   'argument-hint': z.string().optional(),
@@ -94,8 +94,8 @@ export const PragentsSkillFrontmatter = z.object({
     .optional()
     .default('draft'),
   'x-pragents-version': z.number().int().positive().optional().default(1),
-  'x-pragents-tags': z.array(z.string()).optional().default([]),
-  'x-pragents-agent-types': z.array(z.string()).optional().default([]),
+  'x-pragents-tags': z.array(z.string().max(200)).max(100).optional().default([]),
+  'x-pragents-agent-types': z.array(z.string().max(200)).max(50).optional().default([]),
 
   'x-pragents-parameters': z
     .array(
