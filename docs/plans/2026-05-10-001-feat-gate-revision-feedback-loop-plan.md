@@ -1,7 +1,7 @@
 ---
 title: "feat: Workflow gate revision feedback loop"
 type: feat
-status: active
+status: completed
 date: 2026-05-10
 origin: docs/brainstorms/2026-05-10-gate-revision-feedback-requirements.md
 ---
