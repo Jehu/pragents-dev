@@ -209,7 +209,7 @@ describe('WorkflowEngine', () => {
       .mockResolvedValueOnce('## Research complete\n\nFound important insights about X.') // step1
       .mockResolvedValueOnce('## Revised research\n\nUpdated with more details about X.'); // revision re-dispatch
 
-    const revisionSessionMgr = { dispatch: mockDispatch };
+    const revisionSessionMgr = { dispatch: mockDispatch } as any;
 
     // Pre-insert a gate that will be set to revision_requested
     // The workflow will create a gate for the review step, but we intercept by
@@ -281,7 +281,7 @@ describe('WorkflowEngine', () => {
         return '## Unknown step';
       });
 
-    const multiSessionMgr = { dispatch: multiDispatch };
+    const multiSessionMgr = { dispatch: multiDispatch } as any;
     const engine = new WorkflowEngine(tracker, router, multiSessionMgr, agents, eventBuffer, 'test-project');
 
     // Execute the workflow with a short gate timeout

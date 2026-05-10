@@ -32,7 +32,7 @@ export class WorkflowEngine {
     this.emit('workflow.step_started', { runId: run.id, workflow: def.name });
 
     try {
-      await this.executeSteps(def.steps, run.id, {});
+      await this.executeSteps(def, run.id, {});
       this.tracker.completeRun(run.id);
       this.emit('workflow.completed', { runId: run.id, workflow: def.name });
       return run.id;
@@ -43,7 +43,8 @@ export class WorkflowEngine {
     }
   }
 
-  private async executeSteps(steps: WorkflowStep[], runId: string, outputs: Record<string, string>): Promise<void> {
+  private async executeSteps(def: WorkflowDef, runId: string, outputs: Record<string, string>): Promise<void> {
+    const steps = def.steps;
     for (const step of steps) {
       // Conditional step
       if (step.condition) {
