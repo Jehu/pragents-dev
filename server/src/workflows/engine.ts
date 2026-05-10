@@ -138,8 +138,18 @@ export class WorkflowEngine {
 
             const revisedOutput = await this.sessionMgr.dispatch(prevAgent, revisionPrompt);
 
-            // Store revised output
+            // Store revised output in the outputs map (for downstream steps)
             if (prevStep.output) outputs[prevStep.output] = revisedOutput;
+
+            // Update the previous step's row so the revised output is visible in the UI
+            const prevStepRow = db.prepare(
+              'SELECT id FROM workflow_steps WHERE run_id = ? AND step_id = ? ORDER BY started_at DESC LIMIT 1',
+            ).get(runId, prevStep.id) as any;
+            if (prevStepRow) {
+              db.prepare(
+                "UPDATE workflow_steps SET output = ?, completed_at = ? WHERE id = ?",
+              ).run(revisedOutput, new Date().toISOString(), prevStepRow.id);
+            }
 
             // Create a new gate for re-review (carry feedback forward for context)
             gateId = randomUUID();
