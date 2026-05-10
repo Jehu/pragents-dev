@@ -257,50 +257,16 @@ describe('WorkflowEngine', () => {
     expect(prompt).toContain('Reviewer Feedback');
   });
 
-  it('revision loop: two revisions then approve completes workflow', async () => {
-    // This test verifies the full revision loop via a workflow with:
-    // agent step → human_gate → agent step (finalize)
-    // The gate goes through: revision_requested → new gate → revision_requested → new gate → approved
-    // The engine should dispatch the previous agent twice (for revisions) then the finalize step
-
-    const callOrder: string[] = [];
-    const multiDispatch = vi.fn()
-      .mockImplementation(async (_agent: any, prompt: string) => {
-        if (prompt.includes('Research topic X') && !prompt.includes('Revision Request')) {
-          callOrder.push('research');
-          return '## Initial research output';
-        }
-        if (prompt.includes('Revision Request')) {
-          callOrder.push('revision');
-          return '## Revised output v' + (callOrder.filter(c => c === 'revision').length);
-        }
-        if (prompt.includes('Finalize')) {
-          callOrder.push('finalize');
-          return '## Finalized';
-        }
-        return '## Unknown step';
-      });
-
-    const multiSessionMgr = { dispatch: multiDispatch } as any;
-    const engine = new WorkflowEngine(tracker, router, multiSessionMgr, agents, eventBuffer, 'test-project');
-
-    // Execute the workflow with a short gate timeout
-    // The execute promise will block on the gate, so we need to run it in parallel
-    // and manipulate gate status from the test
-
-    // For this test, we'll verify the expected behavior by manually simulating
-    // the revision loop logic that the engine will implement.
-    // The engine should:
-    // 1. Dispatch research step
-    // 2. Create gate, poll → we set revision_requested
-    // 3. Re-dispatch research with feedback → creates new gate
-    // 4. Poll new gate → we set revision_requested again
-    // 5. Re-dispatch research again → creates new gate
-    // 6. Poll new gate → we set approved
-    // 7. Dispatch finalize step
-
-    // Since testing the full async loop is complex, we verify the key
-    // revision prompt building and the expected dispatch count pattern.
-    expect(multiDispatch).toBeDefined(); // Placeholder — full flow verified via manual/API test
-  });
+  // TODO: Full integration test — requires coordinating gate status changes
+  // while the engine's polling loop is running. The individual components
+  // (waitForGate signals, buildRevisionPrompt, single revision dispatch)
+  // are covered by the tests above. A full end-to-end test would:
+  //   1. Start workflow with research → gate → finalize
+  //   2. Intercept gate creation, set revision_requested
+  //   3. Verify agent re-dispatched with feedback
+  //   4. Intercept new gate, set revision_requested again
+  //   5. Verify agent re-dispatched again
+  //   6. Intercept new gate, set approved
+  //   7. Verify finalize step runs
+  it.todo('full revision loop: two revisions then approve completes workflow');
 });
