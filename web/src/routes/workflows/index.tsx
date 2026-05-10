@@ -144,12 +144,13 @@ function RunRow({ run }: { run: Run }) {
                     <div className="flex items-center gap-2">
                       <span className="text-xs font-mono text-gray-400">{i + 1}</span>
                       <span className="text-sm font-medium text-gray-700">{step.stepId}</span>
-                      <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${statusBadge(step.status)}`}>
-                        {step.status}
-                      </span>
-                      {step.gateStatus && (
+                      {step.gateStatus ? (
                         <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${statusBadge(step.gateStatus)}`}>
                           {gateLabel(step.gateStatus)}
+                        </span>
+                      ) : (
+                        <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${statusBadge(step.status)}`}>
+                          {step.status}
                         </span>
                       )}
                     </div>
