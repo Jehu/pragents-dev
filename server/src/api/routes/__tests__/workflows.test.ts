@@ -96,4 +96,41 @@ describe('Workflows Route', () => {
     const res = await app.request('/runs/nonexistent');
     expect(res.status).toBe(404);
   });
+
+  it('GET /runs?includeSteps=true returns runs with enriched steps', async () => {
+    const db = getDb();
+    const run = tracker.createRun('test-wf-steps');
+    const step = tracker.createStep(run.id, 'review');
+    tracker.startStep(step.id);
+    tracker.completeStep(step.id, 'approved');
+
+    db.prepare(
+      "INSERT INTO human_gates (id, workflow_run_id, step_id, label, status, timeout_at) VALUES (?, ?, ?, ?, ?, ?)",
+    ).run('gate-steps-1', run.id, 'review', 'Review', 'pending', new Date(Date.now() + 3600000).toISOString());
+
+    const app = createWorkflowsRoute(registry, mockEngine(), tracker);
+    const res = await app.request('/runs?includeSteps=true');
+    expect(res.status).toBe(200);
+
+    const body = await res.json();
+    expect(Array.isArray(body)).toBe(true);
+    expect(body.length).toBeGreaterThanOrEqual(1);
+    const enrichedRun = body.find((r: any) => r.id === run.id);
+    expect(enrichedRun).toBeDefined();
+    expect(enrichedRun.steps).toBeDefined();
+    expect(enrichedRun.steps[0].gateStatus).toBe('pending');
+  });
+
+  it('GET /runs without includeSteps returns runs without steps', async () => {
+    tracker.createRun('test-wf-nosteps');
+    const app = createWorkflowsRoute(registry, mockEngine(), tracker);
+    const res = await app.request('/runs');
+    expect(res.status).toBe(200);
+
+    const body = await res.json();
+    expect(Array.isArray(body)).toBe(true);
+    expect(body.length).toBeGreaterThanOrEqual(1);
+    // Without includeSteps, steps field should not be present
+    expect(body[0].steps).toBeUndefined();
+  });
 });

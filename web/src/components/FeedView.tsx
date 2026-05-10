@@ -1,34 +1,9 @@
 import React, { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useFeedStore } from '../stores/feed';
+import { relativeTime, statusBadge } from '../lib/badges';
 
 const API = '';
-
-function relativeTime(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
-}
-
-function statusBadge(status: string) {
-  const map: Record<string, string> = {
-    complete: 'bg-green-50 text-green-600',
-    failed: 'bg-red-50 text-red-600',
-    running: 'bg-blue-50 text-blue-600',
-    needs_review: 'bg-amber-50 text-amber-600',
-    blocked: 'bg-purple-50 text-purple-600',
-    pending: 'bg-gray-100 text-gray-400',
-    approved: 'bg-green-50 text-green-600',
-    rejected: 'bg-red-50 text-red-600',
-    timed_out: 'bg-gray-100 text-gray-400',
-  };
-  return map[status] || 'bg-gray-100 text-gray-400';
-}
 
 function GateCard({ gate, onAction }: { gate: any; onAction: (id: string, action: 'approve' | 'reject' | 'revision') => void }) {
   const [acting, setActing] = useState<string | null>(null);
