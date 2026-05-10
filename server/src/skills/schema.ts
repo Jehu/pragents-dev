@@ -141,6 +141,7 @@ export const PragentsSkillFrontmatter = z.object({
 }).passthrough(); // forward-compat: unknown fields pass through silently
 
 export type PragentsSkillFrontmatter = z.infer<typeof PragentsSkillFrontmatter>;
+export type PragentsSkillFrontmatterInput = z.input<typeof PragentsSkillFrontmatter>;
 
 export const SkillDef = z.object({
   name: z.string().min(1),

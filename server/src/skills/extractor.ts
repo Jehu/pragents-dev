@@ -141,7 +141,7 @@ export class SkillExtractor {
       const frontmatter: SkillFM = {
         name: proposal.name,
         description: proposal.description,
-        'x-pragents-tags': proposal.tags,
+        'x-pragents-tags': proposal.tags || [],
         'allowed-tools': proposal.tools?.join(' '),
         'x-pragents-parameters': proposal.parameters?.map((p) => ({
           name: p.name,
@@ -258,7 +258,7 @@ Return ONLY a valid JSON object with this structure — no markdown, no explanat
   "name": "kebab-case-skill-name",
   "description": "What this skill accomplishes and when to use it",
   "tags": ["tag1", "tag2"],
-  "body": "# Skill Title\\n\\n## Setup\\n```bash\\nnpm install\\n```\\n\\n## Steps\\n1. First step with {parameter}\\n2. Second step\\n\\n## Output\\nExpected output format",
+  "body": "# Skill Title\\n\\n## Setup\\nInstall dependencies with npm install\\n\\n## Steps\\n1. First step with {parameter}\\n2. Second step\\n\\n## Output\\nExpected output format (e.g., CSV, JSON)",
   "tools": ["tool_name_1", "tool_name_2"],
   "parameters": [
     {

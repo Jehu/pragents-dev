@@ -110,8 +110,8 @@ describe('SkillRegistry (SKILL.md format)', () => {
       const frontmatter = {
         name: 'tagged-skill',
         description: 'Skill with tags.',
-        'x-pragents-tags': ['seo', 'testing'],
-        'x-pragents-scope': 'project',
+        'x-pragents-tags': ['seo', 'testing'] as string[],
+        'x-pragents-scope': 'project' as const,
       };
       registry.save(frontmatter);
       const result = registry.load();

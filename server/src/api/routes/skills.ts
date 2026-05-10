@@ -5,6 +5,7 @@ import type { EventBuffer } from '../../events/buffer.js';
 import {
   PragentsSkillFrontmatter,
   type PragentsSkillFrontmatter as SkillFM,
+  type PragentsSkillFrontmatterInput,
 } from '../../skills/schema.js';
 
 export function createSkillsRoute(

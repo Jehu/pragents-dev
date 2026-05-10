@@ -11,7 +11,7 @@ import {
   existsSync,
 } from 'node:fs';
 import { join, basename } from 'node:path';
-import { PragentsSkillFrontmatter, type PragentsSkillFrontmatter as SkillFM } from './schema.js';
+import { PragentsSkillFrontmatter, type PragentsSkillFrontmatter as SkillFM, type PragentsSkillFrontmatterInput } from './schema.js';
 
 export class SkillRegistry {
   private skillsDir: string;
@@ -70,7 +70,7 @@ export class SkillRegistry {
    * @param skill The frontmatter (must include at least name and description).
    * @param body Optional markdown body content.
    */
-  save(skill: SkillFM, body?: string): void {
+  save(skill: PragentsSkillFrontmatterInput, body?: string): void {
     // Validate
     const validated = PragentsSkillFrontmatter.parse(skill);
 
