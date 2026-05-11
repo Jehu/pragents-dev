@@ -52,6 +52,7 @@ const CompanyConfig = z.object({
     })
     .default({}),
   memory: MemoryConfig.optional(),
+  autoApproveSkills: z.boolean().optional().default(false),
 });
 
 const ProjectConfig = z.object({
