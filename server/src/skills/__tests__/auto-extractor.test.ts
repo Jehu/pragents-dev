@@ -347,3 +347,127 @@ describe('SkillAutoExtractor', () => {
     });
   });
 });
+
+describe('createSemanticCompareFn', () => {
+  it('returns a function that calls the LLM and parses JSON response', async () => {
+    const { createSemanticCompareFn } = await import('../auto-extractor.js');
+
+    // Mock pi SDK
+    const mockSession = {
+      subscribe: vi.fn((cb: any) => {
+        setTimeout(() => {
+          cb({
+            type: 'assistant_message',
+            message: { content: '{"match":true,"confidence":0.92}' },
+          });
+          setTimeout(() => cb({ type: 'agent_end' }), 5);
+        }, 5);
+        return () => {};
+      }),
+      prompt: vi.fn().mockResolvedValue(undefined),
+      dispose: vi.fn(),
+    };
+
+    const mockCreateSession = vi.fn().mockResolvedValue({ session: mockSession });
+
+    const mockResourceLoader = vi.fn().mockImplementation(function () {
+      return { reload: vi.fn().mockResolvedValue(undefined) };
+    });
+
+    const compareFn = createSemanticCompareFn(mockCreateSession, mockResourceLoader);
+    const result = await compareFn('Body A content', 'Body B content');
+
+    expect(result.match).toBe(true);
+    expect(result.confidence).toBe(0.92);
+    expect(mockSession.prompt).toHaveBeenCalled();
+    const promptArg = (mockSession.prompt as any).mock.calls[0][0];
+    expect(promptArg).toContain('Body A content');
+    expect(promptArg).toContain('Body B content');
+  });
+
+  it('returns no-match for LLM responses below threshold', async () => {
+    const { createSemanticCompareFn } = await import('../auto-extractor.js');
+
+    const mockSession = {
+      subscribe: vi.fn((cb: any) => {
+        setTimeout(() => {
+          cb({
+            type: 'assistant_message',
+            message: { content: '{"match":false,"confidence":0.3}' },
+          });
+          setTimeout(() => cb({ type: 'agent_end' }), 5);
+        }, 5);
+        return () => {};
+      }),
+      prompt: vi.fn().mockResolvedValue(undefined),
+      dispose: vi.fn(),
+    };
+
+    const mockCreateSession = vi.fn().mockResolvedValue({ session: mockSession });
+    const mockResourceLoader = vi.fn().mockImplementation(function () {
+      return { reload: vi.fn().mockResolvedValue(undefined) };
+    });
+
+    const compareFn = createSemanticCompareFn(mockCreateSession, mockResourceLoader);
+    const result = await compareFn('Body A', 'Body B');
+
+    expect(result.match).toBe(false);
+    expect(result.confidence).toBe(0.3);
+  });
+
+  it('handles invalid JSON gracefully', async () => {
+    const { createSemanticCompareFn } = await import('../auto-extractor.js');
+
+    const mockSession = {
+      subscribe: vi.fn((cb: any) => {
+        setTimeout(() => {
+          cb({
+            type: 'assistant_message',
+            message: { content: 'not json at all' },
+          });
+          setTimeout(() => cb({ type: 'agent_end' }), 5);
+        }, 5);
+        return () => {};
+      }),
+      prompt: vi.fn().mockResolvedValue(undefined),
+      dispose: vi.fn(),
+    };
+
+    const mockCreateSession = vi.fn().mockResolvedValue({ session: mockSession });
+    const mockResourceLoader = vi.fn().mockImplementation(function () {
+      return { reload: vi.fn().mockResolvedValue(undefined) };
+    });
+
+    const compareFn = createSemanticCompareFn(mockCreateSession, mockResourceLoader);
+    const result = await compareFn('Body A', 'Body B');
+
+    // Should return no-match on parse failure
+    expect(result.match).toBe(false);
+    expect(result.confidence).toBe(0);
+  });
+
+  it('handles LLM errors gracefully', async () => {
+    const { createSemanticCompareFn } = await import('../auto-extractor.js');
+
+    const mockSession = {
+      subscribe: vi.fn((cb: any) => {
+        setTimeout(() => cb({ type: 'error', error: 'LLM timeout' }), 5);
+        return () => {};
+      }),
+      prompt: vi.fn().mockRejectedValue(new Error('LLM failure')),
+      dispose: vi.fn(),
+    };
+
+    const mockCreateSession = vi.fn().mockResolvedValue({ session: mockSession });
+    const mockResourceLoader = vi.fn().mockImplementation(function () {
+      return { reload: vi.fn().mockResolvedValue(undefined) };
+    });
+
+    const compareFn = createSemanticCompareFn(mockCreateSession, mockResourceLoader);
+    const result = await compareFn('Body A', 'Body B');
+
+    // Should return no-match on error
+    expect(result.match).toBe(false);
+    expect(result.confidence).toBe(0);
+  });
+});

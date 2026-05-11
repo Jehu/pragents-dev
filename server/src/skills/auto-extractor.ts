@@ -3,6 +3,9 @@ import type { SkillRegistry } from './registry.js';
 import type { EventBuffer } from '../events/buffer.js';
 import type { PragentsSkillFrontmatterInput } from './schema.js';
 import { getDb } from '../db/sqlite.js';
+import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 
 /**
  * Result of a semantic similarity check.
@@ -225,4 +228,110 @@ export class SkillAutoExtractor {
       return null;
     }
   }
+}
+
+/**
+ * Creates an LLM-backed semantic comparison function for skill deduplication.
+ *
+ * Uses an isolated pi SDK session with a minimal system prompt to compare
+ * two skill bodies and determine whether they represent the same repeatable
+ * pattern. Returns { match: boolean, confidence: 0-1 }.
+ *
+ * The function is injectable into SkillAutoExtractor for testability;
+ * the actual pi SDK imports are passed as factory parameters so tests
+ * can mock them without requiring a running pi environment.
+ *
+ * @param createAgentSession - pi SDK's createAgentSession (or mock)
+ * @param DefaultResourceLoader - pi SDK's DefaultResourceLoader (or mock)
+ * @returns SemanticCompareFn that calls the LLM for comparison
+ */
+export function createSemanticCompareFn(
+  createAgentSession: any,
+  DefaultResourceLoader: any,
+): SemanticCompareFn {
+  return async (bodyA: string, bodyB: string): Promise<SimilarityResult> => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'pragents-semcmp-'));
+    mkdirSync(join(tempDir, '.pi'), { recursive: true });
+
+    try {
+      const systemPrompt = [
+        'You are a semantic similarity engine. Compare two skill descriptions and determine',
+        'whether they describe the same repeatable pattern. Two skills match when they:',
+        '- Solve the same problem using the same approach',
+        '- Target the same workflow or use case',
+        '- Would be redundant if both existed in the catalog',
+        '',
+        'Return ONLY a JSON object: {"match": true/false, "confidence": 0.0-1.0}',
+        'Do not include any other text, explanation, or markdown formatting.',
+      ].join('\n');
+
+      const loader = new DefaultResourceLoader({
+        cwd: tempDir,
+        agentDir: join(tempDir, '.pi'),
+        noExtensions: true,
+        noSkills: true,
+        noPromptTemplates: true,
+        noThemes: true,
+        noContextFiles: true,
+        systemPromptOverride: () => systemPrompt,
+      });
+      await loader.reload();
+
+      const { session } = await createAgentSession({
+        cwd: tempDir,
+        resourceLoader: loader,
+        sessionManager: { dispose: () => {} } as any,
+        model: undefined as any,
+      });
+
+      try {
+        let responseText = '';
+        const responsePromise = new Promise<string>((resolve) => {
+          const unsubscribe = session.subscribe((event: any) => {
+            if (event.type === 'assistant_message' && event.message?.content) {
+              const content = event.message.content;
+              responseText += typeof content === 'string'
+                ? content
+                : Array.isArray(content)
+                  ? content.map((b: any) => b.text || '').join('')
+                  : '';
+            }
+            if (event.type === 'agent_end') {
+              unsubscribe();
+              resolve(responseText);
+            }
+          });
+        });
+
+        const userMessage = [
+          'Skill A:',
+          bodyA.slice(0, 2000),
+          '',
+          'Skill B:',
+          bodyB.slice(0, 2000),
+          '',
+          'Are these the same skill pattern? Return JSON only.',
+        ].join('\n');
+
+        await session.prompt(userMessage);
+        const text = await responsePromise;
+
+        // Parse JSON from response (strip potential markdown fences)
+        const cleaned = text.replace(/```(?:json)?\s*/g, '').trim();
+        const parsed = JSON.parse(cleaned);
+        return {
+          match: !!parsed.match,
+          confidence: typeof parsed.confidence === 'number' ? parsed.confidence : (parsed.match ? 0.5 : 0),
+          matchedSkillName: undefined,
+        };
+      } finally {
+        try { session.dispose(); } catch {}
+      }
+    } catch (err: any) {
+      console.error('[pragents] Semantic comparison failed:', err?.message || err);
+      return { match: false, confidence: 0 };
+    } finally {
+      try { rmSync(tempDir, { recursive: true, force: true }); } catch {}
+    }
+  };
 }

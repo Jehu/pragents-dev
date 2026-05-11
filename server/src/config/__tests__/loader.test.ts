@@ -142,6 +142,37 @@ projects:
     rmSync(tmpDir, { recursive: true });
   });
 
+  it('defaults similarityThreshold to 0.8 when not set', () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), 'pragents-config-test-'));
+    const path = join(tmpDir, 'sim.yaml');
+    writeFileSync(path, minimalYaml);
+    const { config } = loadConfig(path);
+    expect(config.company.similarityThreshold).toBe(0.8);
+    rmSync(tmpDir, { recursive: true });
+  });
+
+  it('accepts custom similarityThreshold on company config', () => {
+    const yaml = `company:
+  name: SimCo
+  similarityThreshold: 0.9
+projects:
+  proj-a:
+    directory: "/tmp/test-project"
+    name: "Sim Project"
+    agents:
+      dev:
+        type: dev
+        skills: [typescript]
+        model: deepseek/deepseek-v4-flash
+`;
+    const tmpDir = mkdtempSync(join(tmpdir(), 'pragents-config-test-'));
+    const path = join(tmpDir, 'sim.yaml');
+    writeFileSync(path, yaml);
+    const { config } = loadConfig(path);
+    expect(config.company.similarityThreshold).toBe(0.9);
+    rmSync(tmpDir, { recursive: true });
+  });
+
   it('accepts explicit autoApproveSkills: false', () => {
     const yaml = `company:
   name: ManualCo

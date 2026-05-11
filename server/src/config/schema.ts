@@ -53,6 +53,7 @@ const CompanyConfig = z.object({
     .default({}),
   memory: MemoryConfig.optional(),
   autoApproveSkills: z.boolean().optional().default(false),
+  similarityThreshold: z.number().min(0).max(1).optional().default(0.8),
 });
 
 const ProjectConfig = z.object({
