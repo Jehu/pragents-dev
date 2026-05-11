@@ -1,6 +1,6 @@
 import { createAgentSession, DefaultResourceLoader, SessionManager } from '@mariozechner/pi-coding-agent';
 import type { ResolvedAgent } from '../config/schema.js';
-import type { SkillDef } from './schema.js';
+import { PragentsSkillFrontmatter, type PragentsSkillFrontmatter as SkillFM } from './schema.js';
 import type { AgentSessionManager } from '../agents/manager.js';
 import { getDb } from '../db/sqlite.js';
 import { z } from 'zod';
@@ -9,29 +9,33 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 /**
+ * Result of skill extraction: frontmatter + body.
+ */
+export interface ExtractedSkill {
+  frontmatter: SkillFM;
+  body: string;
+}
+
+/**
  * Zod schema for the JSON the LLM extraction prompt produces.
- * Slightly looser than SkillDef — we validate and then map to SkillDef.
+ * Updated for SKILL.md format: body (markdown) replaces steps.
  */
 const LLMSkillProposalSchema = z.object({
   name: z.string().min(1),
-  description: z.string().optional(),
+  description: z.string().min(1),
   tags: z.array(z.string()).optional(),
-  steps: z.array(z.object({
-    id: z.string().optional(),
-    agent: z.string().optional(),
-    prompt: z.string(),
-    output: z.string().optional(),
-  })),
+  body: z.string().optional(),
   tools: z.array(z.string()).optional(),
   parameters: z.array(z.object({
-    name: z.string(),
+    name: z.string().min(1),
     description: z.string(),
-    type: z.enum(['string', 'number', 'boolean', 'string[]']).optional().default('string'),
+    type: z.enum(['string', 'number', 'boolean', 'string[]']).default('string'),
     default: z.any().optional(),
   })).optional(),
   examples: z.array(z.object({
     input: z.record(z.any()),
     expected_output: z.any(),
+    expected_output_format: z.string().optional(),
   })).optional(),
   scope: z.enum(['company', 'project', 'agent']).optional().default('project'),
   confidence: z.number().min(0).max(1).optional(),
@@ -58,10 +62,10 @@ export class SkillExtractor {
    * Extract a skill template from a completed agent session trace.
    *
    * @param sessionId - The session ID whose trace to analyze
-   * @returns A SkillDef proposal ready for human review
+   * @returns An ExtractedSkill with frontmatter + markdown body
    * @throws If the session has no persisted messages or extraction fails
    */
-  async extract(sessionId: string): Promise<SkillDef> {
+  async extract(sessionId: string): Promise<ExtractedSkill> {
     // 1. Load session messages
     const messages = this.sessionMgr.getSessionMessages(sessionId);
     if (!messages || messages.length === 0) {
@@ -130,40 +134,44 @@ export class SkillExtractor {
       const parsed = await this.parseWithRetry(raw, userMessage, session);
       const proposal = LLMSkillProposalSchema.parse(parsed);
 
-      // 7. Map to SkillDef
-      const skill: SkillDef = {
+      // 7. Map to ExtractedSkill (frontmatter + body)
+      const now = new Date().toISOString();
+      const agentId = this.resolveAgentId(sessionId);
+
+      const frontmatter: SkillFM = {
         name: proposal.name,
         description: proposal.description,
-        source_session: sessionId,
-        source_agent: this.resolveAgentId(sessionId),
-        tags: proposal.tags,
-        steps: proposal.steps.map((s, i) => ({
-          id: s.id || `step-${i + 1}`,
-          agent: s.agent,
-          prompt: s.prompt,
-          output: s.output,
-        })),
-        tools: proposal.tools,
-        parameters: proposal.parameters?.map((p) => ({
+        'x-pragents-tags': proposal.tags || [],
+        'allowed-tools': proposal.tools?.join(' '),
+        'x-pragents-parameters': proposal.parameters?.map((p) => ({
           name: p.name,
           description: p.description,
           type: p.type || 'string',
           default: p.default,
         })),
-        examples: proposal.examples,
-        scope: proposal.scope || 'project',
-        status: 'proposed',
-        version: 1,
-        extraction_metadata: {
+        'x-pragents-examples': proposal.examples?.map((e) => ({
+          input: e.input,
+          expected_output: e.expected_output,
+          expected_output_format: e.expected_output_format,
+        })),
+        'x-pragents-scope': proposal.scope || 'project',
+        'x-pragents-status': 'proposed',
+        'x-pragents-version': 1,
+        'x-pragents-agent-types': agentId ? [agentId] : [],
+        'x-pragents-extraction': {
+          source: 'extracted',
           source_session_id: sessionId,
-          source_agent_id: this.resolveAgentId(sessionId),
-          extracted_at: new Date().toISOString(),
+          source_agent_id: agentId,
+          extracted_at: now,
           model_used: model,
           confidence: proposal.confidence,
         },
       };
 
-      return skill;
+      return {
+        frontmatter,
+        body: proposal.body || '',
+      };
     } finally {
       session.dispose();
       try { rmSync(tmpDir, { recursive: true }); } catch {}
@@ -219,6 +227,7 @@ export class SkillExtractor {
 
   /**
    * Build the system prompt that instructs the LLM how to extract a skill.
+   * Output format: JSON with body (markdown) instead of steps array.
    */
   private buildExtractionPrompt(): string {
     return `You are a skill extraction specialist. Analyze the following agent session trace and extract a reusable skill template.
@@ -231,7 +240,7 @@ A skill is a repeatable workflow pattern: a sequence of agent actions with promp
 
 2. **Generalization**: Replace concrete values from the session with parameters. For example, "Winterjacken" becomes "{product_category}", "https://example.com/page" becomes "{url}". Define each parameter with name, description, type, and default value.
 
-3. **Prompt Distillation**: For each step, extract the most effective prompt — the one that produced the final correct result, not early failed attempts. If the agent corrected itself, use the corrected version.
+3. **Prompt Distillation**: For the body, write clear numbered steps that another agent could follow. Use the most effective prompts from the session — the ones that produced the final correct result, not early failed attempts. If the agent corrected itself, use the corrected version.
 
 4. **Tool Detection**: List all tools the agent actually called during the session (not all available tools).
 
@@ -247,16 +256,9 @@ Return ONLY a valid JSON object with this structure — no markdown, no explanat
 
 {
   "name": "kebab-case-skill-name",
-  "description": "What this skill accomplishes",
+  "description": "What this skill accomplishes and when to use it",
   "tags": ["tag1", "tag2"],
-  "steps": [
-    {
-      "id": "step-1",
-      "agent": "optional-agent-hint",
-      "prompt": "The distilled prompt for this step, with {parameters}",
-      "output": "optional-output-key"
-    }
-  ],
+  "body": "# Skill Title\\n\\n## Setup\\nInstall dependencies with npm install\\n\\n## Steps\\n1. First step with {parameter}\\n2. Second step\\n\\n## Output\\nExpected output format (e.g., CSV, JSON)",
   "tools": ["tool_name_1", "tool_name_2"],
   "parameters": [
     {
@@ -269,15 +271,18 @@ Return ONLY a valid JSON object with this structure — no markdown, no explanat
   "examples": [
     {
       "input": {"param": "value"},
-      "expected_output": {"key": "value"}
+      "expected_output": {"key": "value"},
+      "expected_output_format": "csv"
     }
   ],
   "scope": "project",
   "confidence": 0.85
 }
 
+The "body" field contains the skill instructions as a markdown string with numbered steps, setup instructions, and output format. Use {parameter_name} placeholders in the body.
+
 If no clear pattern is extractable, return:
-{"name":"no-pattern","description":"No extractable pattern found","steps":[],"confidence":0.0}`;
+{"name":"no-pattern","description":"No extractable pattern found","body":"","confidence":0.0}`;
   }
 
   /**

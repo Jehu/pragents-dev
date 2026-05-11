@@ -108,7 +108,7 @@ export async function startServer() {
   for (const w of warnings) console.warn(`Workflow warning: ${w}`);
 
   // Skills system
-  const skillsDir = join(__dirname, '..', '..', 'skills');
+  const skillsDir = process.env.PRAGENTS_SKILLS_DIR || join(homedir(), '.pragents', 'skills');
   const skillRegistry = new SkillRegistry(skillsDir);
   const { loaded: skillsLoaded, warnings: skillWarnings } = skillRegistry.load();
   console.log(`Skills loaded: ${skillsLoaded.join(', ') || 'none'}`);
@@ -178,7 +178,7 @@ export async function startServer() {
   app.route('/api/v1/cost', createCostRoute(costTracker));
   app.route('/api/v1/goals', createGoalsRoute(goalRegistry));
   app.route('/api/v1/gates', createGatesRoute(eventBuffer));
-  app.route('/api/v1/feed', createFeedRoute(tracker, eventBuffer, wfTracker, wfRegistry));
+  app.route('/api/v1/feed', createFeedRoute(tracker, eventBuffer, wfTracker, wfRegistry, skillRegistry));
   app.route('/api/v1/memory', createMemoryRoute(memory));
   app.route('/api/v1/skills', createSkillsRoute(skillRegistry, skillExtractor, eventBuffer));
   app.route('/api/v1/events', createEventsRoute(eventBuffer));
