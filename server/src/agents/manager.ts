@@ -9,6 +9,7 @@ import { randomUUID } from 'node:crypto';
 import type { ToolExecutor } from './tool-executor.js';
 import { TOOL_DEFINITIONS } from './tool-definitions.js';
 import { getDb } from '../db/sqlite.js';
+import type { SkillAutoExtractor } from '../skills/auto-extractor.js';
 
 export interface SessionHandle {
   agentId: string;
@@ -26,6 +27,7 @@ export class AgentSessionManager {
 
   private costTracker: CostTracker | null = null;
   private toolExecutor: ToolExecutor | null = null;
+  private autoExtractor: SkillAutoExtractor | null = null;
 
   constructor(memory: MemoryEngine, idleTimeoutMs: number = 10 * 60 * 1000) {
     this.memory = memory;
@@ -42,6 +44,10 @@ export class AgentSessionManager {
 
   setEventCallback(cb: (event: any) => void): void {
     this.onEvent = cb;
+  }
+
+  setAutoExtractor(ae: SkillAutoExtractor): void {
+    this.autoExtractor = ae;
   }
 
   async getOrCreate(agent: ResolvedAgent): Promise<SessionHandle> {
@@ -312,6 +318,15 @@ export class AgentSessionManager {
     for (const [id, handle] of this.sessions) {
       if (!handle.session.isStreaming && now - handle.lastActivityAt > this.idleTimeoutMs) {
         this.persistSessionMessages(id, handle);
+
+        // Try auto-extraction after persistence (fire-and-forget, R9)
+        if (this.autoExtractor) {
+          const messages = (handle.session.agent as any)?.state?.messages;
+          this.autoExtractor.tryExtract(id, messages).catch((err: any) =>
+            console.error(`[pragents] Auto-extraction error for session ${id}:`, err?.message || err),
+          );
+        }
+
         handle.session.dispose();
         this.sessions.delete(id);
         this.memory.compress(id, id);
@@ -329,6 +344,15 @@ export class AgentSessionManager {
         await new Promise((resolve) => setTimeout(resolve, 5000));
       }
       this.persistSessionMessages(id, handle);
+
+      // Try auto-extraction after persistence (fire-and-forget, R9)
+      if (this.autoExtractor) {
+        const messages = (handle.session.agent as any)?.state?.messages;
+        this.autoExtractor.tryExtract(id, messages).catch((err: any) =>
+          console.error(`[pragents] Auto-extraction error for session ${id}:`, err?.message || err),
+        );
+      }
+
       handle.session.dispose();
       this.memory.compress(id, id);
     }

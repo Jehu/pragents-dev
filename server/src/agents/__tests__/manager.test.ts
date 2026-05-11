@@ -209,3 +209,122 @@ describe('Auto-fact collection in dispatch', () => {
     expect(facts.some(f => f.content.includes('ESM modules'))).toBe(true);
   });
 });
+
+describe('AgentSessionManager auto-extraction hooks', () => {
+  const tmpDir = mkdtempSync(join(tmpdir(), 'pragents-autoext-test-'));
+
+  beforeAll(() => {
+    initDb(join(tmpDir, 'test.db'));
+  });
+
+  afterAll(() => {
+    closeDb();
+    rmSync(tmpDir, { recursive: true });
+  });
+
+  it('calls autoExtractor.tryExtract in disposeIdle with session messages', async () => {
+    const { createAgentSession, DefaultResourceLoader } = await import('@mariozechner/pi-coding-agent');
+
+    const mockMessages = Array.from({ length: 15 }, (_, i) => ({
+      role: i % 2 === 0 ? 'user' : 'assistant',
+      content: `Message ${i}`,
+    }));
+
+    const mockSession = {
+      subscribe: vi.fn(() => () => {}),
+      prompt: vi.fn().mockResolvedValue(undefined),
+      dispose: vi.fn(),
+      isStreaming: false,
+      agent: { state: { messages: mockMessages } },
+    };
+    (createAgentSession as any).mockResolvedValue({ session: mockSession });
+    (DefaultResourceLoader as any).mockImplementation(function () {
+      return { reload: vi.fn().mockResolvedValue(undefined) };
+    });
+
+    const memory = new MemoryEngine(10);
+    const mgr = new AgentSessionManager(memory, 0); // 0 timeout = always idle
+
+    const mockAutoExtractor = {
+      tryExtract: vi.fn().mockResolvedValue(undefined),
+    };
+
+    mgr.setAutoExtractor(mockAutoExtractor as any);
+
+    // Get or create a session first
+    await mgr.getOrCreate(mockAgent);
+
+    // Small delay so idle timeout triggers
+    await new Promise((r) => setTimeout(r, 2));
+
+    // disposeIdle should trigger auto-extraction
+    const disposed = await mgr.disposeIdle();
+    expect(mockAutoExtractor.tryExtract).toHaveBeenCalled();
+    expect(disposed.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('autoExtractor errors do not prevent session disposal', async () => {
+    const { createAgentSession, DefaultResourceLoader } = await import('@mariozechner/pi-coding-agent');
+
+    const mockMessages = Array.from({ length: 15 }, (_, i) => ({
+      role: i % 2 === 0 ? 'user' : 'assistant',
+      content: `Message ${i}`,
+    }));
+
+    const mockSession = {
+      subscribe: vi.fn(() => () => {}),
+      prompt: vi.fn().mockResolvedValue(undefined),
+      dispose: vi.fn(),
+      isStreaming: false,
+      agent: { state: { messages: mockMessages } },
+    };
+    (createAgentSession as any).mockResolvedValue({ session: mockSession });
+    (DefaultResourceLoader as any).mockImplementation(function () {
+      return { reload: vi.fn().mockResolvedValue(undefined) };
+    });
+
+    const memory = new MemoryEngine(10);
+    const mgr = new AgentSessionManager(memory, 0);
+
+    const mockAutoExtractor = {
+      tryExtract: vi.fn().mockRejectedValue(new Error('Boom!')),
+    };
+    mgr.setAutoExtractor(mockAutoExtractor as any);
+
+    await mgr.getOrCreate(mockAgent);
+
+    // Small delay so idle timeout triggers
+    await new Promise((r) => setTimeout(r, 2));
+
+    // Should not throw — autoExtractor failure should not block dispose
+    await expect(mgr.disposeIdle()).resolves.toBeDefined();
+    expect(mockSession.dispose).toHaveBeenCalled();
+  });
+
+  it('disposeIdle works correctly without autoExtractor set', async () => {
+    const { createAgentSession, DefaultResourceLoader } = await import('@mariozechner/pi-coding-agent');
+
+    const mockSession = {
+      subscribe: vi.fn(() => () => {}),
+      prompt: vi.fn().mockResolvedValue(undefined),
+      dispose: vi.fn(),
+      isStreaming: false,
+      agent: { state: { messages: [] } },
+    };
+    (createAgentSession as any).mockResolvedValue({ session: mockSession });
+    (DefaultResourceLoader as any).mockImplementation(function () {
+      return { reload: vi.fn().mockResolvedValue(undefined) };
+    });
+
+    const memory = new MemoryEngine(10);
+    const mgr = new AgentSessionManager(memory, 0);
+
+    await mgr.getOrCreate(mockAgent);
+
+    // Small delay so idle timeout triggers
+    await new Promise((r) => setTimeout(r, 2));
+
+    // Should work fine without autoExtractor
+    await expect(mgr.disposeIdle()).resolves.toBeDefined();
+  });
+});
