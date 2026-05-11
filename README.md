@@ -65,8 +65,15 @@ cp .env.example ~/.pragents/.env
 ├── logs/                 # ← auto-created
 │   └── pragents.log      # structured JSON logs (debug level)
 │
-└── sessions/             # ← auto-created
-    └── <agent-id>/       # one pi SDK session directory per agent
+├── sessions/             # ← auto-created
+│   └── <agent-id>/       # one pi SDK session directory per agent
+│
+└── skills/               # ← auto-created
+    └── <skill-name>/     # one subdirectory per skill
+        ├── SKILL.md      # agentskills.io-compatible skill definition
+        ├── scripts/      # optional: executable helpers
+        ├── references/   # optional: detailed docs
+        └── assets/       # optional: templates, data files
 ```
 
 ## Run
@@ -102,3 +109,99 @@ server: {
   },
 },
 ```
+
+## Skills
+
+PrAgents uses the [Agent Skills standard](https://agentskills.io/specification) — the same format pi and other coding agents understand. Each skill is a directory with a `SKILL.md` file at its root.
+
+**Location:** `~/.pragents/skills/` (overridable via `PRAGENTS_SKILLS_DIR`)
+
+**Format:**
+
+```markdown
+---
+# agentskills.io standard (required)
+name: seo-keyword-research
+description: Analysiert Keywords für E-Commerce-Produktseiten.
+
+# agentskills.io standard (optional)
+license: MIT
+compatibility: Requires puppeteer, googleapis
+allowed-tools: Bash(grep:*) Read
+
+# pi-specific
+argument-hint: "[product categories]"
+disable-model-invocation: true
+
+# pragents extensions (x-pragents-* — ignored by other clients)
+x-pragents-scope: project
+x-pragents-status: active
+x-pragents-version: 1
+x-pragents-tags: [seo, keyword-research]
+x-pragents-agent-types: [seo, pm]
+x-pragents-parameters:
+  - name: product_categories
+    type: string[]
+    default: []
+---
+
+# SEO Keyword-Recherche
+
+## Setup
+npm install
+
+## Steps
+1. Extrahiere Produkte aus {product_categories}
+2. Recherchiere Suchvolumen via Search Console API
+3. Bewerte nach Volumen, Relevanz, Wettbewerb
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `name` | ✅ | Max 64 chars, lowercase letters, digits, hyphens only |
+| `description` | ✅ | Max 1024 chars. What the skill does and when to use it |
+| `license` | — | License name or reference |
+| `compatibility` | — | Max 500 chars. Environment requirements |
+| `allowed-tools` | — | Space-separated list of pre-approved tools |
+| `x-pragents-scope` | — | `company` / `project` / `agent` (default: `project`) |
+| `x-pragents-status` | — | `draft` / `proposed` / `approved` / `active` / `rejected` |
+| `x-pragents-tags` | — | String array for skill-based routing |
+| `x-pragents-agent-types` | — | Agent types this skill targets (e.g. `[seo, pm]`) |
+| `x-pragents-parameters` | — | Typed parameters with defaults for templated execution |
+| `x-pragents-extraction` | — | Metadata if the skill was LLM-extracted from a session |
+| `x-pragents-changelog` | — | Version history |
+
+**Optional directories per skill:**
+
+```
+seo-keyword-research/
+├── SKILL.md          # required
+├── scripts/          # executable helpers (Python, Bash, JS)
+├── references/       # detailed docs loaded on-demand
+└── assets/           # templates, data files, images
+```
+
+**Extracting skills from sessions:**
+
+Skills can be automatically extracted from agent session traces via the API:
+
+```bash
+curl -X POST http://localhost:3000/api/v1/skills/extract \
+  -H "Content-Type: application/json" \
+  -d '{"sessionId": "your-session-id"}'
+```
+
+Extracted skills are created with status `proposed` and appear in the web dashboard feed for human review and approval.
+
+**Using skills in pi:**
+
+To make pragents skills visible to pi, add the skills directory to pi's settings:
+
+```json
+// ~/.pi/settings.json
+{
+  "skills": ["~/.pragents/skills"]
+}
+```
+
+Set `disable-model-invocation: true` in a skill's frontmatter to hide it from pi's system prompt while keeping it available via `/skill:name`.
