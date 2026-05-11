@@ -12,6 +12,7 @@ PrAgents fixes that:
 
 - **Persistent memory** — agents remember facts, decisions, and learnings across sessions and projects
 - **Autonomous workflows** — recurring multi-step processes (content pipelines, reporting cycles) that run without human involvement
+- **Auto-skill extraction** — completed sessions are automatically scanned for repeatable patterns; skills are extracted via LLM, deduplicated, and optionally auto-approved
 - **Human-in-the-loop gates** — when an agent needs your input, it shows up in a unified **inbox feed** with approve/reject actions
 - **Web dashboard** — cross-project visibility into what every agent is doing, right now
 - **Config-driven** — agents, skills, models, and token budgets are defined in a single YAML file; no hardcoded agents
@@ -50,6 +51,21 @@ cp pragents.example.yaml ~/.pragents/pragents.yaml
 cp .env.example ~/.pragents/.env
 # edit ~/.pragents/.env — uncomment and fill in your API keys
 ```
+
+**Company-level auto-extraction settings:**
+
+```yaml
+# ~/.pragents/pragents.yaml
+company:
+  name: My Agency
+  autoApproveSkills: false     # default false — requires manual approval
+  similarityThreshold: 0.8     # default 0.8 — semantic dedup sensitivity
+```
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `autoApproveSkills` | `false` | When `true`, auto-extracted skills skip directly to `active`. When `false`, they arrive as `proposed` for manual review in the inbox. |
+| `similarityThreshold` | `0.8` | Semantic deduplication threshold (0–1). When an extracted skill's body is >80% similar to an existing active skill, the existing skill's confidence is raised instead of creating a duplicate. |
 
 **What goes where:**
 
@@ -168,7 +184,7 @@ npm install
 | `x-pragents-tags` | — | String array for skill-based routing |
 | `x-pragents-agent-types` | — | Agent types this skill targets (e.g. `[seo, pm]`) |
 | `x-pragents-parameters` | — | Typed parameters with defaults for templated execution |
-| `x-pragents-extraction` | — | Metadata if the skill was LLM-extracted from a session |
+| `x-pragents-extraction` | — | Metadata if the skill was extracted from a session (`source`, `source_session_id`, `confidence`, `extracted_at`). Set automatically by both manual and auto-extraction. |
 | `x-pragents-changelog` | — | Version history |
 
 **Optional directories per skill:**
@@ -183,7 +199,9 @@ seo-keyword-research/
 
 **Extracting skills from sessions:**
 
-Skills can be automatically extracted from agent session traces via the API:
+Skills can be extracted from agent sessions — manually via API, or automatically via the built-in pipeline.
+
+**Manual extraction (API):**
 
 ```bash
 curl -X POST http://localhost:3000/api/v1/skills/extract \
@@ -191,7 +209,24 @@ curl -X POST http://localhost:3000/api/v1/skills/extract \
   -d '{"sessionId": "your-session-id"}'
 ```
 
-Extracted skills are created with status `proposed` and appear in the web dashboard feed for human review and approval.
+**Automatic extraction (zero-config):**
+
+The server automatically scans completed sessions for repeatable patterns:
+
+1. **Session-end hooks** — when a session is disposed (idle timeout or shutdown), the system checks eligibility (>10 messages, not already extracted) and triggers LLM extraction asynchronously. Extraction never blocks session disposal.
+
+2. **PM monitor** — every 5 minutes, the GoalScheduler scans the last 10 ungeprüfte sessions as a backup (catches sessions missed by the hook — e.g., after a server restart).
+
+3. **Deduplication** — two-stage dedup prevents duplicate skills:
+   - **Name-based** (free): if a skill with the same name exists, extraction is skipped
+   - **Semantic** (LLM-backed): compares the extracted body against active skills via an isolated LLM session. If >80% similar (configurable via `similarityThreshold`), the existing skill's confidence is raised instead of creating a duplicate
+
+4. **Lifecycle events** — extraction emits events through the EventBuffer:
+   - `skill.auto_proposed` — skill extracted, awaiting approval (requires inbox review)
+   - `skill.auto_approved` — skill extracted and auto-approved (`autoApproveSkills: true`)
+   - `skill.deduplicated` — duplicate detected, existing skill confirmed
+
+Extracted skills are created with status `proposed` by default and appear in the web dashboard feed for human review and approval. Set `autoApproveSkills: true` in your config to skip the review step.
 
 **Using skills in pi:**
 

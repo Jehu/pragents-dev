@@ -111,6 +111,90 @@ describe('ConfigLoader', () => {
     rmSync(tmpDir, { recursive: true });
   });
 
+  it('defaults autoApproveSkills to false when not set', () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), 'pragents-config-test-'));
+    const path = join(tmpDir, 'auto.yaml');
+    writeFileSync(path, minimalYaml);
+    const { config } = loadConfig(path);
+    expect(config.company.autoApproveSkills).toBe(false);
+    rmSync(tmpDir, { recursive: true });
+  });
+
+  it('accepts autoApproveSkills: true on company config', () => {
+    const yaml = `company:
+  name: AutoCo
+  autoApproveSkills: true
+projects:
+  proj-a:
+    directory: "/tmp/test-project"
+    name: "Auto Project"
+    agents:
+      dev:
+        type: dev
+        skills: [typescript]
+        model: deepseek/deepseek-v4-flash
+`;
+    const tmpDir = mkdtempSync(join(tmpdir(), 'pragents-config-test-'));
+    const path = join(tmpDir, 'auto.yaml');
+    writeFileSync(path, yaml);
+    const { config } = loadConfig(path);
+    expect(config.company.autoApproveSkills).toBe(true);
+    rmSync(tmpDir, { recursive: true });
+  });
+
+  it('defaults similarityThreshold to 0.8 when not set', () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), 'pragents-config-test-'));
+    const path = join(tmpDir, 'sim.yaml');
+    writeFileSync(path, minimalYaml);
+    const { config } = loadConfig(path);
+    expect(config.company.similarityThreshold).toBe(0.8);
+    rmSync(tmpDir, { recursive: true });
+  });
+
+  it('accepts custom similarityThreshold on company config', () => {
+    const yaml = `company:
+  name: SimCo
+  similarityThreshold: 0.9
+projects:
+  proj-a:
+    directory: "/tmp/test-project"
+    name: "Sim Project"
+    agents:
+      dev:
+        type: dev
+        skills: [typescript]
+        model: deepseek/deepseek-v4-flash
+`;
+    const tmpDir = mkdtempSync(join(tmpdir(), 'pragents-config-test-'));
+    const path = join(tmpDir, 'sim.yaml');
+    writeFileSync(path, yaml);
+    const { config } = loadConfig(path);
+    expect(config.company.similarityThreshold).toBe(0.9);
+    rmSync(tmpDir, { recursive: true });
+  });
+
+  it('accepts explicit autoApproveSkills: false', () => {
+    const yaml = `company:
+  name: ManualCo
+  autoApproveSkills: false
+projects:
+  proj-a:
+    directory: "/tmp/test-project"
+    name: "Manual Project"
+    agents:
+      dev:
+        type: dev
+        skills: [typescript]
+        model: deepseek/deepseek-v4-flash
+`;
+    const tmpDir = mkdtempSync(join(tmpdir(), 'pragents-config-test-'));
+    const path = join(tmpDir, 'manual.yaml');
+    writeFileSync(path, yaml);
+    const { config } = loadConfig(path);
+    expect(config.company.autoApproveSkills).toBe(false);
+    rmSync(tmpDir, { recursive: true });
+  });
+
   it('throws on missing env var', () => {
     delete process.env.PRAGENTS_MISSING;
     const yaml = 'company:\n  name: Bad\n  api_key: "env:PRAGENTS_MISSING"\nprojects:\n  p:\n    name: "P"\n    directory: "/tmp"\n';
