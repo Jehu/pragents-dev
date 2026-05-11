@@ -1,7 +1,7 @@
 ---
 title: "feat: Auto-skill extraction with PM monitoring and deduplication"
 type: feat
-status: active
+status: completed
 date: 2026-05-11
 ---
 
