@@ -125,9 +125,7 @@ export class SkillAutoExtractor {
             : activeSkills;
 
           for (const existing of toCompare) {
-            const existingBody = (this.registry as any).getBody
-              ? (this.registry as any).getBody(existing.name)
-              : '';
+            const existingBody = this.registry.getBody(existing.name) || '';
 
             const similarity = await this.semanticCompare(
               extracted.body,
@@ -243,11 +241,13 @@ export class SkillAutoExtractor {
  *
  * @param createAgentSession - pi SDK's createAgentSession (or mock)
  * @param DefaultResourceLoader - pi SDK's DefaultResourceLoader (or mock)
+ * @param SessionManager - pi SDK's SessionManager (or mock)
  * @returns SemanticCompareFn that calls the LLM for comparison
  */
 export function createSemanticCompareFn(
   createAgentSession: any,
   DefaultResourceLoader: any,
+  SessionManager: any,
 ): SemanticCompareFn {
   return async (bodyA: string, bodyB: string): Promise<SimilarityResult> => {
     const tempDir = mkdtempSync(join(tmpdir(), 'pragents-semcmp-'));
@@ -280,7 +280,7 @@ export function createSemanticCompareFn(
       const { session } = await createAgentSession({
         cwd: tempDir,
         resourceLoader: loader,
-        sessionManager: { dispose: () => {} } as any,
+        sessionManager: SessionManager.inMemory() as any,
         model: undefined as any,
       });
 

@@ -374,7 +374,9 @@ describe('createSemanticCompareFn', () => {
       return { reload: vi.fn().mockResolvedValue(undefined) };
     });
 
-    const compareFn = createSemanticCompareFn(mockCreateSession, mockResourceLoader);
+    const mockSessionManager = { inMemory: vi.fn(() => ({})) };
+
+    const compareFn = createSemanticCompareFn(mockCreateSession, mockResourceLoader, mockSessionManager);
     const result = await compareFn('Body A content', 'Body B content');
 
     expect(result.match).toBe(true);
@@ -408,7 +410,9 @@ describe('createSemanticCompareFn', () => {
       return { reload: vi.fn().mockResolvedValue(undefined) };
     });
 
-    const compareFn = createSemanticCompareFn(mockCreateSession, mockResourceLoader);
+    const mockSessionManager = { inMemory: vi.fn(() => ({})) };
+
+    const compareFn = createSemanticCompareFn(mockCreateSession, mockResourceLoader, mockSessionManager);
     const result = await compareFn('Body A', 'Body B');
 
     expect(result.match).toBe(false);
@@ -438,7 +442,9 @@ describe('createSemanticCompareFn', () => {
       return { reload: vi.fn().mockResolvedValue(undefined) };
     });
 
-    const compareFn = createSemanticCompareFn(mockCreateSession, mockResourceLoader);
+    const mockSessionManager2 = { inMemory: vi.fn(() => ({})) };
+
+    const compareFn = createSemanticCompareFn(mockCreateSession, mockResourceLoader, mockSessionManager2);
     const result = await compareFn('Body A', 'Body B');
 
     // Should return no-match on parse failure
@@ -463,7 +469,9 @@ describe('createSemanticCompareFn', () => {
       return { reload: vi.fn().mockResolvedValue(undefined) };
     });
 
-    const compareFn = createSemanticCompareFn(mockCreateSession, mockResourceLoader);
+    const mockSessionManager3 = { inMemory: vi.fn(() => ({})) };
+
+    const compareFn = createSemanticCompareFn(mockCreateSession, mockResourceLoader, mockSessionManager3);
     const result = await compareFn('Body A', 'Body B');
 
     // Should return no-match on error

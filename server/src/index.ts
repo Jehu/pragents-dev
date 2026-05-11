@@ -31,7 +31,7 @@ import { SkillRegistry } from './skills/registry.js';
 import { SkillExtractor } from './skills/extractor.js';
 import { SkillAutoExtractor, createSemanticCompareFn } from './skills/auto-extractor.js';
 import { createSkillsRoute } from './api/routes/skills.js';
-import { createAgentSession, DefaultResourceLoader } from '@mariozechner/pi-coding-agent';
+import { createAgentSession, DefaultResourceLoader, SessionManager } from '@mariozechner/pi-coding-agent';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { mkdirSync, readFileSync, existsSync, watch } from 'node:fs';
@@ -169,7 +169,7 @@ export async function startServer() {
   // Auto-extraction: hooks into session disposal and PM monitor
   const autoApprove = config.company.autoApproveSkills ?? false;
   const similarityThreshold = config.company.similarityThreshold ?? 0.8;
-  const semanticCompare = createSemanticCompareFn(createAgentSession, DefaultResourceLoader);
+  const semanticCompare = createSemanticCompareFn(createAgentSession, DefaultResourceLoader, SessionManager);
   const skillAutoExtractor = new SkillAutoExtractor(
     skillExtractor,
     skillRegistry,
