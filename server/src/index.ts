@@ -29,6 +29,7 @@ import { createFeedRoute } from './api/routes/feed.js';
 import { createMemoryRoute } from './api/routes/memory.js';
 import { SkillRegistry } from './skills/registry.js';
 import { SkillExtractor } from './skills/extractor.js';
+import { SkillAutoExtractor } from './skills/auto-extractor.js';
 import { createSkillsRoute } from './api/routes/skills.js';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
@@ -163,6 +164,19 @@ export async function startServer() {
   goalScheduler.start(goalRegistry.list());
   process.on('SIGTERM', () => goalScheduler.stop());
   process.on('SIGINT', () => goalScheduler.stop());
+
+  // Auto-extraction: hooks into session disposal and PM monitor
+  const autoApprove = config.company.autoApproveSkills ?? false;
+  const skillAutoExtractor = new SkillAutoExtractor(
+    skillExtractor,
+    skillRegistry,
+    eventBuffer,
+    autoApprove,
+    null, // semantic compare: null for now (requires LLM wiring)
+  );
+  sessionMgr.setAutoExtractor(skillAutoExtractor);
+  goalScheduler.setAutoExtractor(skillAutoExtractor);
+  logger.info(`Auto-extraction enabled (autoApproveSkills: ${autoApprove})`);
 
   // Build API
   const app = new Hono();
