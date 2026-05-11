@@ -137,6 +137,7 @@ export class SkillExtractor {
       // 7. Map to ExtractedSkill (frontmatter + body)
       const now = new Date().toISOString();
       const agentId = this.resolveAgentId(sessionId);
+      const agentType = this.resolveAgentType(sessionId);
 
       const frontmatter: SkillFM = {
         name: proposal.name,
@@ -157,7 +158,7 @@ export class SkillExtractor {
         'x-pragents-scope': proposal.scope || 'project',
         'x-pragents-status': 'proposed',
         'x-pragents-version': 1,
-        'x-pragents-agent-types': agentId ? [agentId] : [],
+        'x-pragents-agent-types': agentType ? [agentType] : [],
         'x-pragents-extraction': {
           source: 'extracted',
           source_session_id: sessionId,
@@ -223,6 +224,16 @@ export class SkillExtractor {
     } catch {
       return undefined;
     }
+  }
+
+  /**
+   * Resolve the agent type from a session's agent ID.
+   */
+  private resolveAgentType(sessionId: string): string | undefined {
+    const agentId = this.resolveAgentId(sessionId);
+    if (!agentId) return undefined;
+    const agent = this.agents.find((a) => a.id === agentId);
+    return agent?.type;
   }
 
   /**
