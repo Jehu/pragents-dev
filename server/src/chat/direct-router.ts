@@ -25,6 +25,7 @@ function extractWorkflowName(tokens: string[], original: string): string | null 
   // Stop words that appear between trigger and workflow name
   const stopWords = new Set([
     'den', 'die', 'das', 'der', 'einen', 'eine', 'ein',
+    'the', 'a', 'an',
     'workflow', 'workflows', 'task', 'tasks',
   ]);
 
@@ -82,7 +83,6 @@ function extractStatus(tokens: string[]): string | null {
     completed: 'complete',
     blocked: 'blocked',
     review: 'needs_review',
-    'needs_review': 'needs_review',
   };
   for (const token of tokens) {
     if (statusMap[token]) return statusMap[token];
@@ -101,17 +101,12 @@ const KEYWORD_RULES: KeywordRule[] = [
     keywords: [
       'tasks', 'task', 'zeig',
       'failed', 'pending', 'running', 'complete', 'blocked',
-      'needs_review', 'needs review',
+      'needs review',
     ],
     extractArg: (tokens) => {
       const status = extractStatus(tokens);
       return status ? { status } : {};
     },
-  },
-  // create_task
-  {
-    tool: 'create_task',
-    keywords: ['erstell', 'neuer', 'mach', 'create task', 'new task'],
   },
   // run_workflow
   {
@@ -243,28 +238,6 @@ export class DirectRouter {
     }
 
     if (!bestMatch) return null;
-
-    // Special handling for ambiguous triggers:
-    // If the only match is through common tokens like "task" in a
-    // create_task context, prefer more specific intent.
-    // "erstell einen task" → create_task, not query_tasks
-    // "neuer task" → create_task, not query_tasks
-    const createTriggers = ['erstell', 'neuer', 'mach'];
-    const hasCreateIntent = createTriggers.some((t) => tokens.includes(t));
-    if (hasCreateIntent && bestMatch.rule.tool === 'query_tasks') {
-      // Check if create_task rule also matched (even with lower score)
-      const createRule = KEYWORD_RULES.find((r) => r.tool === 'create_task')!;
-      let createScore = 0;
-      for (const keyword of createRule.keywords) {
-        const kw = keyword.toLowerCase();
-        for (const token of tokens) {
-          if (tokenMatchesKeyword(token, kw)) createScore++;
-        }
-      }
-      if (createScore > 0) {
-        bestMatch = { rule: createRule, score: createScore };
-      }
-    }
 
     // Special case: "deploy" alone is ambiguous (needs a workflow name)
     if (

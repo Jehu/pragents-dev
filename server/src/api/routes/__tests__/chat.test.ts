@@ -420,4 +420,80 @@ describe('Chat SSE Route — POST /api/v1/chat', () => {
     expect(history[0].content).toBe('Zeig agents');
     expect(history[1].role).toBe('assistant');
   });
+
+  // ---- R7 / F2 Steps 6-8: confirm / modifications flow ----
+  it('passes modifications context to decomposer when confirm:true', async () => {
+    const app = createApp();
+    const res = await app.request('/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: 'Bau eine Landing Page',
+        confirm: true,
+        modifications: 'Füg SEO-Optimierung hinzu',
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const text = await readStreamText(res);
+    const events = parseSSEStream(text);
+
+    // Should call decomposer with the modifications context
+    expect(mockDecomposer.decompose).toHaveBeenCalled();
+    const lastCall = (mockDecomposer.decompose as any).mock.calls.at(-1);
+    expect(lastCall[0]).toContain('Füg SEO-Optimierung hinzu');
+    expect(lastCall[0]).toContain('Original request: Bau eine Landing Page');
+
+    // Should emit a plan_proposal message
+    const planMsg = events.find(
+      (e) => e.type === 'message' && e.data?.subtype === 'plan_proposal',
+    );
+    expect(planMsg).toBeTruthy();
+  });
+
+  it('sends confirm:true without modifications', async () => {
+    const app = createApp();
+    const res = await app.request('/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: 'Bau eine Landing Page',
+        confirm: true,
+      }),
+    });
+
+    const text = await readStreamText(res);
+    const events = parseSSEStream(text);
+
+    // Should still call decomposer
+    expect(mockDecomposer.decompose).toHaveBeenCalled();
+    const lastCall = (mockDecomposer.decompose as any).mock.calls.at(-1);
+    expect(lastCall[0]).toContain('Previous plan was accepted');
+    expect(lastCall[0]).toContain('Bau eine Landing Page');
+
+    const doneEvent = events.find((e) => e.type === 'done');
+    expect(doneEvent).toBeTruthy();
+  });
+
+  // ---- P1-3: error message for TOOL_ERROR includes tool name safely ----
+  it('emits safe error event with TOOL_ERROR code (no raw leak)', async () => {
+    // Tool executor throws an Error — this becomes TOOL_ERROR
+    (mockToolExecutor.execute as any).mockRejectedValueOnce(new Error('raw internal info'));
+
+    const app = createApp();
+    const res = await app.request('/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: 'Zeig tasks' }),
+    });
+
+    const text = await readStreamText(res);
+    const events = parseSSEStream(text);
+
+    const errorEvent = events.find((e) => e.type === 'error');
+    expect(errorEvent).toBeTruthy();
+    expect(errorEvent!.data.code).toBe('TOOL_ERROR');
+    // The message should contain the tool name prefix, not just raw internal info
+    expect(errorEvent!.data.message).toContain('query_tasks');
+  });
 });

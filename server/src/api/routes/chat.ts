@@ -1,15 +1,32 @@
 import { Hono } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
 import type { ConversationManager } from '../../chat/manager.js';
 import type { DirectRouter } from '../../chat/direct-router.js';
 import type { NLDecomposer } from '../../nl/decomposer.js';
 import type { ToolExecutor } from '../../agents/tool-executor.js';
 import type { ResolvedAgent } from '../../config/schema.js';
 import type { EventBuffer } from '../../events/buffer.js';
-import { ChatRequestSchema } from '../../chat/schema.js';
+import { ChatRequestSchema, SSEEventSchema } from '../../chat/schema.js';
 import type { SSEEventInput } from '../../chat/schema.js';
 import { logger } from '../../logging/index.js';
 
 const HEARTBEAT_INTERVAL_MS = 15_000;
+const TOOL_TIMEOUT_MS = 30_000;
+const DECOMPOSER_TIMEOUT_MS = 120_000;
+const MAX_BODY_SIZE = 50 * 1024 * 1024; // 50 MB
+
+/**
+ * Race a promise against a timeout. Rejects with the provided message if the
+ * promise doesn't settle within `ms` milliseconds.
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error(message)), ms),
+    ),
+  ]);
+}
 
 /**
  * Create the Chat SSE route.
@@ -26,6 +43,9 @@ export function createChatRoute(
   eventBuffer: EventBuffer,
 ): Hono {
   const app = new Hono();
+
+  // Apply body size limit to prevent memory exhaustion DoS
+  app.use('*', bodyLimit({ maxSize: MAX_BODY_SIZE }));
 
   app.post('/', async (c) => {
     // 1. Parse and validate body
@@ -47,43 +67,44 @@ export function createChatRoute(
     // 2. Resolve conversation
     const convId = conversationManager.getOrCreate(conversationId, projectId);
 
-    // 3. Persist user message
-    conversationManager.addMessage(
-      convId,
-      'user',
-      message,
-      undefined,
-      attachments,
-    );
-
-    // 4. Build SSE stream
+    // 3. Build SSE stream
     const encoder = new TextEncoder();
     let streamClosed = false;
+    let heartbeatId: ReturnType<typeof setInterval> | undefined;
 
     const stream = new ReadableStream({
       start(controller) {
         const emit = (event: SSEEventInput) => {
           if (streamClosed) return;
+          // Runtime validation: ensure emitted events match schema
+          const parsed = SSEEventSchema.safeParse(event);
+          if (!parsed.success) {
+            logger.warn({ issues: parsed.error.issues, eventType: (event as any).type },
+              'SSE event failed schema validation — emitting anyway');
+          }
           try {
             const payload = `data: ${JSON.stringify(event)}\n\n`;
             controller.enqueue(encoder.encode(payload));
           } catch {
             streamClosed = true;
+            if (heartbeatId) { clearInterval(heartbeatId); heartbeatId = undefined; }
             try { controller.close(); } catch { /* ignore */ }
           }
         };
 
         // Heartbeat
-        const heartbeat = setInterval(() => {
+        heartbeatId = setInterval(() => {
           if (streamClosed) {
-            clearInterval(heartbeat);
+            clearInterval(heartbeatId!);
+            heartbeatId = undefined;
             return;
           }
           try {
             controller.enqueue(encoder.encode(': heartbeat\n\n'));
           } catch {
             streamClosed = true;
-            clearInterval(heartbeat);
+            clearInterval(heartbeatId!);
+            heartbeatId = undefined;
             try { controller.close(); } catch { /* ignore */ }
           }
         }, HEARTBEAT_INTERVAL_MS);
@@ -91,41 +112,63 @@ export function createChatRoute(
         // Cleanup on abort
         const onClose = () => {
           streamClosed = true;
-          clearInterval(heartbeat);
+          if (heartbeatId) { clearInterval(heartbeatId); heartbeatId = undefined; }
           try { controller.close(); } catch { /* ignore */ }
         };
 
+        // Check already-aborted signal before adding listener
         if (c.req.raw.signal) {
-          c.req.raw.signal.addEventListener('abort', onClose, { once: true });
+          if (c.req.raw.signal.aborted) {
+            onClose();
+          } else {
+            c.req.raw.signal.addEventListener('abort', onClose, { once: true });
+          }
         }
 
-        // 5. Process the message
+        // 4. Process the message
         (async () => {
           try {
-            // 5a. Emit thinking event
+            // 4a. Persist user message (inside try/catch so DB failures become SSE error events)
+            conversationManager.addMessage(
+              convId,
+              'user',
+              message,
+              undefined,
+              attachments,
+            );
+
+            // 4b. Emit thinking event
             emit({
               type: 'thinking',
               data: { message: 'Processing your request...' },
             });
 
-            // 5b. Try DirectRouter
+            // 4c. Try DirectRouter
             const routeResult = directRouter.tryRoute(message);
 
             if (routeResult) {
+              // Inject projectId into tool args if available
+              const toolArgs = {
+                ...routeResult.args,
+                ...(projectId ? { projectId } : {}),
+              };
+
               // Direct match — execute tool
               emit({
                 type: 'tool_call',
-                data: { tool: routeResult.tool, args: routeResult.args },
+                data: { tool: routeResult.tool, args: toolArgs },
               });
 
               let toolResult: string;
               try {
-                toolResult = await toolExecutor.execute(
-                  routeResult.tool,
-                  routeResult.args,
+                toolResult = await withTimeout(
+                  toolExecutor.execute(routeResult.tool, toolArgs),
+                  TOOL_TIMEOUT_MS,
+                  `Tool "${routeResult.tool}" timed out`,
                 );
-              } catch (err: any) {
-                throw new ToolError(routeResult.tool, err?.message || String(err));
+              } catch (err) {
+                const message = err instanceof Error ? err.message : String(err);
+                throw new ToolError(routeResult.tool, message);
               }
 
               emit({
@@ -156,50 +199,60 @@ export function createChatRoute(
                   ? `Previous plan was accepted. Confirm: ${modifications ? `User modifications: ${modifications}. ` : ''}Original request: ${message}`
                   : message;
 
-                plan = await decomposer.decompose(prompt, agents);
-              } catch (err: any) {
-                throw new DecomposerError(err?.message || String(err));
+                plan = await withTimeout(
+                  decomposer.decompose(prompt, agents),
+                  DECOMPOSER_TIMEOUT_MS,
+                  'NL decomposition timed out',
+                );
+              } catch (err) {
+                const message = err instanceof Error ? err.message : String(err);
+                throw new DecomposerError(message);
               }
+
+              const planSteps = plan.steps.map((s) => ({
+                description: s.description,
+                agentId: s.agentId,
+                dependsOn: s.dependsOn,
+              }));
 
               emit({
                 type: 'message',
                 data: {
                   subtype: 'plan_proposal',
-                  content: 'Here is the proposed plan:',
-                  plan: {
-                    steps: plan.steps.map((s: any) => ({
-                      description: s.description,
-                      agentId: s.agentId,
-                      dependsOn: s.dependsOn,
-                    })),
-                  },
+                  content: `Here is the proposed plan with ${planSteps.length} step(s):`,
+                  plan: { steps: planSteps },
                 },
               });
 
-              // Persist assistant message with plan
+              // Persist assistant message with human-readable summary + plan JSON
               conversationManager.addMessage(
                 convId,
                 'assistant',
-                JSON.stringify(plan),
+                `Proposed plan with ${planSteps.length} step(s):\n${planSteps.map((s, i) => `${i + 1}. ${s.agentId}: ${s.description}`).join('\n')}`,
                 'plan_proposal',
               );
             }
 
-            // 5c. Emit done
+            // 4d. Emit done
             emit({
               type: 'done',
               data: { conversationId: convId },
             });
-          } catch (err: any) {
-            const code = err instanceof ToolError
-              ? 'TOOL_ERROR'
-              : err instanceof DecomposerError
-                ? 'DECOMPOSER_ERROR'
-                : 'INTERNAL_ERROR';
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            const code =
+              err instanceof ToolError ? 'TOOL_ERROR'
+              : err instanceof DecomposerError ? 'DECOMPOSER_ERROR'
+              : 'INTERNAL_ERROR';
+
+            // For INTERNAL_ERROR, don't leak raw error details
+            const safeMessage = code === 'INTERNAL_ERROR'
+              ? 'An internal error occurred'
+              : message;
 
             emit({
               type: 'error',
-              data: { code, message: err.message },
+              data: { code, message: safeMessage },
             });
 
             // Still emit done so client can close cleanly
@@ -212,7 +265,7 @@ export function createChatRoute(
           }
 
           // Cleanup
-          clearInterval(heartbeat);
+          if (heartbeatId) { clearInterval(heartbeatId); heartbeatId = undefined; }
           streamClosed = true;
           try { controller.close(); } catch { /* ignore */ }
         })();
@@ -220,6 +273,7 @@ export function createChatRoute(
 
       cancel() {
         streamClosed = true;
+        if (heartbeatId) { clearInterval(heartbeatId); heartbeatId = undefined; }
       },
     });
 
