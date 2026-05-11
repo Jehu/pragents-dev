@@ -6,14 +6,7 @@ import type { ToolExecutor } from '../../agents/tool-executor.js';
 import type { ResolvedAgent } from '../../config/schema.js';
 import type { EventBuffer } from '../../events/buffer.js';
 import { ChatRequestSchema } from '../../chat/schema.js';
-import type {
-  ThinkingEvent,
-  ToolCallEvent,
-  ToolResultEvent,
-  MessageEvent,
-  ErrorEvent,
-  DoneEvent,
-} from '../../chat/schema.js';
+import type { SSEEventInput } from '../../chat/schema.js';
 import { logger } from '../../logging/index.js';
 
 const HEARTBEAT_INTERVAL_MS = 15_000;
@@ -69,7 +62,7 @@ export function createChatRoute(
 
     const stream = new ReadableStream({
       start(controller) {
-        const emit = (event: ThinkingEvent | ToolCallEvent | ToolResultEvent | MessageEvent | ErrorEvent | DoneEvent) => {
+        const emit = (event: SSEEventInput) => {
           if (streamClosed) return;
           try {
             const payload = `data: ${JSON.stringify(event)}\n\n`;

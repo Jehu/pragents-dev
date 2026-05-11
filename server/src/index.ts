@@ -31,6 +31,9 @@ import { SkillRegistry } from './skills/registry.js';
 import { SkillExtractor } from './skills/extractor.js';
 import { SkillAutoExtractor, createSemanticCompareFn } from './skills/auto-extractor.js';
 import { createSkillsRoute } from './api/routes/skills.js';
+import { createChatRoute } from './api/routes/chat.js';
+import { ConversationManager } from './chat/manager.js';
+import { DirectRouter } from './chat/direct-router.js';
 import { createAgentSession, DefaultResourceLoader, SessionManager } from '@mariozechner/pi-coding-agent';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
@@ -182,6 +185,18 @@ export async function startServer() {
   goalScheduler.setAutoExtractor(skillAutoExtractor);
   logger.info(`Auto-extraction enabled (autoApproveSkills: ${autoApprove})`);
 
+  // Chat Protocol
+  const conversationManager = new ConversationManager();
+  const directRouter = new DirectRouter();
+  const chatRoute = createChatRoute(
+    conversationManager,
+    directRouter,
+    decomposer,
+    toolExecutor,
+    agents,
+    eventBuffer,
+  );
+
   // Build API
   const app = new Hono();
   const wsInject = await setupWebSocket(app, eventBuffer);
@@ -200,6 +215,7 @@ export async function startServer() {
   app.route('/api/v1/memory', createMemoryRoute(memory));
   app.route('/api/v1/skills', createSkillsRoute(skillRegistry, skillExtractor, eventBuffer));
   app.route('/api/v1/events', createEventsRoute(eventBuffer));
+  app.route('/api/v1/chat', chatRoute);
 
   // Traces (read from persisted events table)
   app.get('/api/v1/traces', (c) => {
@@ -302,7 +318,20 @@ export async function startServer() {
     } catch {}
   }, 6 * 60 * 60 * 1000);
 
-  return { app, config, agents, tracker, sessionMgr, memory, eventBuffer, wfRegistry, wfEngine };
+  // Periodic chat conversation TTL cleanup (hourly)
+  setInterval(() => {
+    try {
+      const deleted = conversationManager.expireStale();
+      if (deleted > 0) {
+        logger.info({ deleted }, 'Chat conversations TTL cleanup');
+      }
+    } catch {}
+  }, 60 * 60 * 1000);
+
+  return {
+    app, config, agents, tracker, sessionMgr, memory, eventBuffer,
+    wfRegistry, wfEngine, conversationManager,
+  };
 }
 
 startServer().catch((err) => {

@@ -192,7 +192,7 @@ describe('SSEEventSchema (discriminated union)', () => {
       if (evt.type === 'message') {
         expect(evt.data.subtype).toBe('plan_proposal');
         expect(evt.data.plan).toBeDefined();
-        expect(evt.data.plan.steps).toHaveLength(1);
+        expect(evt.data.plan!.steps).toHaveLength(1);
       }
     }
   });

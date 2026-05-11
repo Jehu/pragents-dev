@@ -138,3 +138,5 @@ export type MessageEvent = z.infer<typeof MessageEventSchema>;
 export type ErrorEvent = z.infer<typeof ErrorEventSchema>;
 export type DoneEvent = z.infer<typeof DoneEventSchema>;
 export type SSEEvent = z.infer<typeof SSEEventSchema>;
+/** Input type for SSE events — version is optional (defaulted by schema). */
+export type SSEEventInput = z.input<typeof SSEEventSchema>;
