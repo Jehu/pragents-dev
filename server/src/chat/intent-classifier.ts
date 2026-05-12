@@ -67,9 +67,18 @@ Return ONLY a JSON object with this exact structure, no markdown, no explanation
 
 export class IntentClassifier {
   private agents: ResolvedAgent[];
+  private modelOverride: string | undefined;
 
-  constructor(agents: ResolvedAgent[]) {
+  /**
+   * @param agents — the configured agents (used as fallback model source)
+   * @param modelOverride — optional model string ("provider/modelId") to use
+   *   for classification instead of the first agent's model. Useful for
+   *   running a fast/cheap model (e.g. claude-haiku) for routing while
+   *   agents use stronger models for actual work.
+   */
+  constructor(agents: ResolvedAgent[], modelOverride?: string) {
     this.agents = agents;
+    this.modelOverride = modelOverride;
   }
 
   /**
@@ -109,23 +118,29 @@ export class IntentClassifier {
       resourceLoader: loader,
       sessionManager: SessionManager.inMemory() as any,
       model: model as any,
-      // Classification doesn't need reasoning — disable it for speed and
-      // to keep latency bounded on reasoning-capable models.
+      // Classification doesn't need reasoning or tools — disable both to
+      // force the model to answer with plain text JSON, not tool calls.
       thinkingLevel: 'off',
+      noTools: 'all',
     });
 
     try {
       let responseText = '';
       const responsePromise = new Promise<string>((resolve) => {
         const unsubscribe = session.subscribe((event: any) => {
-          // The pi SDK fires message_end with the finalized assistant message.
+          // pi SDK fires message_end with the finalized assistant message.
           // We collect text content from there (not from streaming updates).
           if (event.type === 'message_end' && event.message?.role === 'assistant') {
             const content = event.message.content;
             if (typeof content === 'string') {
-              responseText += content;
+              responseText = content;
             } else if (Array.isArray(content)) {
-              responseText += content.map((b: any) => b.text || '').join('');
+              responseText = content
+                .filter((b: any) => b?.text)
+                .map((b: any) => b.text)
+                .join('');
+            } else if (content && typeof content === 'object' && (content as any).text) {
+              responseText = (content as any).text;
             }
           }
           if (event.type === 'agent_end') {
@@ -174,21 +189,23 @@ export class IntentClassifier {
   }
 
   /**
-   * Pick the best model string for classification — prefers fast/cheap models.
-   * Returns the pragents config string ("<provider>/<modelId>"); the caller
-   * resolves it to a pi-ai Model object via resolveModel().
+   * Pick the best model string for classification.
+   * Resolution order:
+   *   1. Explicit override passed to the constructor (config.chat.classifierModel)
+   *   2. First agent that already runs a fast/cheap model (haiku, flash)
+   *   3. First configured agent's model
+   *   4. Empty string (resolveModel will return null → classifier returns null)
    */
   private pickModelString(): string {
-    // Prefer fast/cheap models (haiku-class, flash-class)
+    if (this.modelOverride) return this.modelOverride;
+
     const fastAgent = this.agents.find((a) =>
       a.model?.includes('haiku') || a.model?.includes('flash'),
     );
     if (fastAgent?.model) return fastAgent.model;
 
-    // Fall back to first agent's model
     if (this.agents[0]?.model) return this.agents[0].model;
 
-    // Absolute fallback (will likely fail to resolve; classifier returns null)
     return '';
   }
 }

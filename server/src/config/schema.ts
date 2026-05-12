@@ -68,6 +68,17 @@ const ProjectConfig = z.object({
     .default({}),
 });
 
+const ChatConfig = z.object({
+  /**
+   * Model used by the IntentClassifier. Format: "provider/modelId"
+   * (e.g. "anthropic/claude-haiku-3-5-20241022", "deepseek/deepseek-v4-flash").
+   * Pick a fast, cheap model — the classifier prompt is short and only
+   * needs to return a JSON object with a tool name. Falls back to the
+   * first agent's model when omitted.
+   */
+  classifierModel: z.string().optional(),
+});
+
 const InterfacesConfig = z.object({
   web: z
     .object({
@@ -86,6 +97,7 @@ export const PragentsConfig = z.object({
   company: CompanyConfig,
   projects: z.record(z.string(), ProjectConfig).default({}),
   interfaces: InterfacesConfig.default({}),
+  chat: ChatConfig.optional(),
   costs: z.record(z.string(), CostRate).optional(),
 });
 

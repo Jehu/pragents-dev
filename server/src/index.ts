@@ -187,7 +187,11 @@ export async function startServer() {
 
   // Chat Protocol
   const conversationManager = new ConversationManager();
-  const classifier = new IntentClassifier(agents);
+  const classifierModel = config.chat?.classifierModel;
+  if (classifierModel) {
+    logger.info({ model: classifierModel }, 'IntentClassifier model override active');
+  }
+  const classifier = new IntentClassifier(agents, classifierModel);
   const chatRoute = createChatRoute(
     conversationManager,
     classifier,

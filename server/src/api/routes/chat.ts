@@ -212,7 +212,9 @@ export function createChatRoute(
               const planSteps = plan.steps.map((s) => ({
                 description: s.description,
                 agentId: s.agentId,
-                dependsOn: s.dependsOn,
+                ...(s.dependsOn != null
+                  ? { dependsOn: Array.isArray(s.dependsOn) ? s.dependsOn[0] : s.dependsOn }
+                  : {}),
               }));
 
               emit({

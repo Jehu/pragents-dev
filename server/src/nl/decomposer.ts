@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 export const PlanStepSchema = z.object({
   description: z.string(),
   agentId: z.string(),
-  dependsOn: z.number().int().optional(),
+  dependsOn: z.union([z.number().int(), z.array(z.number().int())]).nullable().optional(),
 });
 
 export const PlanSchema = z.object({
@@ -61,10 +61,10 @@ Rules: Use agentId from the provided list. Order steps logically. Keep descripti
       resourceLoader: loader,
       sessionManager: SessionManager.inMemory() as any,
       model: model as any,
-      // Disable reasoning — for plan generation we want direct JSON output,
-      // not reasoning chains that may suppress the visible response on
-      // reasoning-only models like deepseek-v4-flash.
+      // Disable reasoning and tools — for plan generation we want direct
+      // JSON output, not reasoning chains or tool calls.
       thinkingLevel: 'off',
+      noTools: 'all',
     });
 
     try {

@@ -41,7 +41,9 @@ export function createNLRoutes(decomposer: NLDecomposer, agents: ResolvedAgent[]
         agent: s.agentId,
         prompt: s.description,
         output: `step-${i}-output`,
-        ...(s.dependsOn !== undefined ? { input: `step-${s.dependsOn}-output` } : {}),
+        ...(s.dependsOn != null
+          ? { input: `step-${Array.isArray(s.dependsOn) ? s.dependsOn[0] : s.dependsOn}-output` }
+          : {}),
       })),
     };
 
