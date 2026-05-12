@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
+import { z } from 'zod';
 import type { ConversationManager } from '../../chat/manager.js';
 import type { IntentClassifier } from '../../chat/intent-classifier.js';
 import type { NLDecomposer } from '../../nl/decomposer.js';
@@ -46,6 +47,19 @@ export function createChatRoute(
 
   // Apply body size limit to prevent memory exhaustion DoS
   app.use('*', bodyLimit({ maxSize: MAX_BODY_SIZE }));
+
+  // GET /api/v1/chat/conversations — list recent conversations
+  app.get('/conversations', (c) => {
+    const limit = z.coerce.number().int().min(1).max(100).safeParse(c.req.query('limit'));
+    const projectId = c.req.query('projectId') || undefined;
+
+    const conversations = conversationManager.listRecent(
+      limit.success ? limit.data : 20,
+      projectId,
+    );
+
+    return c.json({ conversations });
+  });
 
   app.post('/', async (c) => {
     // 1. Parse and validate body

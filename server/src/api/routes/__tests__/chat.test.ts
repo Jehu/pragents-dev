@@ -509,4 +509,73 @@ describe('Chat SSE Route — POST /api/v1/chat', () => {
     // The message should contain the tool name prefix, not just raw internal info
     expect(errorEvent!.data.message).toContain('query_tasks');
   });
+
+  // ---- GET /api/v1/chat/conversations ----
+
+  it('lists recent conversations ordered by last_activity_at DESC', async () => {
+    const app = createApp();
+
+    // Create 3 conversations via POST to ensure we have at least that many
+    for (const msg of ['one', 'two', 'three']) {
+      const res = await app.request('/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: msg }),
+      });
+      await readStreamText(res); // consume stream
+    }
+
+    const listRes = await app.request('/conversations');
+    expect(listRes.status).toBe(200);
+    const body = await listRes.json();
+    expect(body.conversations.length).toBeGreaterThanOrEqual(3);
+    // Order check: timestamps should be non-increasing
+    for (let i = 0; i < body.conversations.length - 1; i++) {
+      expect(new Date(body.conversations[i].lastActivityAt).getTime())
+        .toBeGreaterThanOrEqual(new Date(body.conversations[i + 1].lastActivityAt).getTime());
+    }
+  });
+
+  it('respects limit query param', async () => {
+    const app = createApp();
+    for (const msg of ['a', 'b', 'c']) {
+      const res = await app.request('/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: msg }),
+      });
+      await readStreamText(res);
+    }
+
+    const listRes = await app.request('/conversations?limit=1');
+    const body = await listRes.json();
+    expect(body.conversations).toHaveLength(1);
+  });
+
+  it('filters by projectId', async () => {
+    const app = createApp();
+    const uniquePid = `proj-filter-${Date.now()}`;
+
+    // Conversation with projectId
+    const res1 = await app.request('/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: 'a', projectId: uniquePid }),
+    });
+    await readStreamText(res1);
+
+    const listRes = await app.request(`/conversations?projectId=${uniquePid}`);
+    const body = await listRes.json();
+    expect(body.conversations.length).toBeGreaterThanOrEqual(1);
+    for (const conv of body.conversations) {
+      expect(conv.projectId).toBe(uniquePid);
+    }
+  });
+
+  it('returns empty array when filtering by non-existent projectId', async () => {
+    const app = createApp();
+    const listRes = await app.request('/conversations?projectId=__nonexistent__');
+    const body = await listRes.json();
+    expect(body.conversations).toEqual([]);
+  });
 });

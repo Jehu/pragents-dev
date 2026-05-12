@@ -111,6 +111,20 @@ export class ConversationManager {
     return row ?? null;
   }
 
+  listRecent(limit: number = 20, projectId?: string): Conversation[] {
+    const db = this.getDb();
+    const rows = db
+      .prepare(
+        `SELECT id, project_id as projectId, last_activity_at as lastActivityAt, created_at as createdAt
+         FROM chat_conversations
+         WHERE (? IS NULL OR project_id = ?)
+         ORDER BY last_activity_at DESC
+         LIMIT ?`,
+      )
+      .all(projectId ?? null, projectId ?? null, limit) as Conversation[];
+    return rows;
+  }
+
   expireStale(): number {
     const db = this.getDb();
     const cutoff = new Date(Date.now() - this.ttlMs).toISOString();
