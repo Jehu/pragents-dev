@@ -1,5 +1,6 @@
 import { createAgentSession, DefaultResourceLoader, SessionManager } from '@mariozechner/pi-coding-agent';
 import type { ResolvedAgent } from '../config/schema.js';
+import { resolveModel } from '../agents/model-resolver.js';
 import { PragentsSkillFrontmatter, type PragentsSkillFrontmatter as SkillFM } from './schema.js';
 import type { AgentSessionManager } from '../agents/manager.js';
 import { getDb } from '../db/sqlite.js';
@@ -82,7 +83,13 @@ export class SkillExtractor {
     const systemPrompt = this.buildExtractionPrompt();
     const userMessage = `Session trace to analyze:\n\n${traceText}`;
 
-    // 5. Isolated pi SDK session (NLDecomposer pattern)
+    // 5. Resolve model string to pi-ai Model object (string is just a config convention)
+    const resolvedModel = resolveModel(model);
+    if (!resolvedModel) {
+      throw new Error(`SkillExtractor: model "${model}" could not be resolved against the pi-ai registry`);
+    }
+
+    // 6. Isolated pi SDK session (NLDecomposer pattern)
     const tmpDir = mkdtempSync(join(tmpdir(), 'pragents-skill-extract-'));
     mkdirSync(join(tmpDir, '.pi'), { recursive: true });
 
@@ -98,7 +105,7 @@ export class SkillExtractor {
       cwd: tmpDir,
       resourceLoader: loader,
       sessionManager: SessionManager.inMemory() as any,
-      model: model as any,
+      model: resolvedModel as any,
     });
 
     try {
@@ -106,7 +113,7 @@ export class SkillExtractor {
       let responseText = '';
       const responsePromise = new Promise<string>((resolve) => {
         const unsubscribe = session.subscribe((event: any) => {
-          if (event.type === 'assistant_message' && event.message?.content) {
+          if (event.type === 'message_end' && event.message?.role === 'assistant') {
             const content = event.message.content;
             responseText += typeof content === 'string'
               ? content
@@ -310,7 +317,7 @@ If no clear pattern is extractable, return:
       let retryText = '';
       const retryPromise = new Promise<string>((resolve) => {
         const unsubscribe = session.subscribe((event: any) => {
-          if (event.type === 'assistant_message' && event.message?.content) {
+          if (event.type === 'message_end' && event.message?.role === 'assistant') {
             const content = event.message.content;
             retryText += typeof content === 'string'
               ? content

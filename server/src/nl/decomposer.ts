@@ -1,5 +1,6 @@
 import { createAgentSession, DefaultResourceLoader, SessionManager } from '@mariozechner/pi-coding-agent';
 import type { ResolvedAgent } from '../config/schema.js';
+import { resolveModel } from '../agents/model-resolver.js';
 import { z } from 'zod';
 import { mkdtempSync, rmSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -22,8 +23,15 @@ export class NLDecomposer {
   async decompose(prompt: string, agents: ResolvedAgent[]): Promise<Plan> {
     if (agents.length === 0) throw new Error('No agents configured');
 
-    const haikuAgent = agents.find((a) => a.model?.includes('haiku'));
-    const model = haikuAgent?.model || agents[0].model || 'claude-sonnet';
+    // Prefer fast/cheap models (haiku, flash) for planning
+    const fastAgent = agents.find((a) =>
+      a.model?.includes('haiku') || a.model?.includes('flash'),
+    );
+    const modelString = fastAgent?.model || agents[0].model;
+    const model = resolveModel(modelString);
+    if (!model) {
+      throw new Error(`NLDecomposer: model "${modelString}" could not be resolved against the pi-ai registry`);
+    }
 
     const agentList = agents
       .map((a) => `- ${a.id} (${a.type}): ${a.skills.join(', ') || 'general'}`)
@@ -53,6 +61,10 @@ Rules: Use agentId from the provided list. Order steps logically. Keep descripti
       resourceLoader: loader,
       sessionManager: SessionManager.inMemory() as any,
       model: model as any,
+      // Disable reasoning — for plan generation we want direct JSON output,
+      // not reasoning chains that may suppress the visible response on
+      // reasoning-only models like deepseek-v4-flash.
+      thinkingLevel: 'off',
     });
 
     try {
@@ -60,10 +72,14 @@ Rules: Use agentId from the provided list. Order steps logically. Keep descripti
       let unsubscribe = () => {};
       const responsePromise = new Promise<string>((resolve, reject) => {
         unsubscribe = session.subscribe((event: any) => {
-          if (event.type === 'assistant_message' && event.message?.content) {
-            responseText += typeof event.message.content === 'string'
-              ? event.message.content
-              : event.message.content.map((b: any) => b.text || '').join('');
+          // pi SDK fires message_end with the finalized assistant message.
+          if (event.type === 'message_end' && event.message?.role === 'assistant') {
+            const content = event.message.content;
+            if (typeof content === 'string') {
+              responseText += content;
+            } else if (Array.isArray(content)) {
+              responseText += content.map((b: any) => b.text || '').join('');
+            }
           }
           if (event.type === 'agent_end') resolve(responseText);
         });
@@ -90,8 +106,13 @@ Rules: Use agentId from the provided list. Order steps logically. Keep descripti
         const retryRaw = await new Promise<string>((resolve) => {
           let rt = '';
           retryUnsubscribe = session.subscribe((event: any) => {
-            if (event.type === 'assistant_message' && event.message?.content) {
-              rt += typeof event.message.content === 'string' ? event.message.content : event.message.content.map((b: any) => b.text || '').join('');
+            if (event.type === 'message_end' && event.message?.role === 'assistant') {
+              const content = event.message.content;
+              if (typeof content === 'string') {
+                rt += content;
+              } else if (Array.isArray(content)) {
+                rt += content.map((b: any) => b.text || '').join('');
+              }
             }
             if (event.type === 'agent_end') resolve(rt);
           });

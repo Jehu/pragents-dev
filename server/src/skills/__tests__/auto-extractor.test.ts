@@ -357,8 +357,8 @@ describe('createSemanticCompareFn', () => {
       subscribe: vi.fn((cb: any) => {
         setTimeout(() => {
           cb({
-            type: 'assistant_message',
-            message: { content: '{"match":true,"confidence":0.92}' },
+            type: 'message_end',
+            message: { role: 'assistant', content: '{"match":true,"confidence":0.92}' },
           });
           setTimeout(() => cb({ type: 'agent_end' }), 5);
         }, 5);
@@ -394,8 +394,8 @@ describe('createSemanticCompareFn', () => {
       subscribe: vi.fn((cb: any) => {
         setTimeout(() => {
           cb({
-            type: 'assistant_message',
-            message: { content: '{"match":false,"confidence":0.3}' },
+            type: 'message_end',
+            message: { role: 'assistant', content: '{"match":false,"confidence":0.3}' },
           });
           setTimeout(() => cb({ type: 'agent_end' }), 5);
         }, 5);
@@ -426,8 +426,8 @@ describe('createSemanticCompareFn', () => {
       subscribe: vi.fn((cb: any) => {
         setTimeout(() => {
           cb({
-            type: 'assistant_message',
-            message: { content: 'not json at all' },
+            type: 'message_end',
+            message: { role: 'assistant', content: 'not json at all' },
           });
           setTimeout(() => cb({ type: 'agent_end' }), 5);
         }, 5);

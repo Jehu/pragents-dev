@@ -1,5 +1,6 @@
 import { createAgentSession, DefaultResourceLoader, SessionManager } from '@mariozechner/pi-coding-agent';
 import type { ResolvedAgent } from '../config/schema.js';
+import { resolveModel } from '../agents/model-resolver.js';
 import { z } from 'zod';
 import { mkdtempSync, rmSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -78,8 +79,14 @@ export class IntentClassifier {
   async classify(message: string): Promise<IntentResult | null> {
     if (!message?.trim()) return null;
 
-    // Pick the fastest/cheapest available model
-    const model = this.resolveModel();
+    // Pick the fastest/cheapest available model and resolve to pi-ai Model object
+    const modelString = this.pickModelString();
+    const model = resolveModel(modelString);
+    if (!model) {
+      logger.warn({ modelString },
+        'IntentClassifier: model could not be resolved, skipping classification');
+      return null;
+    }
 
     // Setup temp dir for SDK session
     const tmpDir = mkdtempSync(join(tmpdir(), 'pragents-intent-'));
@@ -102,16 +109,24 @@ export class IntentClassifier {
       resourceLoader: loader,
       sessionManager: SessionManager.inMemory() as any,
       model: model as any,
+      // Classification doesn't need reasoning — disable it for speed and
+      // to keep latency bounded on reasoning-capable models.
+      thinkingLevel: 'off',
     });
 
     try {
       let responseText = '';
       const responsePromise = new Promise<string>((resolve) => {
         const unsubscribe = session.subscribe((event: any) => {
-          if (event.type === 'assistant_message' && event.message?.content) {
-            responseText += typeof event.message.content === 'string'
-              ? event.message.content
-              : event.message.content.map((b: any) => b.text || '').join('');
+          // The pi SDK fires message_end with the finalized assistant message.
+          // We collect text content from there (not from streaming updates).
+          if (event.type === 'message_end' && event.message?.role === 'assistant') {
+            const content = event.message.content;
+            if (typeof content === 'string') {
+              responseText += content;
+            } else if (Array.isArray(content)) {
+              responseText += content.map((b: any) => b.text || '').join('');
+            }
           }
           if (event.type === 'agent_end') {
             unsubscribe();
@@ -159,17 +174,21 @@ export class IntentClassifier {
   }
 
   /**
-   * Resolve the best model for classification — prefers fast/cheap models.
+   * Pick the best model string for classification — prefers fast/cheap models.
+   * Returns the pragents config string ("<provider>/<modelId>"); the caller
+   * resolves it to a pi-ai Model object via resolveModel().
    */
-  private resolveModel(): string {
-    // Prefer haiku-class models for fast classification
-    const haikuAgent = this.agents.find((a) => a.model?.includes('haiku'));
-    if (haikuAgent?.model) return haikuAgent.model;
+  private pickModelString(): string {
+    // Prefer fast/cheap models (haiku-class, flash-class)
+    const fastAgent = this.agents.find((a) =>
+      a.model?.includes('haiku') || a.model?.includes('flash'),
+    );
+    if (fastAgent?.model) return fastAgent.model;
 
     // Fall back to first agent's model
     if (this.agents[0]?.model) return this.agents[0].model;
 
-    // Absolute fallback
-    return 'claude-sonnet';
+    // Absolute fallback (will likely fail to resolve; classifier returns null)
+    return '';
   }
 }

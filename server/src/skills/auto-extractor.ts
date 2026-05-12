@@ -288,7 +288,7 @@ export function createSemanticCompareFn(
         let responseText = '';
         const responsePromise = new Promise<string>((resolve) => {
           const unsubscribe = session.subscribe((event: any) => {
-            if (event.type === 'assistant_message' && event.message?.content) {
+            if (event.type === 'message_end' && event.message?.role === 'assistant') {
               const content = event.message.content;
               responseText += typeof content === 'string'
                 ? content
