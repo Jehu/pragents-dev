@@ -37,33 +37,44 @@ export type IntentResult = z.infer<typeof IntentResultSchema>;
 const CLASSIFIER_TIMEOUT_MS = 10_000;
 
 const SYSTEM_PROMPT = `You are an intent classifier for a developer operations platform.
-Classify the user message into EXACTLY ONE of these intents:
+Your ONLY job: pick the single best tool for the user's message.
 
-- "query_tasks" — the user wants to see or list tasks (by status, project, or agent)
-- "create_task" — the user wants to create a new task
-- "run_workflow" — the user wants to run, start, trigger, or deploy a named workflow
-- "list_workflows" — the user wants to see available workflows
-- "search_memory" — the user wants to recall or search stored facts, memories, or knowledge
-- "remember_fact" — the user wants to save or remember a new fact
-- "delete_fact" — the user wants to delete or forget a stored fact
-- "list_agents" — the user wants to see available agents or their status
-- "get_cost_summary" — the user wants to see token usage or costs
-- "list_skills" — the user wants to see available skills
-- "list_pending_gates" — the user wants to see pending approvals or human gates
-- "list_goals" — the user wants to see goals or objectives
-- "list_events" — the user wants to see recent activity or events
-- "complex" — the message is ambiguous, chit-chat, or requires planning (NOT a simple lookup)
+DECISION RULE (apply in order):
+1. If the message is a simple lookup/fetch ("show me X", "list Y", "what is Z")
+   → route to the specific tool (query_tasks, list_agents, list_workflows, etc.).
+2. If the message asks to CREATE, RUN, DELETE, or MODIFY something
+   → route to the specific tool (create_task, run_workflow, delete_fact, etc.).
+3. ONLY if none of the above tools fit → use "complex".
 
-Also extract any relevant arguments from the message:
-- For "query_tasks": extract "status" (e.g., failed, pending, blocked)
-- For "run_workflow": extract "name" (the workflow name)
-- For "search_memory": extract "query" (the search term)
-- For "create_task": extract "description" and optionally "agentId"
-- For "remember_fact": extract the fact "content" and optionally "category"
-- For all others: leave args empty {}.
+Available tools:
+- "query_tasks" — list or search tasks (often includes status words like failed/pending/blocked)
+- "create_task" — create a new task
+- "run_workflow" — start, trigger, deploy a named workflow
+- "list_workflows" — show available workflows
+- "search_memory" — recall/search stored facts or knowledge
+- "remember_fact" — save a new fact
+- "delete_fact" — delete a stored fact
+- "list_agents" — show available agents or their status
+- "get_cost_summary" — show token usage or costs
+- "list_skills" — show available skills
+- "list_pending_gates" — show pending approvals
+- "list_goals" — show goals/objectives
+- "list_events" — show recent activity
+- "complex" — anything that doesn't fit the above (building, planning, analyzing, chit-chat)
 
-Return ONLY a JSON object with this exact structure, no markdown, no explanation outside the JSON:
-{"tool":"<intent>","args":{...}}`;
+EXAMPLES:
+"Zeig alle Agents" → {"tool":"list_agents","args":{}}
+"Welche Tasks sind failed?" → {"tool":"query_tasks","args":{"status":"failed"}}
+"Was kostet das?" → {"tool":"get_cost_summary","args":{}}
+"Start den weekly-article Workflow" → {"tool":"run_workflow","args":{"name":"weekly-article"}}
+"Erstell einen Task für SEO" → {"tool":"create_task","args":{"description":"SEO task"}}
+"Was weißt du über den API Bug?" → {"tool":"search_memory","args":{"query":"API Bug"}}
+"Merk dir: Port 3000 ist der API-Server" → {"tool":"remember_fact","args":{"content":"Port 3000 ist der API-Server"}}
+"Bau eine Landing Page" → {"tool":"complex","args":{}}
+"Optimier meine SEO" → {"tool":"complex","args":{}}
+"Hallo" → {"tool":"complex","args":{}}
+
+Return ONLY: {"tool":"<tool>","args":{...}}`;
 
 export class IntentClassifier {
   private agents: ResolvedAgent[];
