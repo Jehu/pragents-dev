@@ -240,3 +240,71 @@ To make pragents skills visible to pi, add the skills directory to pi's settings
 ```
 
 Set `disable-model-invocation: true` in a skill's frontmatter to hide it from pi's system prompt while keeping it available via `/skill:name`.
+
+## Chat API
+
+PrAgents exposes a conversational interface at `POST /api/v1/chat`. Clients send a JSON message and receive a typed SSE (Server-Sent Events) stream. Multi-turn conversations are linked via `conversationId`.
+
+### Quick start
+
+```bash
+# One-shot command (DirectRouter — no LLM)
+curl -X POST http://localhost:3000/api/v1/chat \
+  -H 'Content-Type: application/json' \
+  -d '{"message":"Zeig alle Agents"}'
+
+# Complex request (falls through to NL Decomposer → returns plan_proposal)
+curl -X POST http://localhost:3000/api/v1/chat \
+  -H 'Content-Type: application/json' \
+  -d '{"message":"Bau eine Landing Page für mein Startup"}'
+
+# Multi-turn (pass conversationId from the done event)
+curl -X POST http://localhost:3000/api/v1/chat \
+  -H 'Content-Type: application/json' \
+  -d '{"message":"Ja, führ den Plan aus","conversationId":"<id-from-done-event>","confirm":true}'
+```
+
+### SSE event types
+
+| Event | When | Data |
+|-------|------|------|
+| `thinking` | Processing started | `{ message: string }` |
+| `tool_call` | DirectRouter matched a tool | `{ tool: string, args: object }` |
+| `tool_result` | Tool execution completed | `{ tool: string, result: string }` |
+| `message` | Human-readable response | `{ subtype, content, plan? }` |
+| `error` | Processing failed | `{ code: string, message: string }` |
+| `done` | Stream finished | `{ conversationId: string }` |
+
+### Message subtypes
+
+| Subtype | Meaning |
+|---------|---------|
+| `text` | Plain text response (after tool execution) |
+| `plan_proposal` | NL Decomposer created a plan — awaiting confirmation |
+| `status` | Status update |
+| `error_message` | Non-fatal error feedback |
+
+### Routing
+
+Two tiers, zero-config:
+
+1. **DirectRouter** — keyword matching against the 12 most common M6 tools (query tasks, list agents, search memory, run workflow, …). No LLM call, sub-100ms latency.
+2. **NL Decomposer** — fallback for complex requests. Delegates to a lightweight LLM that produces a structured plan. The plan is returned as `plan_proposal` and pauses for confirmation.
+
+### Request body
+
+```typescript
+{
+  message: string;           // required
+  conversationId?: string;   // omit to start a new conversation
+  projectId?: string;        // scope to a specific project
+  attachments?: Array<{
+    name: string;
+    mimeType: "image/png" | "image/jpeg" | "image/webp" | "text/plain" | "application/json" | "text/markdown";
+    data: string;            // base64-encoded, max ~10 MB
+  }>;
+  confirm?: boolean;         // confirm a proposed plan
+  modifications?: string;    // modifications when confirming a plan
+}
+```
+
