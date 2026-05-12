@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { Hono } from 'hono';
 import { initDb, closeDb } from '../../../db/sqlite.js';
 import { ConversationManager } from '../../../chat/manager.js';
-import { DirectRouter } from '../../../chat/direct-router.js';
+import type { IntentClassifier } from '../../../chat/intent-classifier.js';
 import { createChatRoute } from '../chat.js';
 import { SSEEventSchema } from '../../../chat/schema.js';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -119,7 +119,7 @@ class MockEventBuffer {
 describe('Chat SSE Route — POST /api/v1/chat', () => {
   const tmpDir = mkdtempSync(join(tmpdir(), 'pragents-chat-route-'));
   let conversationManager: ConversationManager;
-  let directRouter: DirectRouter;
+  let mockClassifier: IntentClassifier;
   let mockDecomposer: NLDecomposer;
   let mockToolExecutor: ToolExecutor;
   let agents: ResolvedAgent[];
@@ -128,11 +128,13 @@ describe('Chat SSE Route — POST /api/v1/chat', () => {
   beforeAll(() => {
     initDb(join(tmpDir, 'test.db'));
     conversationManager = new ConversationManager();
-    directRouter = new DirectRouter();
     agents = createMockAgents();
     eventBuffer = new MockEventBuffer();
 
-    // Mock NL Decomposer
+    // Mock IntentClassifier
+    mockClassifier = {
+      classify: vi.fn().mockResolvedValue({ tool: 'list_agents', args: {} }),
+    } as any;
     mockDecomposer = {
       decompose: vi.fn().mockResolvedValue({
         steps: [
@@ -155,7 +157,7 @@ describe('Chat SSE Route — POST /api/v1/chat', () => {
   function createApp(): Hono {
     return createChatRoute(
       conversationManager,
-      directRouter,
+      mockClassifier as IntentClassifier,
       mockDecomposer,
       mockToolExecutor,
       agents,
@@ -198,8 +200,10 @@ describe('Chat SSE Route — POST /api/v1/chat', () => {
     expect(res.status).toBe(400);
   });
 
-  // ---- AE1: One-shot Command (DirectRouter match) ----
+  // ---- AE1: One-shot Command (IntentClassifier match) ----
   it('AE1: streams tool_call, tool_result, message, done for direct match', async () => {
+    // Set up classifier to return list_agents
+    (mockClassifier.classify as any).mockResolvedValue({ tool: 'list_agents', args: {} });
     // Set up tool executor to return a specific result
     (mockToolExecutor.execute as any).mockResolvedValue(
       JSON.stringify([{ id: 'a1', type: 'dev', projectId: 'proj-1' }]),
@@ -262,9 +266,9 @@ describe('Chat SSE Route — POST /api/v1/chat', () => {
     expect(history.length).toBe(4);
   });
 
-  // ---- AE3: NL Decomposition → plan_proposal ----
-  it('AE3: streams plan_proposal for complex message not matched by DirectRouter', async () => {
-    const app = createApp();
+  // ---- AE3: NL Decomposition → plan_proposal (classifier returns "complex") ----
+  it('AE3: streams plan_proposal when classifier returns complex', async () => {
+    (mockClassifier.classify as any).mockResolvedValue({ tool: 'complex', args: {} });    const app = createApp();
     const res = await app.request('/', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -290,6 +294,7 @@ describe('Chat SSE Route — POST /api/v1/chat', () => {
 
   // ---- AE4: Message with attachment ----
   it('AE4: forwards attachment data to decomposer', async () => {
+    (mockClassifier.classify as any).mockResolvedValue({ tool: 'complex', args: {} });
     const app = createApp();
     const res = await app.request('/', {
       method: 'POST',
@@ -310,6 +315,7 @@ describe('Chat SSE Route — POST /api/v1/chat', () => {
 
   // ---- Error path: Tool executor throws ----
   it('emits error event when tool executor throws', async () => {
+    (mockClassifier.classify as any).mockResolvedValue({ tool: 'query_tasks', args: {} });
     (mockToolExecutor.execute as any).mockRejectedValueOnce(new Error('Tool failed'));
 
     const app = createApp();
@@ -329,6 +335,7 @@ describe('Chat SSE Route — POST /api/v1/chat', () => {
 
   // ---- Error path: NL Decomposer throws ----
   it('emits error event when NL decomposer throws', async () => {
+    (mockClassifier.classify as any).mockResolvedValue({ tool: 'complex', args: {} });
     (mockDecomposer.decompose as any).mockRejectedValueOnce(new Error('Decomposer error'));
 
     const app = createApp();
@@ -348,6 +355,7 @@ describe('Chat SSE Route — POST /api/v1/chat', () => {
 
   // ---- SSE events validate against schemas ----
   it('all emitted SSE events validate against SSEEventSchema', async () => {
+    (mockClassifier.classify as any).mockResolvedValue({ tool: 'list_agents', args: {} });
     const app = createApp();
     const res = await app.request('/', {
       method: 'POST',
@@ -366,6 +374,7 @@ describe('Chat SSE Route — POST /api/v1/chat', () => {
 
   // ---- done event includes conversationId ----
   it('done event always includes conversationId', async () => {
+    (mockClassifier.classify as any).mockResolvedValue({ tool: 'complex', args: {} });
     const app = createApp();
     const res = await app.request('/', {
       method: 'POST',
@@ -384,6 +393,7 @@ describe('Chat SSE Route — POST /api/v1/chat', () => {
 
   // ---- Heartbeats do not interfere with events ----
   it('does not emit heartbeat lines as parseable events', async () => {
+    (mockClassifier.classify as any).mockResolvedValue({ tool: 'list_agents', args: {} });
     const app = createApp();
     const res = await app.request('/', {
       method: 'POST',
@@ -402,6 +412,7 @@ describe('Chat SSE Route — POST /api/v1/chat', () => {
 
   // ---- Conversation persists across requests ----
   it('persists user and assistant messages in conversation', async () => {
+    (mockClassifier.classify as any).mockResolvedValue({ tool: 'list_agents', args: {} });
     const app = createApp();
     const res = await app.request('/', {
       method: 'POST',
@@ -423,6 +434,7 @@ describe('Chat SSE Route — POST /api/v1/chat', () => {
 
   // ---- R7 / F2 Steps 6-8: confirm / modifications flow ----
   it('passes modifications context to decomposer when confirm:true', async () => {
+    (mockClassifier.classify as any).mockResolvedValue({ tool: 'complex', args: {} });
     const app = createApp();
     const res = await app.request('/', {
       method: 'POST',
@@ -477,6 +489,7 @@ describe('Chat SSE Route — POST /api/v1/chat', () => {
 
   // ---- P1-3: error message for TOOL_ERROR includes tool name safely ----
   it('emits safe error event with TOOL_ERROR code (no raw leak)', async () => {
+    (mockClassifier.classify as any).mockResolvedValue({ tool: 'query_tasks', args: {} });
     // Tool executor throws an Error — this becomes TOOL_ERROR
     (mockToolExecutor.execute as any).mockRejectedValueOnce(new Error('raw internal info'));
 

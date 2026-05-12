@@ -33,7 +33,7 @@ import { SkillAutoExtractor, createSemanticCompareFn } from './skills/auto-extra
 import { createSkillsRoute } from './api/routes/skills.js';
 import { createChatRoute } from './api/routes/chat.js';
 import { ConversationManager } from './chat/manager.js';
-import { DirectRouter } from './chat/direct-router.js';
+import { IntentClassifier } from './chat/intent-classifier.js';
 import { createAgentSession, DefaultResourceLoader, SessionManager } from '@mariozechner/pi-coding-agent';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
@@ -187,10 +187,10 @@ export async function startServer() {
 
   // Chat Protocol
   const conversationManager = new ConversationManager();
-  const directRouter = new DirectRouter();
+  const classifier = new IntentClassifier(agents);
   const chatRoute = createChatRoute(
     conversationManager,
-    directRouter,
+    classifier,
     decomposer,
     toolExecutor,
     agents,

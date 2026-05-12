@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import type { ConversationManager } from '../../chat/manager.js';
-import type { DirectRouter } from '../../chat/direct-router.js';
+import type { IntentClassifier } from '../../chat/intent-classifier.js';
 import type { NLDecomposer } from '../../nl/decomposer.js';
 import type { ToolExecutor } from '../../agents/tool-executor.js';
 import type { ResolvedAgent } from '../../config/schema.js';
@@ -36,7 +36,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promi
  */
 export function createChatRoute(
   conversationManager: ConversationManager,
-  directRouter: DirectRouter,
+  classifier: IntentClassifier,
   decomposer: NLDecomposer,
   toolExecutor: ToolExecutor,
   agents: ResolvedAgent[],
@@ -143,41 +143,41 @@ export function createChatRoute(
               data: { message: 'Processing your request...' },
             });
 
-            // 4c. Try DirectRouter
-            const routeResult = directRouter.tryRoute(message);
+            // 4c. Classify intent via LLM classifier
+            const classification = await classifier.classify(message);
 
-            if (routeResult) {
+            if (classification && classification.tool !== 'complex') {
               // Inject projectId into tool args if available
               const toolArgs = {
-                ...routeResult.args,
+                ...classification.args,
                 ...(projectId ? { projectId } : {}),
               };
 
               // Direct match — execute tool
               emit({
                 type: 'tool_call',
-                data: { tool: routeResult.tool, args: toolArgs },
+                data: { tool: classification.tool, args: toolArgs },
               });
 
               let toolResult: string;
               try {
                 toolResult = await withTimeout(
-                  toolExecutor.execute(routeResult.tool, toolArgs),
+                  toolExecutor.execute(classification.tool, toolArgs),
                   TOOL_TIMEOUT_MS,
-                  `Tool "${routeResult.tool}" timed out`,
+                  `Tool "${classification.tool}" timed out`,
                 );
               } catch (err) {
                 const message = err instanceof Error ? err.message : String(err);
-                throw new ToolError(routeResult.tool, message);
+                throw new ToolError(classification.tool, message);
               }
 
               emit({
                 type: 'tool_result',
-                data: { tool: routeResult.tool, result: toolResult },
+                data: { tool: classification.tool, result: toolResult },
               });
 
               // Emit result as message
-              const responseContent = formatToolResponse(routeResult.tool, toolResult);
+              const responseContent = formatToolResponse(classification.tool, toolResult);
               emit({
                 type: 'message',
                 data: { subtype: 'text', content: responseContent },
