@@ -105,20 +105,20 @@ export async function startServer() {
   const wfRegistry = new WorkflowRegistry();
   const wfDir = join(__dirname, '..', '..', 'workflows');
   const { loaded, warnings } = wfRegistry.load(wfDir);
-  console.log(`Workflows loaded: ${loaded.join(', ') || 'none'}`);
+  logger.info({ loaded: loaded.join(', ') || 'none' }, 'Workflows loaded');
 
   const goalRegistry = new GoalRegistry();
   const goalsDir = join(__dirname, '..', '..', 'goals');
   const { loaded: goalsLoaded, warnings: goalWarnings } = goalRegistry.load(goalsDir);
-  console.log(`Goals loaded: ${goalsLoaded.join(', ') || 'none'}`);
-  for (const w of warnings) console.warn(`Workflow warning: ${w}`);
+  logger.info({ loaded: goalsLoaded.join(', ') || 'none' }, 'Goals loaded');
+  for (const w of warnings) logger.warn({ warning: w }, 'Workflow warning');
 
   // Skills system
   const skillsDir = process.env.PRAGENTS_SKILLS_DIR || join(homedir(), '.pragents', 'skills');
   const skillRegistry = new SkillRegistry(skillsDir);
   const { loaded: skillsLoaded, warnings: skillWarnings } = skillRegistry.load();
-  console.log(`Skills loaded: ${skillsLoaded.join(', ') || 'none'}`);
-  for (const w of skillWarnings) console.warn(`Skill warning: ${w}`);
+  logger.info({ loaded: skillsLoaded.join(', ') || 'none' }, 'Skills loaded');
+  for (const w of skillWarnings) logger.warn({ warning: w }, 'Skill warning');
   const skillExtractor = new SkillExtractor(sessionMgr, agents);
 
   // Hot-reload: watch file changes and reload registries
@@ -216,7 +216,7 @@ export async function startServer() {
   // Build API
   const app = new Hono();
   const wsInject = await setupWebSocket(app, eventBuffer);
-  if (wsInject) console.log('WebSocket endpoint ready');
+  if (wsInject) logger.info('WebSocket endpoint ready');
 
   app.route('/', createHealthRoute(memory));
   app.route('/api/v1/projects', createProjectsRoute(config));
@@ -277,7 +277,7 @@ export async function startServer() {
   // Startup
   const port = config.interfaces.web.port;
   const host = config.interfaces.web.host;
-  console.log(`pragents server starting on http://${host}:${port}`);
+  logger.info({ url: `http://${host}:${port}` }, 'pragents server starting');
   logger.info({ count: agents.length }, 'Agents loaded');
 
   const serveOptions: any = { fetch: app.fetch, port, hostname: host };
@@ -287,7 +287,7 @@ export async function startServer() {
 
   if (wsInject) {
     wsInject(service);
-    console.log('WebSocket upgrade injected');
+    logger.info('WebSocket upgrade injected');
   }
 
   const shutdown = async () => {
@@ -353,6 +353,6 @@ export async function startServer() {
 }
 
 startServer().catch((err) => {
-  console.error('Failed to start pragents server:', err);
+  logger.error({ err }, 'Failed to start pragents server');
   process.exit(1);
 });

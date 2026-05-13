@@ -1,6 +1,10 @@
 import { EventBuffer, type PragentsEvent } from '../events/buffer.js';
+import { logger } from '../logging/index.js';
 
-const wsClients: Set<any> = new Set();
+// Hot-reload safe singleton: survives tsx-watch module re-execution (issue #32)
+const g = globalThis as any;
+if (!g.__pragentsWsClients) g.__pragentsWsClients = new Set<any>();
+const wsClients: Set<any> = g.__pragentsWsClients;
 
 export async function setupWebSocket(app: any, buffer: EventBuffer) {
   try {
@@ -29,10 +33,10 @@ export async function setupWebSocket(app: any, buffer: EventBuffer) {
         },
       })),
     );
-    console.log('WebSocket endpoint ready at /ws');
+    logger.info('WebSocket endpoint ready at /ws');
     return injectWebSocket;
   } catch (err: any) {
-    console.warn(`WebSocket not available: ${err.message}`);
+    logger.warn({ err: err.message }, 'WebSocket not available');
     return null;
   }
 }

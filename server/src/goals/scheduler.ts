@@ -35,7 +35,7 @@ export class GoalScheduler {
     for (const goal of goals) {
       const job = cron(goal.cadence, () => this.trigger(goal));
       this.jobs.push(job);
-      console.log(`Goal "${goal.id}" scheduled: ${goal.cadence} → ${goal.workflow}`);
+      logger.info({ goalId: goal.id, cadence: goal.cadence, workflow: goal.workflow }, 'Goal scheduled');
     }
 
     // PM monitor: check every 5 minutes
@@ -89,7 +89,7 @@ export class GoalScheduler {
           db.prepare("UPDATE goal_runs SET status = 'escalated' WHERE id = ?").run(info.goalRunId);
           this.sessionMgr.dispatch(this.pmAgent, 
             `Goal "${goal.id}" has passed its deadline. Workflow run ${wfRunId} may need attention. Check and take appropriate action.`
-          ).catch((err) => console.warn(`Goal escalation dispatch failed for "${goal.id}":`, err?.message));
+          ).catch((err) => logger.warn({ goalId: goal.id, err: err?.message }, 'Goal escalation dispatch failed'));
         }
         this.activeGoalRuns.delete(wfRunId);
       } else if (now > info.deadline.getTime() - (goal.warn_before_ms || 7200000)) {
@@ -98,7 +98,7 @@ export class GoalScheduler {
           info.warnedAt = now;
           this.sessionMgr.dispatch(this.pmAgent,
             `Warning: Goal "${goal.id}" deadline approaching in ${Math.round((info.deadline.getTime() - now) / 60000)} minutes. Workflow run ${wfRunId} is active.`
-          ).catch((err) => console.warn(`Goal warning dispatch failed for "${goal.id}":`, err?.message));
+          ).catch((err) => logger.warn({ goalId: goal.id, err: err?.message }, 'Goal warning dispatch failed'));
         }
       }
     }
@@ -143,7 +143,7 @@ export class GoalScheduler {
         // Let autoExtractor handle eligibility (409, <10 messages, etc.)
         // Messages are loaded by autoExtractor internally
         autoExtractor.tryExtract(row.id).catch((err: any) =>
-          console.error(`[pragents] PM auto-extract error for session ${row.id}:`, err?.message || err),
+          logger.error({ sessionId: row.id, err: err?.message || err }, 'PM auto-extract error for session'),
         );
 
         // Mark as checked regardless of extraction success
@@ -151,10 +151,10 @@ export class GoalScheduler {
       }
 
       if (rows.length > 0) {
-        console.log(`[pragents] PM auto-extract checked ${rows.length} sessions`);
+        logger.info({ count: rows.length }, 'PM auto-extract checked sessions');
       }
     } catch (err: any) {
-      console.error('[pragents] PM auto-extract check failed:', err?.message || err);
+      logger.error({ err: err?.message || err }, 'PM auto-extract check failed');
     }
   }
 

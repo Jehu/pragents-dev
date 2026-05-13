@@ -6,6 +6,7 @@ import type { ResolvedAgent } from '../config/schema.js';
 import type { EventBuffer } from '../events/buffer.js';
 import { getDb } from '../db/sqlite.js';
 import { randomUUID } from 'node:crypto';
+import { logger } from '../logging/index.js';
 
 /**
  * Minimal step shape accepted by resolveAgent/buildPrompt.
@@ -267,7 +268,7 @@ function evaluateCondition(condition: string, outputs: Record<string, string>): 
   // Also supports $step_id syntax: $step_id.output includes 'text'
   const match = condition.match(/^\$?(\w+)\.(\w+)\s*(==|!=|includes)\s*['"](.+?)['"]$/);
   if (!match) {
-    console.warn(`evaluateCondition: cannot parse condition "${condition}" — step will be skipped`);
+    logger.warn({ condition }, 'evaluateCondition: cannot parse condition — step will be skipped');
     return false;
   }
 

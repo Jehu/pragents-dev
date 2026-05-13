@@ -126,9 +126,9 @@ export class AgentSessionManager {
       },
     });
 
-    console.log(`Agent "${agent.id}" model: ${agent.model}, projectDir: ${agent.projectDir}, cwd: ${agent.projectDir}`);
+    logger.info({ agentId: agent.id, model: agent.model, projectDir: agent.projectDir }, 'Agent session initializing');
     if (!agent.projectDir) {
-      console.error(`FATAL: agent.projectDir is undefined for ${agent.id}. Agent config:`, JSON.stringify(agent));
+      logger.error({ agentId: agent.id, config: JSON.stringify(agent) }, 'FATAL: agent.projectDir is undefined');
     }
     await loader.reload();
 
@@ -140,7 +140,7 @@ export class AgentSessionManager {
       customTools: this.toolExecutor ? TOOL_DEFINITIONS as any : undefined,
       // model auto-discovered by pi SDK from configured API keys
     });
-    console.log(`Session created for "${agent.id}" with model "${agent.model}"`);
+    logger.info({ agentId: agent.id, model: agent.model }, 'Session created');
 
     // Subscribe to SDK events
     session.subscribe((event: any) => {
@@ -248,7 +248,7 @@ export class AgentSessionManager {
       this.memory.remember(fact.scope, fact.category, fact.content, agent.id);
     }
     if (rememberedFacts.length > 0) {
-      console.log(`Agent "${agent.id}" auto-remembered ${rememberedFacts.length} facts`);
+      logger.info({ agentId: agent.id, count: rememberedFacts.length }, 'Agent auto-remembered facts');
     }
 
     return response;
@@ -317,7 +317,7 @@ export class AgentSessionManager {
       ).run(id, sessionId, JSON.stringify(messages), messages.length);
     } catch (err) {
       // Best-effort: log and continue — don't block dispose on persistence failure
-      console.error(`[pragents] Failed to persist messages for session ${sessionId}:`, err);
+      logger.error({ sessionId, err }, 'Failed to persist messages for session');
     }
   }
 
@@ -335,7 +335,7 @@ export class AgentSessionManager {
       if (!row) return null;
       return JSON.parse(row.messages_json);
     } catch (err) {
-      console.error(`[pragents] Failed to read messages for session ${sessionId}:`, err);
+      logger.error({ sessionId, err }, 'Failed to read messages for session');
       return null;
     }
   }
@@ -352,7 +352,7 @@ export class AgentSessionManager {
         if (this.autoExtractor) {
           const messages = (handle.session.agent as any)?.state?.messages;
           this.autoExtractor.tryExtract(id, messages).catch((err: any) =>
-            console.error(`[pragents] Auto-extraction error for session ${id}:`, err?.message || err),
+            logger.error({ sessionId: id, err: err?.message || err }, 'Auto-extraction error for session'),
           );
         }
 
@@ -378,7 +378,7 @@ export class AgentSessionManager {
       if (this.autoExtractor) {
         const messages = (handle.session.agent as any)?.state?.messages;
         this.autoExtractor.tryExtract(id, messages).catch((err: any) =>
-          console.error(`[pragents] Auto-extraction error for session ${id}:`, err?.message || err),
+          logger.error({ sessionId: id, err: err?.message || err }, 'Auto-extraction error for session'),
         );
       }
 
