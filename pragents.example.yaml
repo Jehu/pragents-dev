@@ -4,6 +4,7 @@ company:
   agents:
     office:
       type: office
+      role: fast  # used by the NL-decomposer to pick the planning model
       model: deepseek/deepseek-v4-flash
       personality: |
         Du bist der Office-Manager einer Agentur. Koordiniere Deadlines,

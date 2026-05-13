@@ -108,11 +108,12 @@ export class NLDecomposer {
   async decompose(prompt: string, agents: ResolvedAgent[]): Promise<Plan> {
     if (agents.length === 0) throw new Error('No agents configured');
 
-    // Prefer fast/cheap models (haiku, flash) for planning
-    const fastAgent = agents.find((a) =>
-      a.model?.includes('haiku') || a.model?.includes('flash'),
-    );
-    const modelString = fastAgent?.model || agents[0].model;
+    // Prefer the agent explicitly marked as fast; fall back to first agent.
+    const fastAgent = agents.find((a) => a.role === 'fast');
+    if (!fastAgent) {
+      logger.warn('NLDecomposer: no agent with role "fast" configured; falling back to first agent');
+    }
+    const modelString = (fastAgent ?? agents[0]).model;
 
     const agentList = agents
       .map((a) => `- ${a.id} (${a.type}): ${a.skills.join(', ') || 'general'}`)

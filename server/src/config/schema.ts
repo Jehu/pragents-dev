@@ -14,6 +14,7 @@ const MemoryAccess = z.object({
 
 const AgentConfig = z.object({
   type: AgentType,
+  role: z.enum(['fast', 'standard']).optional(),
   model: z.string().optional(),
   personality: z.string().optional(),
   memory: MemoryAccess.optional(),
@@ -110,6 +111,7 @@ export interface ResolvedAgent {
   id: string;
   projectId: string;
   type: AgentType;
+  role?: 'fast' | 'standard';
   model: string;
   personality: string;
   memory: MemoryAccess;
@@ -153,6 +155,7 @@ export function resolveAgent(
     id: agentId,
     projectId,
     type: agentConfig.type,
+    role: agentConfig.role,
     model: resolveModel(agentConfig.model || SYSTEM_DEFAULTS.model),
     personality:
       agentConfig.personality ?? SYSTEM_DEFAULTS.personality,
