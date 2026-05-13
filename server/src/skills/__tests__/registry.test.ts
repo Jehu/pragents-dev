@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { SkillRegistry } from '../registry.js';
@@ -88,6 +88,21 @@ describe('SkillRegistry (SKILL.md format)', () => {
       const result = registry.load();
       expect(result.loaded).toContain('skill-1');
       expect(result.loaded).toContain('skill-2');
+    });
+
+    it('never loads skills from _quarantine subdirectory (security: U17)', () => {
+      createSkillMd('active-skill', 'name: active-skill\ndescription: Active.');
+      // Manually place a skill in _quarantine
+      const quarantineDir = join(skillsDir, '_quarantine', 'injected-skill');
+      mkdirSync(quarantineDir, { recursive: true });
+      writeFileSync(
+        join(quarantineDir, 'SKILL.md'),
+        '---\nname: injected-skill\ndescription: Should not load.\n---\n# Body',
+      );
+      const result = registry.load();
+      expect(result.loaded).toContain('active-skill');
+      expect(result.loaded).not.toContain('injected-skill');
+      expect(registry.get('injected-skill')).toBeUndefined();
     });
   });
 
@@ -205,6 +220,28 @@ describe('SkillRegistry (SKILL.md format)', () => {
       const list = registry.list();
       expect(list).toHaveLength(2);
       expect(list.map((s) => s.name).sort()).toEqual(['a', 'b']);
+    });
+  });
+
+  describe('saveToQuarantine()', () => {
+    it('writes SKILL.md to _quarantine/<name>/ and returns the path', () => {
+      const quarantinePath = registry.saveToQuarantine({
+        name: 'quarantine-skill',
+        description: 'Pending review.',
+      });
+      expect(quarantinePath).toContain('_quarantine');
+      expect(quarantinePath).toContain('quarantine-skill');
+      expect(existsSync(join(quarantinePath, 'SKILL.md'))).toBe(true);
+    });
+
+    it('quarantined skills are not loaded by load()', () => {
+      registry.saveToQuarantine({
+        name: 'quarantined',
+        description: 'Should not be active.',
+      }, '# Quarantined body');
+      const result = registry.load();
+      expect(result.loaded).not.toContain('quarantined');
+      expect(registry.get('quarantined')).toBeUndefined();
     });
   });
 

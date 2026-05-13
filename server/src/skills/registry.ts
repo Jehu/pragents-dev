@@ -38,6 +38,7 @@ export class SkillRegistry {
       for (const entry of entries) {
         if (!entry.isDirectory()) continue;
         if (entry.name.startsWith('.')) continue;
+        if (entry.name === '_quarantine') continue; // never load quarantined skills
 
         const skillMdPath = join(this.skillsDir, entry.name, 'SKILL.md');
         if (!existsSync(skillMdPath)) continue;
@@ -138,6 +139,40 @@ export class SkillRegistry {
     } catch {
       // DB not initialized (e.g., tests) — SQLite persistence is optional
     }
+  }
+
+  /**
+   * Save an auto-extracted skill to the quarantine directory.
+   * Skills in quarantine are NOT loaded into system prompts and require
+   * manual review before activation. This prevents prompt injection via
+   * workflow-generated skill content.
+   *
+   * @param skill The frontmatter (must include at least name and description).
+   * @param body Optional markdown body content.
+   * @returns The path to the quarantined skill directory.
+   */
+  saveToQuarantine(skill: PragentsSkillFrontmatterInput, body?: string): string {
+    const validated = PragentsSkillFrontmatter.parse(skill);
+
+    const quarantineDir = join(this.skillsDir, '_quarantine', validated.name);
+    mkdirSync(quarantineDir, { recursive: true });
+
+    const frontmatterObj: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(validated)) {
+      if (key === 'body') continue;
+      if (value !== undefined && value !== null) {
+        if (Array.isArray(value) && value.length === 0) continue;
+        if (typeof value === 'object' && !Array.isArray(value) && Object.keys(value as object).length === 0) continue;
+        frontmatterObj[key] = value;
+      }
+    }
+
+    const mdBody = body ?? '';
+    const fileContent = matter.stringify(mdBody, frontmatterObj);
+    const skillMdPath = join(quarantineDir, 'SKILL.md');
+    writeFileSync(skillMdPath, fileContent, 'utf-8');
+
+    return quarantineDir;
   }
 
   /**

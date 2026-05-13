@@ -51,6 +51,7 @@ function createMockRegistry(
       return s ? { name: s.name, 'x-pragents-extraction': { source_session_id: s.sourceSessionId } } : undefined;
     },
     save: vi.fn(),
+    saveToQuarantine: vi.fn().mockReturnValue('/tmp/skills/_quarantine/test-pattern'),
   } as unknown as SkillRegistry;
 }
 
@@ -168,40 +169,35 @@ describe('SkillAutoExtractor', () => {
       expect(extractor.extract).not.toHaveBeenCalled();
     });
 
-    it('saves skill with status "proposed" when autoApproveSkills is false', async () => {
+    it('quarantines skill with status "proposed" instead of saving to active dir (security: U17)', async () => {
       const ae = new SkillAutoExtractor(extractor, registry, eventBuffer, false);
       await ae.tryExtract('session-1', mockMessages);
-      expect(registry.save).toHaveBeenCalled();
-      const savedSkill = (registry.save as any).mock.calls[0][0];
-      expect(savedSkill['x-pragents-status']).toBe('proposed');
-      expect(savedSkill['x-pragents-extraction'].source).toBe('extracted');
+      // Must route through quarantine, never directly to active skills directory
+      expect(registry.saveToQuarantine).toHaveBeenCalled();
+      const quarantinedSkill = (registry.saveToQuarantine as any).mock.calls[0][0];
+      expect(quarantinedSkill['x-pragents-status']).toBe('proposed');
+      expect(quarantinedSkill['x-pragents-extraction'].source).toBe('extracted');
     });
 
-    it('saves skill with status "active" when autoApproveSkills is true', async () => {
+    it('quarantines skill even when autoApproveSkills is true (U17 override)', async () => {
       const ae = new SkillAutoExtractor(extractor, registry, eventBuffer, true);
       await ae.tryExtract('session-1', mockMessages);
-      expect(registry.save).toHaveBeenCalled();
-      const savedSkill = (registry.save as any).mock.calls[0][0];
-      expect(savedSkill['x-pragents-status']).toBe('active');
+      expect(registry.saveToQuarantine).toHaveBeenCalled();
+      const quarantinedSkill = (registry.saveToQuarantine as any).mock.calls[0][0];
+      // Always proposed when quarantined — activation requires manual review
+      expect(quarantinedSkill['x-pragents-status']).toBe('proposed');
     });
 
-    it('emits skill.auto_proposed event when autoApproveSkills is false', async () => {
+    it('emits skill.quarantined event for auto-extracted skills', async () => {
       const ae = new SkillAutoExtractor(extractor, registry, eventBuffer, false);
       await ae.tryExtract('session-1', mockMessages);
       expect(eventBuffer.push).toHaveBeenCalled();
       const call = (eventBuffer.push as any).mock.calls.find(
-        (c: any[]) => c[2] === 'skill.auto_proposed',
+        (c: any[]) => c[2] === 'skill.quarantined',
       );
       expect(call).toBeDefined();
-    });
-
-    it('emits skill.auto_approved event when autoApproveSkills is true', async () => {
-      const ae = new SkillAutoExtractor(extractor, registry, eventBuffer, true);
-      await ae.tryExtract('session-1', mockMessages);
-      const call = (eventBuffer.push as any).mock.calls.find(
-        (c: any[]) => c[2] === 'skill.auto_approved',
-      );
-      expect(call).toBeDefined();
+      expect(call[3].name).toBe('test-pattern');
+      expect(call[3].sessionId).toBe('session-1');
     });
 
     it('catches errors and does not throw', async () => {
@@ -214,9 +210,9 @@ describe('SkillAutoExtractor', () => {
     it('sets extraction metadata with source_session_id', async () => {
       const ae = new SkillAutoExtractor(extractor, registry, eventBuffer, false);
       await ae.tryExtract('session-1', mockMessages);
-      const savedSkill = (registry.save as any).mock.calls[0][0];
-      expect(savedSkill['x-pragents-extraction'].source_session_id).toBe('session-1');
-      expect(savedSkill['x-pragents-extraction'].source).toBe('extracted');
+      const quarantinedSkill = (registry.saveToQuarantine as any).mock.calls[0][0];
+      expect(quarantinedSkill['x-pragents-extraction'].source_session_id).toBe('session-1');
+      expect(quarantinedSkill['x-pragents-extraction'].source).toBe('extracted');
     });
   });
 
@@ -236,24 +232,21 @@ describe('SkillAutoExtractor', () => {
       );
       expect(call).toBeDefined();
       expect(call[3].reason).toBe('name_match');
-      // Should not save a duplicate
-      const saveCalls = (reg.save as any).mock.calls.filter(
-        (c: any[]) => c[0]?.name === 'test-pattern',
-      );
-      expect(saveCalls).toHaveLength(0);
+      // Should not quarantine a duplicate
+      expect(reg.saveToQuarantine).not.toHaveBeenCalled();
     });
 
-    it('name-based: allows extraction when name does not exist', async () => {
+    it('name-based: quarantines skill when name does not exist', async () => {
       const reg = createMockRegistry([
         { name: 'different-skill', sourceSessionId: 'session-0' },
       ]);
       const ae = new SkillAutoExtractor(extractor, reg, eventBuffer, false);
       await ae.tryExtract('session-1', mockMessages);
 
-      // Should save the new skill
-      expect(reg.save).toHaveBeenCalled();
-      const savedSkill = (reg.save as any).mock.calls[0][0];
-      expect(savedSkill.name).toBe('test-pattern');
+      // Should quarantine the new skill
+      expect(reg.saveToQuarantine).toHaveBeenCalled();
+      const quarantinedSkill = (reg.saveToQuarantine as any).mock.calls[0][0];
+      expect(quarantinedSkill.name).toBe('test-pattern');
     });
 
     it('semantic: skips extraction when body matches existing skill', async () => {
@@ -274,13 +267,10 @@ describe('SkillAutoExtractor', () => {
       const ae = new SkillAutoExtractor(extractor, reg, eventBuffer, false, semanticCompare);
       await ae.tryExtract('session-1', mockMessages);
 
-      // Should NOT save a new skill (semantic duplicate)
-      const saveCalls = (reg.save as any).mock.calls.filter(
-        (c: any[]) => c[0]?.name === 'test-pattern',
-      );
-      expect(saveCalls).toHaveLength(0);
+      // Should NOT quarantine a new skill (semantic duplicate)
+      expect(reg.saveToQuarantine).not.toHaveBeenCalled();
 
-      // Should update existing skill confidence
+      // Should update existing skill confidence via save (not quarantine)
       const updateCalls = (reg.save as any).mock.calls.filter(
         (c: any[]) => c[0]?.name === 'different-name',
       );
@@ -294,7 +284,7 @@ describe('SkillAutoExtractor', () => {
       expect(call[3].reason).toBe('semantic_match');
     });
 
-    it('semantic: saves skill when no semantic match found', async () => {
+    it('semantic: quarantines skill when no semantic match found', async () => {
       const reg = createMockRegistry([
         { name: 'active-skill', sourceSessionId: 'session-0' },
       ]);
@@ -309,11 +299,10 @@ describe('SkillAutoExtractor', () => {
       const ae = new SkillAutoExtractor(extractor, reg, eventBuffer, false, semanticCompare);
       await ae.tryExtract('session-1', mockMessages);
 
-      // Should save the new skill
-      const saveCalls = (reg.save as any).mock.calls.filter(
-        (c: any[]) => c[0]?.name === 'test-pattern',
-      );
-      expect(saveCalls.length).toBe(1);
+      // Should quarantine the new skill
+      expect(reg.saveToQuarantine).toHaveBeenCalled();
+      const quarantinedSkill = (reg.saveToQuarantine as any).mock.calls[0][0];
+      expect(quarantinedSkill.name).toBe('test-pattern');
     });
 
     it('semantic: skips comparison when no active skills exist', async () => {
@@ -328,8 +317,8 @@ describe('SkillAutoExtractor', () => {
 
       // Should not call semantic compare (no active skills)
       expect(semanticCompare).not.toHaveBeenCalled();
-      // Should save normally
-      expect(reg.save).toHaveBeenCalled();
+      // Should quarantine normally
+      expect(reg.saveToQuarantine).toHaveBeenCalled();
     });
 
     it('semantic: handles missing semanticCompare gracefully', async () => {
@@ -342,8 +331,8 @@ describe('SkillAutoExtractor', () => {
       const ae = new SkillAutoExtractor(extractor, reg, eventBuffer, false, null);
       await ae.tryExtract('session-1', mockMessages);
 
-      // Should save normally (semantic dedup skipped)
-      expect(reg.save).toHaveBeenCalled();
+      // Should quarantine normally (semantic dedup skipped)
+      expect(reg.saveToQuarantine).toHaveBeenCalled();
     });
   });
 });

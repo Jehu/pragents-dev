@@ -6,6 +6,7 @@ import { getDb } from '../db/sqlite.js';
 import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { logger } from '../logging/index.js';
 
 /**
  * Result of a semantic similarity check.
@@ -165,15 +166,12 @@ export class SkillAutoExtractor {
         }
       }
 
-      // Determine status based on autoApprove flag (R4)
-      const status = this.autoApprove ? 'active' : 'proposed';
-
-      // Build skill metadata
+      // Build skill metadata — always proposed initially; quarantine guards activation
       const skillInput: PragentsSkillFrontmatterInput = {
         name: extracted.frontmatter.name,
         description: extracted.frontmatter.description,
         'x-pragents-scope': extracted.frontmatter['x-pragents-scope'] || 'project',
-        'x-pragents-status': status as any,
+        'x-pragents-status': 'proposed' as any,
         'x-pragents-version': 1,
         'x-pragents-tags': extracted.frontmatter['x-pragents-tags'] || [],
         'x-pragents-agent-types': extracted.frontmatter['x-pragents-agent-types'] || [],
@@ -186,25 +184,29 @@ export class SkillAutoExtractor {
         'x-pragents-parameters': extracted.frontmatter['x-pragents-parameters'],
       };
 
-      // Save to registry
-      this.registry.save(skillInput, extracted.body);
+      // Write to quarantine — never to the active skills directory directly.
+      // This prevents prompt injection via workflow-generated skill content (U17).
+      const quarantinePath = this.registry.saveToQuarantine(skillInput, extracted.body);
+      logger.warn(
+        { name: extracted.frontmatter.name, sessionId, quarantinePath },
+        'skill quarantined, requires review before activation',
+      );
 
       // Emit lifecycle event (R8)
-      const eventType = this.autoApprove ? 'skill.auto_approved' : 'skill.auto_proposed';
       this.eventBuffer.push(
         'company',
         undefined,
-        eventType,
+        'skill.quarantined',
         {
           name: extracted.frontmatter.name,
           sessionId,
           confidence: extracted.frontmatter['x-pragents-extraction']?.confidence || 0.7,
-          status,
+          quarantinePath,
         },
       );
     } catch (err: any) {
       // Fire-and-forget: log but never throw (R9)
-      console.error(`[pragents] Auto-extraction failed for session ${sessionId}:`, err?.message || err);
+      logger.error({ sessionId, err: err?.message || String(err) }, 'Auto-extraction failed for session');
     }
   }
 
@@ -222,7 +224,7 @@ export class SkillAutoExtractor {
       if (!row) return null;
       return JSON.parse(row.messages_json);
     } catch (err) {
-      console.error(`[pragents] Failed to load messages for session ${sessionId}:`, err);
+      logger.error({ sessionId, err }, 'Failed to load messages for session');
       return null;
     }
   }
@@ -328,7 +330,7 @@ export function createSemanticCompareFn(
         try { session.dispose(); } catch {}
       }
     } catch (err: any) {
-      console.error('[pragents] Semantic comparison failed:', err?.message || err);
+      logger.error({ err: err?.message || String(err) }, 'Semantic comparison failed');
       return { match: false, confidence: 0 };
     } finally {
       try { rmSync(tempDir, { recursive: true, force: true }); } catch {}
