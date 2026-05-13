@@ -55,6 +55,9 @@ export class WorkflowEngine {
 
       // Parallel group
       if (step.parallel?.length) {
+        // Resolve effective failure policy: step-level overrides workflow-level default.
+        const failurePolicy = step.onStepFailure ?? def.onStepFailure ?? 'abort';
+
         const stepRows = step.parallel.map((s) => this.tracker.createStep(runId, s.id));
         const results = await Promise.allSettled(step.parallel.map(async (s, i) => {
           this.tracker.startStep(stepRows[i].id);
@@ -67,18 +70,54 @@ export class WorkflowEngine {
           this.tracker.completeStep(stepRows[i].id, result);
           if (s.output) outputs[s.output] = result;
           this.emit('workflow.step_completed', { runId, stepId: s.id });
+          return { stepId: s.id, value: result };
         }));
-        // Check for failures and fail-fast
+
         const failures = results.filter(r => r.status === 'rejected');
+
+        // Always record failed steps in the tracker and event buffer.
+        for (let i = 0; i < results.length; i++) {
+          if (results[i].status === 'rejected') {
+            const err = (results[i] as PromiseRejectedResult).reason;
+            this.tracker.failStep(stepRows[i].id, err?.message || String(err));
+            this.emit('workflow.step_failed', { runId, stepId: step.parallel[i].id, error: err?.message });
+          }
+        }
+
         if (failures.length > 0) {
+          if (failurePolicy === 'abort') {
+            throw new Error(`Parallel group failed: ${failures.length} step(s) failed`);
+          }
+
+          if (failurePolicy === 'resume-later') {
+            // TODO: full resume-later implementation — persist partial results to DB
+            // and emit a human_gate event so an operator can decide to continue or abort.
+            // For now this falls through to 'continue' behaviour and logs a warning.
+            logger.warn(
+              { runId, stepId: step.id, failures: failures.length },
+              'onStepFailure=resume-later is not yet fully implemented; treating as continue',
+            );
+          }
+
+          // 'continue' (and stub resume-later): collect all results into a JSON blob
+          // and expose it as `<step.id>.results` in the outputs map so downstream
+          // steps can inspect which sub-steps succeeded/failed.
+          const collected: Record<string, { ok: boolean; value?: string; error?: string }> = {};
           for (let i = 0; i < results.length; i++) {
-            if (results[i].status === 'rejected') {
+            const s = step.parallel[i];
+            if (results[i].status === 'fulfilled') {
+              const val = (results[i] as PromiseFulfilledResult<{ stepId: string; value: string }>).value;
+              collected[s.id] = { ok: true, value: val.value };
+            } else {
               const err = (results[i] as PromiseRejectedResult).reason;
-              this.tracker.failStep(stepRows[i].id, err?.message || String(err));
-              this.emit('workflow.step_failed', { runId, stepId: step.parallel[i].id, error: err?.message });
+              collected[s.id] = { ok: false, error: err?.message || String(err) };
             }
           }
-          throw new Error(`Parallel group failed: ${failures.length} step(s) failed`);
+          outputs[`${step.id}.results`] = JSON.stringify(collected);
+          logger.info(
+            { runId, stepId: step.id, failures: failures.length, policy: failurePolicy },
+            'Parallel group had failures; continuing with partial results',
+          );
         }
         continue;
       }

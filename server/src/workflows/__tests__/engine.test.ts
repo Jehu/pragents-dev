@@ -269,4 +269,134 @@ describe('WorkflowEngine', () => {
   //   6. Intercept new gate, set approved
   //   7. Verify finalize step runs
   it.todo('full revision loop: two revisions then approve completes workflow');
+
+  // --- onStepFailure: abort / continue / resume-later ---
+
+  it('onStepFailure=abort (default): parallel group failure throws', async () => {
+    const failingMgr = {
+      dispatch: vi.fn().mockRejectedValue(new Error('step failed')),
+    } as any;
+    const wf: WorkflowDef = {
+      name: 'abort-test',
+      steps: [
+        {
+          type: 'agent' as const,
+          id: 'group-abort',
+          onStepFailure: 'abort',
+          parallel: [
+            { id: 'pa1', agent: 'dev@test-project', prompt: 'Task A' },
+            { id: 'pa2', agent: 'seo@test-project', prompt: 'Task B' },
+          ],
+        },
+      ],
+    };
+    const engine = new WorkflowEngine(tracker, router, failingMgr, agents, eventBuffer, 'test-project');
+    await expect(engine.execute(wf)).rejects.toThrow('Parallel group failed');
+  });
+
+  it('onStepFailure=continue: parallel group failure does not throw, partial results stored in outputs', async () => {
+    let callCount = 0;
+    const mixedMgr = {
+      dispatch: vi.fn().mockImplementation(async () => {
+        callCount++;
+        if (callCount === 1) return 'success result';
+        throw new Error('second step failed');
+      }),
+    } as any;
+    const wf: WorkflowDef = {
+      name: 'continue-test',
+      steps: [
+        {
+          type: 'agent' as const,
+          id: 'group-cont',
+          onStepFailure: 'continue',
+          parallel: [
+            { id: 'pc1', agent: 'dev@test-project', prompt: 'Task A', output: 'pc1_out' },
+            { id: 'pc2', agent: 'seo@test-project', prompt: 'Task B' },
+          ],
+        },
+      ],
+    };
+    const engine = new WorkflowEngine(tracker, router, mixedMgr, agents, eventBuffer, 'test-project');
+    // Should not throw
+    const runId = await engine.execute(wf);
+    expect(runId).toBeTruthy();
+    expect(mixedMgr.dispatch).toHaveBeenCalledTimes(2);
+  });
+
+  it('onStepFailure=continue: all steps fail, workflow still completes', async () => {
+    const allFailMgr = {
+      dispatch: vi.fn().mockRejectedValue(new Error('all failed')),
+    } as any;
+    const wf: WorkflowDef = {
+      name: 'continue-all-fail-test',
+      steps: [
+        {
+          type: 'agent' as const,
+          id: 'group-all-fail',
+          onStepFailure: 'continue',
+          parallel: [
+            { id: 'pf1', agent: 'dev@test-project', prompt: 'Task A' },
+            { id: 'pf2', agent: 'seo@test-project', prompt: 'Task B' },
+          ],
+        },
+      ],
+    };
+    const engine = new WorkflowEngine(tracker, router, allFailMgr, agents, eventBuffer, 'test-project');
+    const runId = await engine.execute(wf);
+    expect(runId).toBeTruthy();
+  });
+
+  it('onStepFailure=resume-later: behaves like continue (stub)', async () => {
+    let callCount2 = 0;
+    const mixedMgr2 = {
+      dispatch: vi.fn().mockImplementation(async () => {
+        callCount2++;
+        if (callCount2 === 1) return 'ok';
+        throw new Error('stub fail');
+      }),
+    } as any;
+    const wf: WorkflowDef = {
+      name: 'resume-later-test',
+      steps: [
+        {
+          type: 'agent' as const,
+          id: 'group-rl',
+          onStepFailure: 'resume-later',
+          parallel: [
+            { id: 'rl1', agent: 'dev@test-project', prompt: 'Task A' },
+            { id: 'rl2', agent: 'seo@test-project', prompt: 'Task B' },
+          ],
+        },
+      ],
+    };
+    const engine = new WorkflowEngine(tracker, router, mixedMgr2, agents, eventBuffer, 'test-project');
+    // resume-later is a stub that behaves like continue — should not throw
+    const runId = await engine.execute(wf);
+    expect(runId).toBeTruthy();
+  });
+
+  it('workflow-level onStepFailure default is used when step does not override', async () => {
+    const failMgr = {
+      dispatch: vi.fn().mockRejectedValue(new Error('wf-level fail')),
+    } as any;
+    const wf: WorkflowDef = {
+      name: 'wf-level-default-test',
+      onStepFailure: 'continue',           // workflow-level default
+      steps: [
+        {
+          type: 'agent' as const,
+          id: 'group-wf-default',
+          // no step-level onStepFailure — should inherit workflow default
+          parallel: [
+            { id: 'wd1', agent: 'dev@test-project', prompt: 'Task A' },
+          ],
+        },
+      ],
+    };
+    const engine = new WorkflowEngine(tracker, router, failMgr, agents, eventBuffer, 'test-project');
+    // Should not throw because workflow default is continue
+    const runId = await engine.execute(wf);
+    expect(runId).toBeTruthy();
+  });
 });

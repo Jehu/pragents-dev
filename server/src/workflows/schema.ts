@@ -32,6 +32,12 @@ const WorkflowStep = z.lazy(() =>
     timeout: z.number().int().positive().optional(),
     condition: z.string().optional(),
     parallel: z.array(ParallelStep).optional(),
+    /** Controls what happens when one or more parallel sub-steps fail.
+     *  abort (default): throw immediately, entire run fails.
+     *  continue: collect all results (ok + error), pass as JSON to next step via outputs.
+     *  resume-later: persist partial results and pause for human gate (stub — behaves like continue, see TODO).
+     */
+    onStepFailure: z.enum(['abort', 'continue', 'resume-later']).default('abort'),
   }),
 );
 
@@ -51,9 +57,12 @@ export const WorkflowDef = z.object({
   description: z.string().optional(),
   trigger: TriggerConfig.optional(),
   steps: z.array(WorkflowStep),
+  /** Workflow-level default for onStepFailure; individual steps override this. */
+  onStepFailure: z.enum(['abort', 'continue', 'resume-later']).default('abort'),
 });
 
 // Zod schema + inferred type: import type { WorkflowStep } for the type, { WorkflowStepSchema } for the schema
 export type WorkflowDef = z.infer<typeof WorkflowDef>;
 export type WorkflowStep = z.infer<typeof WorkflowStep>;
 export type TriggerConfig = z.infer<typeof TriggerConfig>;
+export type OnStepFailure = 'abort' | 'continue' | 'resume-later';

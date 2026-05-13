@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { getDb } from '../db/sqlite.js';
+import { pino } from 'pino';
 import matter from 'gray-matter';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import {
@@ -9,14 +10,22 @@ import {
   mkdirSync,
   rmSync,
   existsSync,
+  renameSync,
 } from 'node:fs';
 import { join, basename, resolve } from 'node:path';
 import { PragentsSkillFrontmatter, type PragentsSkillFrontmatter as SkillFM, type PragentsSkillFrontmatterInput } from './schema.js';
+
+const logger = pino({ name: 'skill-registry' });
+
+/** Default number of rejections before a skill is demoted back to `proposed`. */
+const DEFAULT_REJECT_THRESHOLD = 3;
 
 export class SkillRegistry {
   private skillsDir: string;
   private skills: Map<string, SkillFM> = new Map();
   private skillBodies: Map<string, string> = new Map();
+  /** Tracks cumulative rejection count per skill name (in-memory mirror of DB). */
+  private rejectCounts: Map<string, number> = new Map();
 
   constructor(skillsDir: string) {
     this.skillsDir = skillsDir;
@@ -32,6 +41,7 @@ export class SkillRegistry {
     const warnings: string[] = [];
     this.skills.clear();
     this.skillBodies.clear();
+    this.rejectCounts.clear();
 
     try {
       const entries = readdirSync(this.skillsDir, { withFileTypes: true });
@@ -59,6 +69,17 @@ export class SkillRegistry {
           this.skills.set(parsed.data.name, parsed.data);
           this.skillBodies.set(parsed.data.name, body);
           loaded.push(parsed.data.name);
+
+          // Load reject_count from DB if available
+          try {
+            const db = getDb();
+            const row = db.prepare('SELECT reject_count FROM skills WHERE name = ?').get(parsed.data.name) as { reject_count: number } | undefined;
+            if (row) {
+              this.rejectCounts.set(parsed.data.name, row.reject_count ?? 0);
+            }
+          } catch {
+            // DB not initialized — ignore
+          }
         } catch (err: any) {
           warnings.push(`${entry.name}: ${err.message}`);
         }
@@ -110,10 +131,11 @@ export class SkillRegistry {
     try {
       const db = getDb();
       const id = randomUUID();
+      const rejectCount = this.rejectCounts.get(validated.name) ?? 0;
       db.prepare(
         `INSERT OR REPLACE INTO skills (id, name, description, source_session, source_agent, tags, steps_yaml,
-         parameters_yaml, tools, examples_yaml, scope, status, version, extraction_metadata_yaml)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         parameters_yaml, tools, examples_yaml, scope, status, version, extraction_metadata_yaml, reject_count)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         id,
         validated.name,
@@ -135,6 +157,7 @@ export class SkillRegistry {
         validated['x-pragents-extraction']
           ? JSON.stringify(validated['x-pragents-extraction'])
           : null,
+        rejectCount,
       );
     } catch {
       // DB not initialized (e.g., tests) — SQLite persistence is optional
@@ -176,6 +199,36 @@ export class SkillRegistry {
   }
 
   /**
+   * Promote a skill from quarantine to the active skills directory.
+   * Moves `_quarantine/<name>/SKILL.md` → `<skillsDir>/<name>/SKILL.md`.
+   *
+   * @param name Skill name to promote.
+   * @returns The destination path, or null if the quarantined skill was not found.
+   */
+  promoteFromQuarantine(name: string): string | null {
+    const quarantineDir = join(this.skillsDir, '_quarantine', name);
+    const quarantinePath = join(quarantineDir, 'SKILL.md');
+
+    if (!existsSync(quarantinePath)) {
+      logger.warn({ skillName: name }, 'promoteFromQuarantine: quarantine entry not found');
+      return null;
+    }
+
+    const destDir = join(this.skillsDir, name);
+    mkdirSync(destDir, { recursive: true });
+    const destPath = join(destDir, 'SKILL.md');
+
+    renameSync(quarantinePath, destPath);
+
+    // Clean up empty quarantine subdirectory
+    try {
+      rmSync(quarantineDir, { recursive: true, force: true });
+    } catch {}
+
+    return destDir;
+  }
+
+  /**
    * Delete a skill by name.
    */
   delete(name: string): boolean {
@@ -203,6 +256,62 @@ export class SkillRegistry {
     } catch {}
 
     return true;
+  }
+
+  /**
+   * Increment the rejection counter for a skill.
+   * If the count reaches `threshold` (default 3), the skill is demoted back to
+   * `proposed` so it can be re-reviewed. Works on any status, including `active`.
+   *
+   * @param name Skill name.
+   * @param threshold Demotion threshold (default 3).
+   * @returns The updated reject count and whether demotion occurred.
+   */
+  rejectSkill(
+    name: string,
+    threshold: number = DEFAULT_REJECT_THRESHOLD,
+  ): { rejectCount: number; demoted: boolean } | null {
+    const skill = this.skills.get(name);
+    if (!skill) return null;
+
+    const prev = this.rejectCounts.get(name) ?? 0;
+    const rejectCount = prev + 1;
+    this.rejectCounts.set(name, rejectCount);
+
+    const demoted = rejectCount >= threshold;
+    const newStatus = demoted ? 'proposed' : skill['x-pragents-status'];
+
+    if (demoted) {
+      logger.warn(
+        { skillName: name, rejectCount },
+        'Skill demoted to proposed after repeated rejections',
+      );
+    }
+
+    const updated: SkillFM = { ...skill, 'x-pragents-status': newStatus };
+    this.skills.set(name, updated);
+
+    // Persist updated status and reject_count to file
+    this.save(updated);
+
+    // Update reject_count directly in DB (save() uses current rejectCounts map, already updated)
+    try {
+      const db = getDb();
+      db.prepare(
+        `UPDATE skills SET reject_count = ?, last_rejected_at = datetime('now'), status = ? WHERE name = ?`,
+      ).run(rejectCount, newStatus ?? 'draft', name);
+    } catch {
+      // DB not initialized — ignore
+    }
+
+    return { rejectCount, demoted };
+  }
+
+  /**
+   * Return the current rejection count for a skill (0 if unknown).
+   */
+  getRejectCount(name: string): number {
+    return this.rejectCounts.get(name) ?? 0;
   }
 
   get(name: string): SkillFM | undefined {

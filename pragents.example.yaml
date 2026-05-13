@@ -55,6 +55,35 @@ projects:
           - keyword-research
           - technical-seo
 
+# Example workflow showing onStepFailure: continue.
+# Place workflow YAML files in the workflow directory configured for the project.
+#
+# workflows/parallel-research.yaml:
+#
+#   name: parallel-research
+#   description: |
+#     Run multiple research agents in parallel. If one fails, collect partial
+#     results and continue — no expensive work is discarded.
+#   onStepFailure: continue          # workflow-level default (abort | continue | resume-later)
+#   steps:
+#     - id: gather
+#       onStepFailure: continue      # step-level override (takes precedence over workflow default)
+#       parallel:
+#         - id: research-seo
+#           agent: seo@kunde-webshop
+#           prompt: "Research top SEO keywords for the relaunch."
+#           output: seo_result
+#         - id: research-dev
+#           agent: dev@kunde-webshop
+#           prompt: "Audit current tech stack and list migration risks."
+#           output: dev_result
+#     - id: summarize
+#       agent: pm@kunde-webshop
+#       prompt: |
+#         Summarize the gathered research. Partial results (if any step failed) are
+#         available as JSON in the template variable {gather.results}.
+#       input: gather.results
+
 interfaces:
   web:
     port: 3000

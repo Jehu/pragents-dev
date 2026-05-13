@@ -172,15 +172,44 @@ export function createSkillsRoute(
     return c.json({ approved: skill.name, status: 'active' });
   });
 
-  // Reject an extracted skill
+  // Reject a skill (increments reject_count; demotes active skills to proposed on threshold)
   r.post('/:name/reject', async (c) => {
-    const skill = registry.get(c.req.param('name'));
+    const skillName = c.req.param('name');
+    const skill = registry.get(skillName);
     if (!skill) return c.json({ error: 'Skill not found' }, 404);
-    if (skill['x-pragents-status'] === 'active') {
-      return c.json({ error: 'Skill is already active — cannot reject' }, 409);
-    }
 
     const body = await c.req.json().catch(() => ({}));
+    const isActive = skill['x-pragents-status'] === 'active';
+
+    if (isActive) {
+      // Active skills use the counter-based demotion path
+      const result = registry.rejectSkill(skillName);
+      if (!result) return c.json({ error: 'Skill not found' }, 404);
+
+      const extraction = skill['x-pragents-extraction'];
+      const eventName = result.demoted ? 'skill.demoted' : 'skill.reject_counted';
+      eventBuffer?.push(
+        skill['x-pragents-scope'] || 'company',
+        extraction?.source_agent_id,
+        eventName,
+        {
+          name: skillName,
+          reason: body.reason,
+          rejectCount: result.rejectCount,
+          demoted: result.demoted,
+        },
+      );
+
+      return c.json({
+        name: skillName,
+        rejectCount: result.rejectCount,
+        demoted: result.demoted,
+        status: result.demoted ? 'proposed' : 'active',
+        reason: body.reason || null,
+      });
+    }
+
+    // Non-active skills: immediate rejection (existing behaviour)
     const updated: SkillFM = { ...skill, 'x-pragents-status': 'rejected' };
     registry.save(updated);
 
