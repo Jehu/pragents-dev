@@ -237,6 +237,7 @@ export class SkillRegistry {
 
     this.skills.delete(name);
     this.skillBodies.delete(name);
+    this.rejectCounts.delete(name);
 
     // Remove skill subdirectory (with path traversal protection)
     const skillDir = join(this.skillsDir, name);
