@@ -1,14 +1,29 @@
-import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { initDb, closeDb } from '../../db/sqlite.js';
+
+// Hoist mocks so they are available before module imports
+const { mockWarn } = vi.hoisted(() => ({ mockWarn: vi.fn() }));
 
 // Mock pi SDK
 vi.mock('@mariozechner/pi-coding-agent', () => ({
   createAgentSession: vi.fn(),
   DefaultResourceLoader: vi.fn(),
   SessionManager: { inMemory: vi.fn(() => ({})) },
+}));
+
+// Mock pino logger
+vi.mock('../../logging/index.js', () => ({
+  logger: {
+    warn: mockWarn,
+    info: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
+    child: vi.fn(() => ({ warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() })),
+  },
+  childLogger: vi.fn(),
 }));
 
 import { AgentSessionManager } from '../../agents/manager.js';
@@ -326,5 +341,97 @@ describe('AgentSessionManager auto-extraction hooks', () => {
 
     // Should work fine without autoExtractor
     await expect(mgr.disposeIdle()).resolves.toBeDefined();
+  });
+});
+
+describe('AgentSessionManager.persistSessionMessages — pi-SDK accessor guard', () => {
+  const tmpDir = mkdtempSync(join(tmpdir(), 'pragents-persist-test-'));
+
+  beforeAll(() => {
+    initDb(join(tmpDir, 'test.db'));
+  });
+
+  afterAll(() => {
+    closeDb();
+    rmSync(tmpDir, { recursive: true });
+  });
+
+  beforeEach(() => {
+    mockWarn.mockClear();
+  });
+
+  it('logs a pino warn and does NOT throw when session.agent.state.messages is undefined', async () => {
+    const { createAgentSession, DefaultResourceLoader } = await import('@mariozechner/pi-coding-agent');
+
+    // Simulate a pi SDK session where the accessor path does not exist
+    const mockSession = {
+      subscribe: vi.fn(() => () => {}),
+      prompt: vi.fn().mockResolvedValue(undefined),
+      dispose: vi.fn(),
+      isStreaming: false,
+      // agent.state.messages is intentionally absent
+      agent: { state: {} },
+    };
+    (createAgentSession as any).mockResolvedValue({ session: mockSession });
+    (DefaultResourceLoader as any).mockImplementation(function () {
+      return { reload: vi.fn().mockResolvedValue(undefined) };
+    });
+
+    const memory = new MemoryEngine(10);
+    const mgr = new AgentSessionManager(memory, 0);
+
+    await mgr.getOrCreate(mockAgent);
+    await new Promise((r) => setTimeout(r, 2));
+
+    // disposeIdle internally calls persistSessionMessages — must not throw
+    await expect(mgr.disposeIdle()).resolves.toBeDefined();
+
+    // Warn must have been emitted with the structured fields required by issue #31
+    expect(mockWarn).toHaveBeenCalledWith(
+      expect.objectContaining({ accessor: 'session.agent.state.messages', agentId: mockAgent.id }),
+      'pi-SDK session messages accessor returned undefined — skipping persist',
+    );
+  });
+
+  it('writes messages to DB when session.agent.state.messages is a valid array', async () => {
+    const { createAgentSession, DefaultResourceLoader } = await import('@mariozechner/pi-coding-agent');
+
+    const validMessages = [
+      { role: 'user', content: 'hello' },
+      { role: 'assistant', content: 'world' },
+    ];
+
+    const mockSession = {
+      subscribe: vi.fn(() => () => {}),
+      prompt: vi.fn().mockResolvedValue(undefined),
+      dispose: vi.fn(),
+      isStreaming: false,
+      agent: { state: { messages: validMessages } },
+    };
+    (createAgentSession as any).mockResolvedValue({ session: mockSession });
+    (DefaultResourceLoader as any).mockImplementation(function () {
+      return { reload: vi.fn().mockResolvedValue(undefined) };
+    });
+
+    // Insert the required sessions row so the FK constraint is satisfied
+    const { getDb } = await import('../../db/sqlite.js');
+    getDb().prepare('INSERT OR IGNORE INTO sessions (id, agent_id) VALUES (?, ?)').run(mockAgent.id, mockAgent.id);
+
+    const memory = new MemoryEngine(10);
+    const mgr = new AgentSessionManager(memory, 0);
+
+    await mgr.getOrCreate(mockAgent);
+    await new Promise((r) => setTimeout(r, 2));
+
+    await mgr.disposeIdle();
+
+    // No warn should have been logged — accessor worked fine
+    expect(mockWarn).not.toHaveBeenCalled();
+
+    // The session ID used internally is the agent id (key in sessions map)
+    const persisted = mgr.getSessionMessages(mockAgent.id);
+    expect(persisted).not.toBeNull();
+    expect(persisted).toHaveLength(2);
+    expect(persisted![0].role).toBe('user');
   });
 });

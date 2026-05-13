@@ -10,6 +10,7 @@ import type { ToolExecutor } from './tool-executor.js';
 import { TOOL_DEFINITIONS } from './tool-definitions.js';
 import { getDb } from '../db/sqlite.js';
 import type { SkillAutoExtractor } from '../skills/auto-extractor.js';
+import { logger } from '../logging/index.js';
 
 export interface SessionHandle {
   agentId: string;
@@ -17,6 +18,7 @@ export interface SessionHandle {
   loader: ResourceLoader;
   createdAt: number;
   lastActivityAt: number;
+  stale?: boolean;
 }
 
 export class AgentSessionManager {
@@ -53,12 +55,32 @@ export class AgentSessionManager {
   async getOrCreate(agent: ResolvedAgent): Promise<SessionHandle> {
     const existing = this.sessions.get(agent.id);
     if (existing) {
+      // If session is stale and not currently streaming, dispose and respawn with fresh config
+      if (existing.stale && !existing.session.isStreaming) {
+        logger.info({ agentId: agent.id }, 'Restarting stale session with updated config');
+        this.persistSessionMessages(agent.id, existing);
+        existing.session.dispose();
+        this.sessions.delete(agent.id);
+        return this.create(agent);
+      }
       // Reuse existing session even if streaming — pi SDK sequential prompts work on same session
       existing.lastActivityAt = Date.now();
       return existing;
     }
 
     return this.create(agent);
+  }
+
+  /**
+   * Mark a session as stale so it will be restarted on next dispatch/interaction.
+   * Does not kill the session immediately — respects in-flight requests.
+   */
+  markStale(agentId: string): void {
+    const handle = this.sessions.get(agentId);
+    if (handle) {
+      handle.stale = true;
+      logger.info({ agentId }, 'Session marked stale after config reload');
+    }
   }
 
   private async create(agent: ResolvedAgent): Promise<SessionHandle> {
@@ -278,7 +300,14 @@ export class AgentSessionManager {
   private persistSessionMessages(sessionId: string, handle: SessionHandle): void {
     try {
       const messages = (handle.session.agent as any)?.state?.messages;
-      if (!messages || messages.length === 0) return;
+      if (messages === undefined || messages === null) {
+        logger.warn(
+          { accessor: 'session.agent.state.messages', agentId: handle.agentId },
+          'pi-SDK session messages accessor returned undefined — skipping persist',
+        );
+        return;
+      }
+      if (messages.length === 0) return;
 
       const db = getDb();
       const id = randomUUID();
