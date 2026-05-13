@@ -245,6 +245,77 @@ describe('SkillRegistry (SKILL.md format)', () => {
     });
   });
 
+  describe('rejectSkill()', () => {
+    it('returns null for unknown skill', () => {
+      expect(registry.rejectSkill('nonexistent')).toBeNull();
+    });
+
+    it('increments reject count on each call', () => {
+      registry.save({ name: 'count-skill', description: 'Reject counting.', 'x-pragents-status': 'active' });
+
+      const r1 = registry.rejectSkill('count-skill');
+      expect(r1).not.toBeNull();
+      expect(r1!.rejectCount).toBe(1);
+      expect(r1!.demoted).toBe(false);
+
+      const r2 = registry.rejectSkill('count-skill');
+      expect(r2!.rejectCount).toBe(2);
+      expect(r2!.demoted).toBe(false);
+    });
+
+    it('demotes skill to proposed after reaching threshold (default 3)', () => {
+      registry.save({ name: 'demote-skill', description: 'Will be demoted.', 'x-pragents-status': 'active' });
+
+      registry.rejectSkill('demote-skill');
+      registry.rejectSkill('demote-skill');
+      const r3 = registry.rejectSkill('demote-skill');
+
+      expect(r3!.rejectCount).toBe(3);
+      expect(r3!.demoted).toBe(true);
+
+      const skill = registry.get('demote-skill');
+      expect(skill!['x-pragents-status']).toBe('proposed');
+    });
+
+    it('demotes at custom threshold', () => {
+      registry.save({ name: 'custom-threshold', description: 'Custom threshold.', 'x-pragents-status': 'active' });
+
+      const r1 = registry.rejectSkill('custom-threshold', 2);
+      expect(r1!.demoted).toBe(false);
+
+      const r2 = registry.rejectSkill('custom-threshold', 2);
+      expect(r2!.demoted).toBe(true);
+      expect(registry.get('custom-threshold')!['x-pragents-status']).toBe('proposed');
+    });
+
+    it('getRejectCount returns 0 for unknown skill', () => {
+      expect(registry.getRejectCount('no-such-skill')).toBe(0);
+    });
+
+    it('getRejectCount reflects increments', () => {
+      registry.save({ name: 'count-check', description: 'Count check.' });
+      expect(registry.getRejectCount('count-check')).toBe(0);
+      registry.rejectSkill('count-check');
+      expect(registry.getRejectCount('count-check')).toBe(1);
+    });
+
+    it('persists demoted status to SKILL.md (survives reload)', () => {
+      registry.save({ name: 'persist-demote', description: 'Persists.', 'x-pragents-status': 'active' });
+
+      // Reject 3 times to trigger demotion
+      registry.rejectSkill('persist-demote');
+      registry.rejectSkill('persist-demote');
+      registry.rejectSkill('persist-demote');
+
+      // Reload from disk
+      const fresh = new SkillRegistry(skillsDir);
+      fresh.load();
+      const skill = fresh.get('persist-demote');
+      expect(skill).toBeDefined();
+      expect(skill!['x-pragents-status']).toBe('proposed');
+    });
+  });
+
   describe('findByTags()', () => {
     it('finds skills by x-pragents-tags', () => {
       createSkillMd(
