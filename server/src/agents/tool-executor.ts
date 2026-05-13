@@ -97,6 +97,17 @@ export class ToolExecutor {
         case 'search_memory': {
           const { query, scope, limit } = args as { query: string; scope?: string; limit?: number };
           const facts = await this.deps.memory.recall(query, scope || 'project', limit || 10, agentContext);
+          // Emit memory.recall event for live metrics aggregation (issue #22)
+          try {
+            this.deps.eventBuffer.push(
+              agentContext?.projectId || 'unknown',
+              agentContext?.id,
+              'memory.recall',
+              { query, scope: scope || 'project', resultCount: facts.length, hit: facts.length > 0 },
+            );
+          } catch {
+            // best-effort — metric emission must not break tool execution
+          }
           return JSON.stringify(facts);
         }
         case 'remember_fact': {
@@ -107,6 +118,19 @@ export class ToolExecutor {
         }
         case 'list_skills': {
           const skills = this.deps.skills.list();
+          // Emit skill.used event for live metrics aggregation (issue #22).
+          // Best-effort signal: an agent inspecting the skill catalog is a proxy for skill engagement.
+          // TODO: emit a richer skill.used event when individual skill invocation is wired through tool-executor.
+          try {
+            this.deps.eventBuffer.push(
+              agentContext?.projectId || 'unknown',
+              agentContext?.id,
+              'skill.used',
+              { count: skills.length, source: 'list_skills' },
+            );
+          } catch {
+            // best-effort — metric emission must not break tool execution
+          }
           return JSON.stringify(skills.map((s: any) => ({ name: s.name, description: s.description || '' })));
         }
         case 'get_cost_summary': {

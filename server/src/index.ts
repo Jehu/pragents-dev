@@ -27,6 +27,7 @@ import { createGoalsRoute } from './api/routes/goals.js';
 import { createGatesRoute } from './api/routes/gates.js';
 import { createFeedRoute } from './api/routes/feed.js';
 import { createMemoryRoute } from './api/routes/memory.js';
+import { createMetricsRoute } from './api/routes/metrics.js';
 import { SkillRegistry } from './skills/registry.js';
 import { SkillExtractor } from './skills/extractor.js';
 import { SkillAutoExtractor, createSemanticCompareFn } from './skills/auto-extractor.js';
@@ -240,6 +241,7 @@ export async function startServer() {
   app.route('/api/v1/gates', createGatesRoute(eventBuffer));
   app.route('/api/v1/feed', createFeedRoute(tracker, eventBuffer, wfTracker, wfRegistry, skillRegistry));
   app.route('/api/v1/memory', createMemoryRoute(memory));
+  app.route('/api/v1/metrics', createMetricsRoute());
   app.route('/api/v1/skills', createSkillsRoute(skillRegistry, skillExtractor, eventBuffer));
   app.route('/api/v1/events', createEventsRoute(eventBuffer));
   app.route('/api/v1/chat', chatRoute);
