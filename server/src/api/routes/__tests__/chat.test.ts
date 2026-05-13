@@ -144,9 +144,14 @@ describe('Chat SSE Route — POST /api/v1/chat', () => {
       }),
     } as any;
 
-    // Mock Tool Executor
+    // Mock Tool Executor — return proper responses based on tool name
     mockToolExecutor = {
-      execute: vi.fn().mockResolvedValue(JSON.stringify([])),
+      execute: vi.fn().mockImplementation((tool: string) => {
+        if (tool === 'create_task') {
+          return JSON.stringify({ taskId: 'task-mock-1', status: 'dispatched' });
+        }
+        return JSON.stringify([]);
+      }),
     } as any;
   });
   afterAll(() => {
@@ -456,11 +461,17 @@ describe('Chat SSE Route — POST /api/v1/chat', () => {
     expect(lastCall[0]).toContain('Füg SEO-Optimierung hinzu');
     expect(lastCall[0]).toContain('Original request: Bau eine Landing Page');
 
-    // Should emit a plan_proposal message
-    const planMsg = events.find(
-      (e) => e.type === 'message' && e.data?.subtype === 'plan_proposal',
+    // Confirm path dispatches tasks, not plan_proposal
+    const toolCalls = events.filter((e) => e.type === 'tool_call');
+    expect(toolCalls.length).toBeGreaterThan(0);
+    expect(toolCalls[0].data.tool).toBe('create_task');
+
+    // Should emit a text summary message
+    const textMsg = events.find(
+      (e) => e.type === 'message' && e.data?.subtype === 'text',
     );
-    expect(planMsg).toBeTruthy();
+    expect(textMsg).toBeTruthy();
+    expect(textMsg!.data.content).toContain('dispatched');
   });
 
   it('sends confirm:true without modifications', async () => {

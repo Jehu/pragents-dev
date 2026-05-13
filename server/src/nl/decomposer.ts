@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 export const PlanStepSchema = z.object({
   description: z.string(),
   agentId: z.string(),
-  dependsOn: z.union([z.number().int(), z.array(z.number().int())]).nullable().optional(),
+  dependsOn: z.any().optional(),
 });
 
 export const PlanSchema = z.object({
@@ -123,7 +123,25 @@ Rules: Use agentId from the provided list. Order steps logically. Keep descripti
         parsed = JSON.parse(retryMatch[0]);
       }
 
-      const plan = PlanSchema.parse(parsed);
+      // Normalize dependsOn BEFORE Zod validation: LLM may return strings ("0") or string arrays (["1"])
+      const normalizePlan = (p: any) => {
+        if (p.steps && Array.isArray(p.steps)) {
+          for (const step of p.steps) {
+            if (step.dependsOn != null) {
+              if (typeof step.dependsOn === 'string' && /^\d+$/.test(step.dependsOn)) {
+                step.dependsOn = parseInt(step.dependsOn, 10);
+              } else if (Array.isArray(step.dependsOn)) {
+                step.dependsOn = step.dependsOn.map((v: any) =>
+                  typeof v === 'string' && /^\d+$/.test(v) ? parseInt(v, 10) : v,
+                );
+              }
+            }
+          }
+        }
+        return p;
+      };
+
+      const plan = PlanSchema.parse(normalizePlan(parsed));
       const validIds = new Set(agents.map((a) => a.id));
       for (const step of plan.steps) {
         if (!validIds.has(step.agentId)) {

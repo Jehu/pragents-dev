@@ -223,30 +223,106 @@ export function createChatRoute(
                 throw new DecomposerError(message);
               }
 
-              const planSteps = plan.steps.map((s) => ({
-                description: s.description,
-                agentId: s.agentId,
-                ...(s.dependsOn != null
-                  ? { dependsOn: Array.isArray(s.dependsOn) ? s.dependsOn[0] : s.dependsOn }
-                  : {}),
-              }));
+              if (confirm) {
+                // ── Confirm path: dispatch each plan step as a task ──
 
-              emit({
-                type: 'message',
-                data: {
-                  subtype: 'plan_proposal',
-                  content: `Here is the proposed plan with ${planSteps.length} step(s):`,
-                  plan: { steps: planSteps },
-                },
-              });
+                // Resolve projectId from conversation if not in request
+                const conv = conversationManager.getConversation(convId);
+                const effectiveProjectId = projectId || conv?.projectId || undefined;
 
-              // Persist assistant message with human-readable summary + plan JSON
-              conversationManager.addMessage(
-                convId,
-                'assistant',
-                `Proposed plan with ${planSteps.length} step(s):\n${planSteps.map((s, i) => `${i + 1}. ${s.agentId}: ${s.description}`).join('\n')}`,
-                'plan_proposal',
-              );
+                const stepResults: Array<{
+                  agentId: string;
+                  description: string;
+                  taskId?: string;
+                  error?: string;
+                }> = [];
+
+                for (let i = 0; i < plan.steps.length; i++) {
+                  const step = plan.steps[i];
+
+                  emit({
+                    type: 'tool_call',
+                    data: {
+                      tool: 'create_task',
+                      args: {
+                        projectId: effectiveProjectId,
+                        agentId: step.agentId,
+                        description: step.description,
+                      },
+                    },
+                  });
+
+                  let result: string;
+                  try {
+                    result = await toolExecutor.execute('create_task', {
+                      projectId: effectiveProjectId,
+                      agentId: step.agentId,
+                      description: step.description,
+                    });
+                    const parsed = JSON.parse(result);
+                    stepResults.push({
+                      agentId: step.agentId,
+                      description: step.description,
+                      taskId: parsed.taskId,
+                    });
+                  } catch (err) {
+                    const errorMsg = err instanceof Error ? err.message : String(err);
+                    result = `Error: ${errorMsg}`;
+                    stepResults.push({
+                      agentId: step.agentId,
+                      description: step.description,
+                      error: errorMsg,
+                    });
+                  }
+
+                  emit({
+                    type: 'tool_result',
+                    data: { tool: 'create_task', result },
+                  });
+                }
+
+                // Emit summary message
+                const summaryLines = stepResults.map((r, i) =>
+                  r.error
+                    ? `${i + 1}. ${r.agentId}: ${r.description} — FAILED: ${r.error}`
+                    : `${i + 1}. ${r.agentId}: ${r.description} — dispatched (${r.taskId})`,
+                );
+                const summary = `Plan executed: ${stepResults.length} task(s) dispatched.\n${summaryLines.join('\n')}`;
+
+                emit({
+                  type: 'message',
+                  data: { subtype: 'text', content: summary },
+                });
+
+                conversationManager.addMessage(convId, 'assistant', summary, 'text');
+              } else {
+                // ── Proposal path: emit plan for user confirmation ──
+
+                const planSteps = plan.steps.map((s) => ({
+                  description: s.description,
+                  agentId: s.agentId,
+                  ...(s.dependsOn != null
+                    ? { dependsOn: Array.isArray(s.dependsOn) ? s.dependsOn[0] : s.dependsOn }
+                    : {}),
+                }));
+
+                emit({
+                  type: 'message',
+                  data: {
+                    subtype: 'plan_proposal',
+                    content: `Here is the proposed plan with ${planSteps.length} step(s):`,
+                    plan: { steps: planSteps },
+                  },
+                });
+
+                // Persist assistant message with human-readable summary
+                conversationManager.addMessage(
+                  convId,
+                  'assistant',
+                  `Proposed plan with ${planSteps.length} step(s):\n${planSteps.map((s, i) => `${i + 1}. ${s.agentId}: ${s.description}`).join('\n')}`,
+                  'plan_proposal',
+                );
+              }
             }
 
             // 4d. Emit done
