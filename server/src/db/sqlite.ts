@@ -142,7 +142,7 @@ function runMigrations(database: Database.Database): void {
     const sql = readFileSync(join(migrationsDir, file), 'utf-8');
     const run = database.transaction(() => {
       database.exec(sql);
-      database.prepare('INSERT INTO _migrations (name) VALUES (?)').run(file);
+      database.prepare('INSERT INTO _migrations (name, applied_at) VALUES (?, ?)').run(file, new Date().toISOString());
     });
 
     run();
