@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { SkillAutoExtractor } from '../auto-extractor.js';
+import type { SkillApprovalConfig } from '../auto-extractor.js';
 import type { SkillExtractor, ExtractedSkill } from '../extractor.js';
 import type { SkillRegistry } from '../registry.js';
 import type { EventBuffer, PragentsEvent } from '../../events/buffer.js';
@@ -52,6 +53,7 @@ function createMockRegistry(
     },
     save: vi.fn(),
     saveToQuarantine: vi.fn().mockReturnValue('/tmp/skills/_quarantine/test-pattern'),
+    promoteFromQuarantine: vi.fn().mockReturnValue('/tmp/skills/test-pattern'),
   } as unknown as SkillRegistry;
 }
 
@@ -333,6 +335,119 @@ describe('SkillAutoExtractor', () => {
 
       // Should quarantine normally (semantic dedup skipped)
       expect(reg.saveToQuarantine).toHaveBeenCalled();
+    });
+  });
+
+  describe('graduated auto-promotion', () => {
+    const highConfidenceSkill: ExtractedSkill = {
+      frontmatter: {
+        name: 'test-pattern',
+        description: 'A high-confidence safe skill.',
+        'x-pragents-scope': 'project',
+        'x-pragents-status': 'draft',
+        'x-pragents-version': 1,
+        'x-pragents-tags': [],
+        'x-pragents-agent-types': [],
+        'x-pragents-extraction': {
+          source: 'extracted',
+          confidence: 0.95,
+        },
+      } as any,
+      body: '## High Confidence Skill\n\nNo destructive tools.',
+    };
+
+    it('promotes from quarantine when confidence >= threshold and no blocked tools', async () => {
+      const reg = createMockRegistry();
+      const ext = { extract: vi.fn().mockResolvedValue(highConfidenceSkill) } as unknown as SkillExtractor;
+      const approvalCfg: SkillApprovalConfig = { confidenceThreshold: 0.9, blockedTools: ['bash', 'write'] };
+
+      const ae = new SkillAutoExtractor(ext, reg, eventBuffer, false, null, 0.8, approvalCfg);
+      await ae.tryExtract('session-1', mockMessages);
+
+      expect(reg.saveToQuarantine).toHaveBeenCalled();
+      expect(reg.promoteFromQuarantine).toHaveBeenCalledWith('test-pattern');
+    });
+
+    it('emits skill.promoted event after auto-promotion', async () => {
+      const reg = createMockRegistry();
+      const ext = { extract: vi.fn().mockResolvedValue(highConfidenceSkill) } as unknown as SkillExtractor;
+      const approvalCfg: SkillApprovalConfig = { confidenceThreshold: 0.9, blockedTools: ['bash', 'write'] };
+
+      const ae = new SkillAutoExtractor(ext, reg, eventBuffer, false, null, 0.8, approvalCfg);
+      await ae.tryExtract('session-1', mockMessages);
+
+      const promotedCall = (eventBuffer.push as any).mock.calls.find(
+        (c: any[]) => c[2] === 'skill.promoted',
+      );
+      expect(promotedCall).toBeDefined();
+      expect(promotedCall[3].name).toBe('test-pattern');
+    });
+
+    it('holds in quarantine when confidence < threshold', async () => {
+      const reg = createMockRegistry();
+      const lowConfidenceSkill = {
+        ...highConfidenceSkill,
+        frontmatter: {
+          ...highConfidenceSkill.frontmatter,
+          'x-pragents-extraction': { source: 'extracted', confidence: 0.75 },
+        },
+      };
+      const ext = { extract: vi.fn().mockResolvedValue(lowConfidenceSkill) } as unknown as SkillExtractor;
+      const approvalCfg: SkillApprovalConfig = { confidenceThreshold: 0.9, blockedTools: ['bash', 'write'] };
+
+      const ae = new SkillAutoExtractor(ext, reg, eventBuffer, false, null, 0.8, approvalCfg);
+      await ae.tryExtract('session-1', mockMessages);
+
+      expect(reg.saveToQuarantine).toHaveBeenCalled();
+      expect(reg.promoteFromQuarantine).not.toHaveBeenCalled();
+    });
+
+    it('holds in quarantine when skill has a blocked tool', async () => {
+      const reg = createMockRegistry();
+      const skillWithBash = {
+        ...highConfidenceSkill,
+        frontmatter: {
+          ...highConfidenceSkill.frontmatter,
+          'allowed-tools': 'read,bash,write',
+          'x-pragents-extraction': { source: 'extracted', confidence: 0.95 },
+        },
+      };
+      const ext = { extract: vi.fn().mockResolvedValue(skillWithBash) } as unknown as SkillExtractor;
+      const approvalCfg: SkillApprovalConfig = { confidenceThreshold: 0.9, blockedTools: ['bash', 'write'] };
+
+      const ae = new SkillAutoExtractor(ext, reg, eventBuffer, false, null, 0.8, approvalCfg);
+      await ae.tryExtract('session-1', mockMessages);
+
+      expect(reg.saveToQuarantine).toHaveBeenCalled();
+      expect(reg.promoteFromQuarantine).not.toHaveBeenCalled();
+    });
+
+    it('uses default thresholds when no skillApproval config is provided', async () => {
+      const reg = createMockRegistry();
+      // Default threshold is 0.9; confidence 0.95 with no blocked tools → should promote
+      const ext = { extract: vi.fn().mockResolvedValue(highConfidenceSkill) } as unknown as SkillExtractor;
+
+      const ae = new SkillAutoExtractor(ext, reg, eventBuffer, false, null, 0.8);
+      await ae.tryExtract('session-1', mockMessages);
+
+      expect(reg.promoteFromQuarantine).toHaveBeenCalledWith('test-pattern');
+    });
+
+    it('does not promote when promoteFromQuarantine returns null (file missing)', async () => {
+      const reg = createMockRegistry();
+      (reg.promoteFromQuarantine as any).mockReturnValue(null);
+      const ext = { extract: vi.fn().mockResolvedValue(highConfidenceSkill) } as unknown as SkillExtractor;
+      const approvalCfg: SkillApprovalConfig = { confidenceThreshold: 0.9, blockedTools: ['bash'] };
+
+      const ae = new SkillAutoExtractor(ext, reg, eventBuffer, false, null, 0.8, approvalCfg);
+      await ae.tryExtract('session-1', mockMessages);
+
+      // Should attempt promote but emit no skill.promoted event (file was gone)
+      expect(reg.promoteFromQuarantine).toHaveBeenCalled();
+      const promotedCall = (eventBuffer.push as any).mock.calls.find(
+        (c: any[]) => c[2] === 'skill.promoted',
+      );
+      expect(promotedCall).toBeUndefined();
     });
   });
 });

@@ -33,6 +33,17 @@ company:
     short_term:
       max_entries: 100
 
+  # Graduated skill auto-approval (optional).
+  # Auto-promotes from quarantine when confidence >= confidenceThreshold
+  # AND no blockedTools appear in the skill's allowed-tools list.
+  # Omit this section to keep all extracted skills in quarantine for manual review.
+  skillApproval:
+    confidenceThreshold: 0.9          # 0.0–1.0; default 0.9
+    blockedTools:                     # tools that block auto-promotion
+      - bash
+      - write
+      - computer
+
 projects:
   kunde-webshop:
     name: "Kunde Webshop Relaunch"

@@ -336,4 +336,42 @@ describe('SkillRegistry (SKILL.md format)', () => {
       expect(noneSkills).toHaveLength(0);
     });
   });
+
+  describe('promoteFromQuarantine()', () => {
+    it('moves SKILL.md from _quarantine/<name>/ to <skillsDir>/<name>/', () => {
+      // Arrange: write a skill directly into quarantine
+      const quarantineDir = join(skillsDir, '_quarantine', 'my-skill');
+      mkdirSync(quarantineDir, { recursive: true });
+      writeFileSync(
+        join(quarantineDir, 'SKILL.md'),
+        '---\nname: my-skill\ndescription: A quarantined skill.\n---\n# Body\n',
+      );
+
+      const result = registry.promoteFromQuarantine('my-skill');
+
+      // Destination should exist
+      expect(result).toBeTruthy();
+      expect(existsSync(join(skillsDir, 'my-skill', 'SKILL.md'))).toBe(true);
+      // Quarantine entry should be removed
+      expect(existsSync(join(quarantineDir, 'SKILL.md'))).toBe(false);
+    });
+
+    it('returns null when the quarantine entry does not exist', () => {
+      const result = registry.promoteFromQuarantine('nonexistent-skill');
+      expect(result).toBeNull();
+    });
+
+    it('promoted skill is loadable after promotion', () => {
+      const quarantineDir = join(skillsDir, '_quarantine', 'loadable-skill');
+      mkdirSync(quarantineDir, { recursive: true });
+      writeFileSync(
+        join(quarantineDir, 'SKILL.md'),
+        '---\nname: loadable-skill\ndescription: Should load after promotion.\n---\n# Body\n',
+      );
+
+      registry.promoteFromQuarantine('loadable-skill');
+      const { loaded } = registry.load();
+      expect(loaded).toContain('loadable-skill');
+    });
+  });
 });

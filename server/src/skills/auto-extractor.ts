@@ -32,6 +32,24 @@ export type SemanticCompareFn = (
 const DEFAULT_SIMILARITY_THRESHOLD = 0.8;
 
 /**
+ * Default confidence threshold for graduated auto-promotion from quarantine.
+ */
+const DEFAULT_APPROVAL_CONFIDENCE_THRESHOLD = 0.9;
+
+/**
+ * Default set of tool keywords that block auto-promotion (destructive tools).
+ */
+const DEFAULT_BLOCKED_TOOLS = ['bash', 'write', 'computer'];
+
+/**
+ * Configuration for graduated skill approval.
+ */
+export interface SkillApprovalConfig {
+  confidenceThreshold: number;
+  blockedTools: string[];
+}
+
+/**
  * SkillAutoExtractor handles automatic skill extraction from completed
  * agent sessions. It checks eligibility heuristics, triggers asynchronous
  * LLM-based extraction, performs deduplication, and emits lifecycle events.
@@ -41,6 +59,7 @@ const DEFAULT_SIMILARITY_THRESHOLD = 0.8;
 export class SkillAutoExtractor {
   private semanticCompare: SemanticCompareFn | null;
   private similarityThreshold: number;
+  private skillApproval: SkillApprovalConfig;
 
   constructor(
     private extractor: SkillExtractor,
@@ -49,9 +68,37 @@ export class SkillAutoExtractor {
     private autoApprove: boolean,
     semanticCompare?: SemanticCompareFn | null,
     similarityThreshold?: number,
+    skillApproval?: SkillApprovalConfig,
   ) {
     this.semanticCompare = semanticCompare ?? null;
     this.similarityThreshold = similarityThreshold ?? DEFAULT_SIMILARITY_THRESHOLD;
+    this.skillApproval = skillApproval ?? {
+      confidenceThreshold: DEFAULT_APPROVAL_CONFIDENCE_THRESHOLD,
+      blockedTools: DEFAULT_BLOCKED_TOOLS,
+    };
+  }
+
+  /**
+   * Evaluate whether a quarantined skill qualifies for automatic promotion.
+   *
+   * A skill is auto-promoted when:
+   *   1. Its extraction confidence >= confidenceThreshold
+   *   2. Its allowed-tools list contains none of the blockedTools
+   *
+   * @param confidence Extraction confidence score (0–1).
+   * @param allowedTools The skill's allowed-tools string (comma-separated or space-separated).
+   * @returns true if the skill should be auto-promoted.
+   */
+  private qualifiesForAutoPromotion(confidence: number, allowedTools?: string): boolean {
+    if (confidence < this.skillApproval.confidenceThreshold) return false;
+
+    if (allowedTools) {
+      const toolTokens = allowedTools.toLowerCase().split(/[\s,;]+/).filter(Boolean);
+      const blocked = this.skillApproval.blockedTools.map((t) => t.toLowerCase());
+      if (toolTokens.some((t) => blocked.some((b) => t.includes(b)))) return false;
+    }
+
+    return true;
   }
 
   /**
@@ -186,6 +233,8 @@ export class SkillAutoExtractor {
 
       // Write to quarantine — never to the active skills directory directly.
       // This prevents prompt injection via workflow-generated skill content (U17).
+      const confidence = extracted.frontmatter['x-pragents-extraction']?.confidence ?? 0.7;
+      const allowedTools = (extracted.frontmatter as any)['allowed-tools'];
       const quarantinePath = this.registry.saveToQuarantine(skillInput, extracted.body);
       logger.warn(
         { name: extracted.frontmatter.name, sessionId, quarantinePath },
@@ -200,10 +249,38 @@ export class SkillAutoExtractor {
         {
           name: extracted.frontmatter.name,
           sessionId,
-          confidence: extracted.frontmatter['x-pragents-extraction']?.confidence || 0.7,
+          confidence,
           quarantinePath,
         },
       );
+
+      // Graduated auto-promotion: promote from quarantine if confidence and tool-safety
+      // thresholds are met, instead of leaving every skill pending manual review.
+      if (this.qualifiesForAutoPromotion(confidence, allowedTools)) {
+        const promoted = this.registry.promoteFromQuarantine(extracted.frontmatter.name);
+        if (promoted) {
+          logger.info(
+            { skillName: extracted.frontmatter.name, confidence },
+            'Skill auto-promoted from quarantine',
+          );
+          this.eventBuffer.push(
+            'company',
+            undefined,
+            'skill.promoted',
+            {
+              name: extracted.frontmatter.name,
+              sessionId,
+              confidence,
+              promotedPath: promoted,
+            },
+          );
+        }
+      } else {
+        logger.info(
+          { skillName: extracted.frontmatter.name, confidence },
+          'Skill held in quarantine — requires manual review',
+        );
+      }
     } catch (err: any) {
       // Fire-and-forget: log but never throw (R9)
       logger.error({ sessionId, err: err?.message || String(err) }, 'Auto-extraction failed for session');
