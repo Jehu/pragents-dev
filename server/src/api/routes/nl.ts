@@ -1,12 +1,35 @@
 import { Hono } from 'hono';
 import type { NLDecomposer } from '../../nl/decomposer.js';
 import type { ResolvedAgent } from '../../config/schema.js';
-import type { WorkflowEngine } from '../../workflows/engine.js';
-import type { WorkflowDef } from '../../workflows/schema.js';
+import type { PlanStore } from '../../plans/store.js';
+import type { PlanExecutor } from '../../plans/executor.js';
 import { getDb } from '../../db/sqlite.js';
-import { randomUUID } from 'node:crypto';
+import { logger } from '../../logging/index.js';
 
-export function createNLRoutes(decomposer: NLDecomposer, agents: ResolvedAgent[], wfEngine: WorkflowEngine) {
+/**
+ * Natural-language routes — thin wrappers over the unified Plan store (#28).
+ *
+ * /decompose   Produce a plan via the LLM, persist as `draft`, return
+ *              `{ planId, plan, steps }`. Response stays additive — legacy
+ *              clients that read `.steps` keep working.
+ *
+ * /execute     Supports two shapes:
+ *                a) `{ planId }`                    — preferred (post-#28).
+ *                                                     Fire-and-forget; client
+ *                                                     polls GET /plans/:id.
+ *                b) `{ prompt?, plan: { steps } }`  — legacy inline plan.
+ *                                                     Awaits completion and
+ *                                                     returns `{ planId, runId,
+ *                                                     status: 'executing' }`
+ *                                                     to preserve the original
+ *                                                     synchronous contract.
+ */
+export function createNLRoutes(
+  decomposer: NLDecomposer,
+  agents: ResolvedAgent[],
+  store: PlanStore,
+  executor: PlanExecutor,
+) {
   const r = new Hono();
 
   r.post('/decompose', async (c) => {
@@ -15,52 +38,87 @@ export function createNLRoutes(decomposer: NLDecomposer, agents: ResolvedAgent[]
 
     try {
       const plan = await decomposer.decompose(prompt.trim(), agents);
-      return c.json(plan);
+      const persisted = store.create({
+        origin: 'nl',
+        prompt: prompt.trim(),
+        steps: plan.steps,
+      });
+      // Backward-compat: legacy clients read `.steps`; new clients use `planId`.
+      return c.json({
+        planId: persisted.id,
+        plan: { steps: persisted.steps },
+        steps: persisted.steps,
+      });
     } catch (err: any) {
       return c.json({ error: err.message }, 500);
     }
   });
 
   r.post('/execute', async (c) => {
-    const { prompt, plan } = await c.req.json();
-    if (!plan?.steps?.length) return c.json({ error: 'Plan with steps is required' }, 400);
+    const body = await c.req.json();
+    const { planId, prompt, plan } = body ?? {};
 
-    // Store plan in DB
-    const db = getDb();
-    const id = randomUUID();
-    db.prepare(
-      "INSERT INTO nl_plans (id, prompt, plan_json, status, created_at) VALUES (?, ?, ?, 'approved', ?)",
-    ).run(id, prompt || '', JSON.stringify(plan), new Date().toISOString());
+    // ---- Path A: new {planId} form (fire-and-forget) ----
+    if (planId) {
+      const existing = store.get(planId);
+      if (!existing) return c.json({ error: 'Plan not found' }, 404);
 
-    // Build ad-hoc workflow
-    const wfDef: WorkflowDef = {
-      name: `nl-${id.substring(0, 8)}`,
-      description: prompt || 'NL Delegated Plan',
-      steps: plan.steps.map((s: any, i: number) => ({
-        id: `step-${i}`,
-        agent: s.agentId,
-        prompt: s.description,
-        output: `step-${i}-output`,
-        ...(s.dependsOn != null
-          ? { input: `step-${Array.isArray(s.dependsOn) ? s.dependsOn[0] : s.dependsOn}-output` }
-          : {}),
-      })),
-    };
+      let approved = existing;
+      if (existing.status === 'draft') {
+        try {
+          approved = store.approve(planId);
+        } catch (err: any) {
+          return c.json({ error: err.message }, 409);
+        }
+      } else if (existing.status !== 'approved') {
+        return c.json(
+          { error: `Plan cannot be executed from status "${existing.status}"` },
+          409,
+        );
+      }
+
+      executor.executePlan(approved).catch((err) => {
+        logger.warn(
+          { planId, err: err?.message || String(err) },
+          'NL execute: background execution failed',
+        );
+      });
+      return c.json({ planId, status: 'executing' }, 201);
+    }
+
+    // ---- Path B: legacy {plan: {steps}} form (sync, returns runId) ----
+    if (!plan?.steps?.length) {
+      return c.json({ error: 'Plan with steps is required' }, 400);
+    }
+
+    const draft = store.create({
+      origin: 'nl',
+      prompt: prompt || '',
+      steps: plan.steps,
+    });
+    const approved = store.approve(draft.id);
 
     try {
-      const runId = await wfEngine.execute(wfDef);
-      db.prepare("UPDATE nl_plans SET status = 'executed' WHERE id = ?").run(id);
-      return c.json({ planId: id, runId, status: 'executing' }, 201);
+      const { runId } = await executor.executePlan(approved);
+      return c.json({ planId: draft.id, runId, status: 'executing' }, 201);
     } catch (err: any) {
-      db.prepare("UPDATE nl_plans SET status = 'failed' WHERE id = ?").run(id);
       return c.json({ error: err.message }, 500);
     }
   });
 
   r.get('/plans', (c) => {
-    const rows = getDb().prepare(
-      "SELECT id, prompt, status, created_at FROM nl_plans ORDER BY created_at DESC LIMIT 20",
-    ).all();
+    // Legacy endpoint kept for backward compat — returns the same shape
+    // (id, prompt, status, created_at) but now backed by the unified
+    // `plans` table, filtered to origin='nl'.
+    const rows = getDb()
+      .prepare(
+        `SELECT id, prompt, status, created_at
+         FROM plans
+         WHERE origin = 'nl'
+         ORDER BY created_at DESC
+         LIMIT 20`,
+      )
+      .all();
     return c.json(rows);
   });
 

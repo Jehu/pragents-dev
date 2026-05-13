@@ -92,6 +92,13 @@ export const MessageEventSchema = SSEBase.extend({
   data: z.object({
     subtype: MessageSubtype,
     content: z.string(),
+    /**
+     * For plan_proposal subtype: id of the plan persisted in the unified
+     * `plans` store (#28). Clients can call POST /api/v1/plans/:id/approve
+     * to dispatch execution. Optional — older clients can still use the
+     * existing chat `confirm` flow without ever reading this field.
+     */
+    planId: z.string().optional(),
     plan: z
       .object({
         steps: z.array(

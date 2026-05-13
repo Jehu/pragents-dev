@@ -841,4 +841,73 @@ describe('Chat SSE Route — POST /api/v1/chat', () => {
     const body = await listRes.json();
     expect(body.conversations).toEqual([]);
   });
+
+  // ---- #28: plan_proposal carries planId when PlanStore is wired in ----
+  it('includes planId in plan_proposal envelope and persists draft when PlanStore is provided', async () => {
+    const { PlanStore } = await import('../../../plans/store.js');
+    const planStore = new PlanStore();
+
+    (mockClassifier.classify as any).mockResolvedValue({ tool: 'complex', args: {} });
+    (mockDecomposer.decompose as any).mockResolvedValueOnce({
+      steps: [
+        { description: 'Build x', agentId: 'dev' },
+        { description: 'Test x', agentId: 'dev', dependsOn: 0 },
+      ],
+    });
+
+    const app = createChatRoute(
+      conversationManager,
+      mockClassifier as IntentClassifier,
+      mockDecomposer,
+      mockToolExecutor,
+      agents,
+      eventBuffer as any,
+      mockTracker as any,
+      planStore,
+    );
+    const res = await app.request('/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: 'Build x and test it', projectId: 'p1', agentId: 'dev' }),
+    });
+    expect(res.status).toBe(200);
+    const text = await readStreamText(res);
+    const events = parseSSEStream(text);
+
+    const planMsg = events.find(
+      (e) => e.type === 'message' && e.data?.subtype === 'plan_proposal',
+    );
+    expect(planMsg).toBeTruthy();
+    expect(typeof planMsg!.data.planId).toBe('string');
+    expect(planMsg!.data.planId.length).toBeGreaterThan(0);
+
+    // Plan should be persisted as draft with origin=chat and the conversation id
+    const stored = planStore.get(planMsg!.data.planId);
+    expect(stored).toBeTruthy();
+    expect(stored!.status).toBe('draft');
+    expect(stored!.origin).toBe('chat');
+    expect(stored!.steps).toHaveLength(2);
+    expect(stored!.conversationId).toBe(planMsg!.data ? events.find((e) => e.type === 'done')!.data.conversationId : null);
+  });
+
+  it('still emits plan_proposal without planId when PlanStore is not provided (backward compat)', async () => {
+    (mockClassifier.classify as any).mockResolvedValue({ tool: 'complex', args: {} });
+    (mockDecomposer.decompose as any).mockResolvedValueOnce({
+      steps: [{ description: 'a', agentId: 'dev' }],
+    });
+
+    const app = createApp(); // no planStore
+    const res = await app.request('/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: 'something' }),
+    });
+    const text = await readStreamText(res);
+    const events = parseSSEStream(text);
+    const planMsg = events.find(
+      (e) => e.type === 'message' && e.data?.subtype === 'plan_proposal',
+    );
+    expect(planMsg).toBeTruthy();
+    expect(planMsg!.data.planId).toBeUndefined();
+  });
 });

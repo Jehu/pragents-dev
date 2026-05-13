@@ -4,6 +4,14 @@ import type { AgentSessionManager } from '../../agents/manager.js';
 import type { ResolvedAgent } from '../../config/schema.js';
 import type { EventBuffer } from '../../events/buffer.js';
 import { logger } from '../../logging/index.js';
+
+// TODO(#28): conceptually a single-task creation is a 1-step Plan with
+// origin='tasks'. Migrating the existing tasks table + WS bridge + downstream
+// consumers (web feed, terminal, traces) was deliberately deferred from the
+// unified-plan-store PR to keep that change narrow. When migrating, create a
+// draft Plan here, approve+execute via PlanExecutor, and keep /api/v1/tasks
+// as a thin compatibility shim.
+
 export function createTasksRoute(tracker: TaskTracker, agents: ResolvedAgent[], sessionMgr: AgentSessionManager, eventBuffer: EventBuffer) {
   const r = new Hono();
 

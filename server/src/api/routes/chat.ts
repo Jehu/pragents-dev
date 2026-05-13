@@ -8,6 +8,7 @@ import type { ToolExecutor } from '../../agents/tool-executor.js';
 import type { TaskTracker } from '../../tasks/tracker.js';
 import type { ResolvedAgent } from '../../config/schema.js';
 import type { EventBuffer } from '../../events/buffer.js';
+import type { PlanStore } from '../../plans/store.js';
 import { ChatRequestSchema, SSEEventSchema } from '../../chat/schema.js';
 import type { SSEEventInput } from '../../chat/schema.js';
 import { logger } from '../../logging/index.js';
@@ -77,6 +78,14 @@ export function createChatRoute(
   agents: ResolvedAgent[],
   eventBuffer: EventBuffer,
   tracker: TaskTracker,
+  /**
+   * Optional. When provided, every plan_proposal emitted on the SSE stream is
+   * persisted to the unified plan store (#28) and its `planId` is included in
+   * the envelope so the client can call POST /api/v1/plans/:id/approve to
+   * approve+execute. Older clients that don't read `planId` keep working via
+   * the existing `confirm` flow.
+   */
+  planStore?: PlanStore,
 ): Hono {
   const app = new Hono();
 
@@ -398,11 +407,36 @@ export function createChatRoute(
                     : {}),
                 }));
 
+                // Persist plan in the unified store so the client can
+                // approve+execute via POST /api/v1/plans/:id/approve.
+                // Best-effort: if persistence fails we still surface the
+                // plan_proposal to keep the existing confirm flow working.
+                let planId: string | undefined;
+                if (planStore) {
+                  try {
+                    const persisted = planStore.create({
+                      origin: 'chat',
+                      conversationId: convId,
+                      projectId: projectId ?? null,
+                      agentId: agentId ?? null,
+                      prompt: message,
+                      steps: planSteps,
+                    });
+                    planId = persisted.id;
+                  } catch (err) {
+                    logger.warn(
+                      { err, convId },
+                      'Chat: failed to persist plan_proposal to plan store — continuing',
+                    );
+                  }
+                }
+
                 emit({
                   type: 'message',
                   data: {
                     subtype: 'plan_proposal',
                     content: `Here is the proposed plan with ${planSteps.length} step(s):`,
+                    ...(planId ? { planId } : {}),
                     plan: { steps: planSteps },
                   },
                 });

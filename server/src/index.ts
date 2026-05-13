@@ -19,6 +19,9 @@ import { createProjectsRoute, createAgentsRoute } from './api/routes/projects.js
 import { createWorkflowsRoute } from './api/routes/workflows.js';
 import { NLDecomposer } from './nl/decomposer.js';
 import { createNLRoutes } from './api/routes/nl.js';
+import { PlanStore } from './plans/store.js';
+import { PlanExecutor } from './plans/executor.js';
+import { createPlansRoute } from './api/routes/plans.js';
 import { CostTracker } from './tracking/cost-tracker.js';
 import { createCostRoute } from './api/routes/cost.js';
 import { GoalRegistry } from './goals/loader.js';
@@ -160,6 +163,8 @@ export async function startServer() {
 
   const wfEngine = new WorkflowEngine(wfTracker, router, sessionMgr, agents, eventBuffer);
   const decomposer = new NLDecomposer();
+  const planStore = new PlanStore();
+  const planExecutor = new PlanExecutor(planStore, wfEngine);
   const costTracker = new CostTracker(config.costs || {});
   sessionMgr.setCostTracker(costTracker);
 
@@ -228,6 +233,7 @@ export async function startServer() {
     agents,
     eventBuffer,
     tracker,
+    planStore,
   );
 
   // Build API
@@ -246,7 +252,8 @@ export async function startServer() {
   app.route('/api/v1/agents', createAgentsRoute(agents, sessionMgr));
   app.route('/api/v1/tasks', createTasksRoute(tracker, agents, sessionMgr, eventBuffer));
   app.route('/api/v1/workflows', createWorkflowsRoute(wfRegistry, wfEngine, wfTracker));
-  app.route('/api/v1/nl', createNLRoutes(decomposer, agents, wfEngine));
+  app.route('/api/v1/nl', createNLRoutes(decomposer, agents, planStore, planExecutor));
+  app.route('/api/v1/plans', createPlansRoute(planStore, planExecutor));
   app.route('/api/v1/cost', createCostRoute(costTracker));
   app.route('/api/v1/goals', createGoalsRoute(goalRegistry));
   app.route('/api/v1/gates', createGatesRoute(eventBuffer));
