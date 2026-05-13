@@ -52,30 +52,40 @@ cp .env.example ~/.pragents/.env
 # edit ~/.pragents/.env — uncomment and fill in your API keys
 ```
 
-**Company-level auto-extraction settings:**
+**Company-level settings:**
 
 ```yaml
 # ~/.pragents/pragents.yaml
 company:
   name: My Agency
-  autoApproveSkills: false     # default false — requires manual approval
-  similarityThreshold: 0.8     # default 0.8 — semantic dedup sensitivity
+  similarityThreshold: 0.8        # semantic dedup sensitivity
+  skillApproval:
+    confidenceThreshold: 0.9      # auto-promote when extraction confidence ≥ this
+    blockedTools: [bash, write, computer]   # skills using these tools stay in quarantine
+pool:
+  maxWarmSessions: 10             # global cap for keepWarm agents
+chat:
+  classifierThreshold: 0.7        # IntentClassifier confidence below this → fallback to NL decomposer
 ```
 
 | Field | Default | Description |
 |-------|---------|-------------|
-| `autoApproveSkills` | `false` | When `true`, auto-extracted skills skip directly to `active`. When `false`, they arrive as `proposed` for manual review in the inbox. |
-| `similarityThreshold` | `0.8` | Semantic deduplication threshold (0–1). When an extracted skill's body is >80% similar to an existing active skill, the existing skill's confidence is raised instead of creating a duplicate. |
+| `similarityThreshold` | `0.8` | Semantic deduplication threshold (0–1). When an extracted skill is >80% similar to an existing active skill, the existing skill's confidence is raised instead of creating a duplicate. |
+| `skillApproval.confidenceThreshold` | `0.9` | Auto-extracted skills land in `skills/_quarantine/` first. If extraction confidence ≥ this **and** none of the skill's `allowed-tools` appear in `blockedTools`, the skill is promoted to active. Otherwise it waits in quarantine for manual review. |
+| `skillApproval.blockedTools` | `[bash, write, computer]` | Tools that block auto-promotion regardless of confidence. |
+| `pool.maxWarmSessions` | `10` | Global cap on `keepWarm: true` agent sessions held in memory. |
+| `chat.classifierThreshold` | `0.7` | When the IntentClassifier reports confidence below this, the chat falls back to the full NL decomposer instead of running the classified tool. |
 
 **What goes where:**
 
 ```
 ~/.pragents/
 ├── pragents.yaml         # your config (agents, projects, models, costs)
-├── .env                  # API keys (auto-loaded on start)
+├── .env                  # API keys + PRAGENTS_API_TOKEN (auto-loaded on start)
 │
 ├── data/                 # ← auto-created
-│   ├── pragents.db       # SQLite — tasks, workflows, memory, skills, events
+│   ├── pragents.db       # SQLite — tasks, workflows, memory, skills, events, plans
+│   ├── backups/          # rolling DB snapshots (5 generations, taken on each boot)
 │   └── lancedb/          # vector index (if LanceDB is configured)
 │
 ├── logs/                 # ← auto-created
@@ -85,11 +95,29 @@ company:
 │   └── <agent-id>/       # one pi SDK session directory per agent
 │
 └── skills/               # ← auto-created
-    └── <skill-name>/     # one subdirectory per skill
+    ├── _quarantine/      # auto-extracted skills awaiting promotion (never loaded into prompts)
+    │   └── <name>/SKILL.md
+    └── <skill-name>/     # active skills
         ├── SKILL.md      # agentskills.io-compatible skill definition
         ├── scripts/      # optional: executable helpers
         ├── references/   # optional: detailed docs
         └── assets/       # optional: templates, data files
+```
+
+## Auth
+
+On first boot the server generates a 32-byte hex token and writes it to `~/.pragents/.env` as `PRAGENTS_API_TOKEN=...`. The token is also logged once at warn-level so you can copy it out of the log.
+
+All `/api/*` routes, the SSE event stream, and the WebSocket are gated by an auth middleware that accepts:
+
+- `Authorization: Bearer <token>` header
+- `?token=<...>` query param (used by the WebSocket upgrade, since browsers can't set headers there)
+- requests from `localhost` / `127.0.0.1` / `::1` (bypass, so local dev keeps working without copying the token)
+
+Set the token explicitly in `~/.pragents/.env` before boot to skip auto-generation:
+
+```bash
+PRAGENTS_API_TOKEN=your-token-here
 ```
 
 ## Run
@@ -215,18 +243,33 @@ The server automatically scans completed sessions for repeatable patterns:
 
 1. **Session-end hooks** — when a session is disposed (idle timeout or shutdown), the system checks eligibility (>10 messages, not already extracted) and triggers LLM extraction asynchronously. Extraction never blocks session disposal.
 
-2. **PM monitor** — every 5 minutes, the GoalScheduler scans the last 10 ungeprüfte sessions as a backup (catches sessions missed by the hook — e.g., after a server restart).
+2. **PM monitor** — every 5 minutes, the GoalScheduler scans the last 10 unchecked sessions as a backup (catches sessions missed by the hook — e.g., after a server restart).
 
 3. **Deduplication** — two-stage dedup prevents duplicate skills:
    - **Name-based** (free): if a skill with the same name exists, extraction is skipped
    - **Semantic** (LLM-backed): compares the extracted body against active skills via an isolated LLM session. If >80% similar (configurable via `similarityThreshold`), the existing skill's confidence is raised instead of creating a duplicate
 
-4. **Lifecycle events** — extraction emits events through the EventBuffer:
-   - `skill.auto_proposed` — skill extracted, awaiting approval (requires inbox review)
-   - `skill.auto_approved` — skill extracted and auto-approved (`autoApproveSkills: true`)
+4. **Quarantine + graduated promotion** — every newly extracted skill is first written to `skills/_quarantine/<name>/SKILL.md`. Quarantined skills are **never** loaded into agent system prompts. The skill is then evaluated against `company.skillApproval`:
+   - confidence ≥ `confidenceThreshold` **and** none of the skill's `allowed-tools` appear in `blockedTools` → auto-promoted to active
+   - otherwise → stays in quarantine until manually approved via the inbox or `POST /api/v1/skills/:name/approve`
+
+5. **Lifecycle events** — extraction emits events through the EventBuffer:
+   - `skill.quarantined` — skill extracted into quarantine
+   - `skill.promoted` — graduated approval moved it to active
+   - `skill.demoted` — skill auto-demoted to `proposed` after 3 rejections
+   - `skill.reject_counted` — rejection recorded but threshold not yet reached
    - `skill.deduplicated` — duplicate detected, existing skill confirmed
 
-Extracted skills are created with status `proposed` by default and appear in the web dashboard feed for human review and approval. Set `autoApproveSkills: true` in your config to skip the review step.
+**Rejecting skills:**
+
+A skill that proves unhelpful can be rejected via:
+
+```bash
+curl -X POST -H "Authorization: Bearer $PRAGENTS_API_TOKEN" \
+  http://localhost:3000/api/v1/skills/<name>/reject
+```
+
+After 3 rejections an active skill is auto-demoted back to `proposed` and removed from system prompts.
 
 **Using skills in pi:**
 
@@ -280,7 +323,7 @@ curl -X POST http://localhost:3000/api/v1/chat \
 | Subtype | Meaning |
 |---------|---------|
 | `text` | Plain text response (after tool execution) |
-| `plan_proposal` | NL Decomposer created a plan — awaiting confirmation |
+| `plan_proposal` | NL Decomposer created a plan — awaiting confirmation. The envelope carries a `planId` referencing a row in the `plans` table; use `POST /api/v1/plans/:planId/approve` to execute or send `confirm: true` in a follow-up chat request. |
 | `status` | Status update |
 | `error_message` | Non-fatal error feedback |
 
@@ -307,4 +350,52 @@ Two tiers, zero-config:
   modifications?: string;    // modifications when confirming a plan
 }
 ```
+
+## Plans API
+
+Natural-language requests, chat plan proposals, and (eventually) task creations all flow through a single canonical Plan store. A `Plan` has a status lifecycle (`draft → approved → executing → done|failed|cancelled`) and is persisted to the `plans` table.
+
+```bash
+# List plans (filter by status/origin/conversationId)
+curl -H "Authorization: Bearer $PRAGENTS_API_TOKEN" \
+  'http://localhost:3000/api/v1/plans?status=draft&origin=nl'
+
+# Get a single plan
+curl -H "Authorization: Bearer $PRAGENTS_API_TOKEN" \
+  http://localhost:3000/api/v1/plans/<plan-id>
+
+# Approve and dispatch a draft
+curl -X POST -H "Authorization: Bearer $PRAGENTS_API_TOKEN" \
+  http://localhost:3000/api/v1/plans/<plan-id>/approve
+
+# Cancel
+curl -X POST -H "Authorization: Bearer $PRAGENTS_API_TOKEN" \
+  http://localhost:3000/api/v1/plans/<plan-id>/cancel
+```
+
+Entry points that create plans:
+
+- `POST /api/v1/nl/decompose` — returns `{ planId, plan, steps }`, status `draft`
+- `POST /api/v1/chat` — when a `plan_proposal` message is emitted, the envelope carries `planId` referencing a draft plan
+- `POST /api/v1/nl/execute` — accepts either `{ planId }` (preferred) or the legacy `{ prompt, plan }` shape
+
+The `/api/v1/tasks` POST endpoint still creates standalone tasks; migrating it onto the Plan store is deferred.
+
+## Metrics API
+
+```bash
+curl -H "Authorization: Bearer $PRAGENTS_API_TOKEN" \
+  http://localhost:3000/api/v1/metrics
+```
+
+Returns four objective KPIs aggregated from `events`, `tasks`, `goal_runs`, and `cost_log` over a 7-day rolling window. Results are cached for 30 seconds.
+
+| Field | Meaning |
+|-------|---------|
+| `skillSuccessRate` | Fraction of `skill.used` events whose parent task ended `complete` |
+| `memoryHitRate` | Fraction of `memory.recall` events that returned ≥1 result |
+| `escalationsPerGoalRun` | Ratio of escalation tasks created to goal runs in the window |
+| `tokensPerCompletedTask` | Average `tokens_in + tokens_out` per completed task |
+
+Metrics that can't be computed (missing data, no linkable events) return `null` and a reason string in the `notes` object — never zero, so dashboards can distinguish "no data" from "actually zero."
 
