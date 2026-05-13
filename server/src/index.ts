@@ -16,6 +16,7 @@ import { createEventsRoute, broadcastSSE } from './api/routes/events.js';
 import { createHealthRoute } from './api/routes/health.js';
 import { createTasksRoute } from './api/routes/tasks.js';
 import { createProjectsRoute, createAgentsRoute } from './api/routes/projects.js';
+import { createAgentDetailRoute } from './api/routes/agents.js';
 import { createWorkflowsRoute } from './api/routes/workflows.js';
 import { NLDecomposer } from './nl/decomposer.js';
 import { createNLRoutes } from './api/routes/nl.js';
@@ -250,6 +251,7 @@ export async function startServer() {
   app.route('/', createHealthRoute(memory));
   app.route('/api/v1/projects', createProjectsRoute(config));
   app.route('/api/v1/agents', createAgentsRoute(agents, sessionMgr));
+  app.route('/api/v1/agents', createAgentDetailRoute(agents, sessionMgr, eventBuffer, tracker));
   app.route('/api/v1/tasks', createTasksRoute(tracker, agents, sessionMgr, eventBuffer));
   app.route('/api/v1/workflows', createWorkflowsRoute(wfRegistry, wfEngine, wfTracker));
   app.route('/api/v1/nl', createNLRoutes(decomposer, agents, planStore, planExecutor));

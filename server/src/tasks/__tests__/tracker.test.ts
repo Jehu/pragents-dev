@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { initDb, closeDb } from '../../db/sqlite.js';
+import { initDb, closeDb, getDb } from '../../db/sqlite.js';
 import { TaskTracker } from '../../tasks/tracker.js';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -109,5 +109,67 @@ describe('TaskTracker', () => {
     const recovered = tracker.recoverStaleTasks();
     expect(recovered).toBeGreaterThanOrEqual(1);
     expect(tracker.get(t.id)?.status).toBe('needs_review');
+  });
+
+  // ---- Cost + Duration fields (M6 #64) ----
+  it('create returns zero cost fields and null timestamps', () => {
+    const t = tracker.create({ projectId: 'p1', agentId: 'a1', description: 'cost zero' });
+    expect(t.costEur).toBe(0);
+    expect(t.tokensIn).toBe(0);
+    expect(t.tokensOut).toBe(0);
+    expect(t.durationMs).toBeNull();
+    expect(t.startedAt).toBeNull();
+    expect(t.completedAt).toBeNull();
+  });
+
+  it('setRunning records started_at once', () => {
+    const t = tracker.create({ projectId: 'p1', agentId: 'a1', description: 'started_at test' });
+    tracker.setRunning(t.id);
+    const after = tracker.get(t.id)!;
+    expect(after.startedAt).not.toBeNull();
+    const firstStart = after.startedAt;
+    tracker.setRunning(t.id);
+    expect(tracker.get(t.id)!.startedAt).toBe(firstStart);
+  });
+
+  it('setComplete records completed_at and yields non-null durationMs', () => {
+    const t = tracker.create({ projectId: 'p1', agentId: 'a1', description: 'duration test' });
+    tracker.setRunning(t.id);
+    tracker.setComplete(t.id, 'ok');
+    const after = tracker.get(t.id)!;
+    expect(after.completedAt).not.toBeNull();
+    expect(after.durationMs).not.toBeNull();
+    expect(after.durationMs!).toBeGreaterThanOrEqual(0);
+  });
+
+  it('setFailed records completed_at', () => {
+    const t = tracker.create({ projectId: 'p1', agentId: 'a1', description: 'fail duration' });
+    tracker.setRunning(t.id);
+    tracker.setFailed(t.id, 'boom');
+    const after = tracker.get(t.id)!;
+    expect(after.completedAt).not.toBeNull();
+  });
+
+  it('get includes cost aggregation from cost_log', () => {
+    const t = tracker.create({ projectId: 'p1', agentId: 'a1', description: 'cost join' });
+    const db = getDb();
+    db.prepare(
+      'INSERT INTO cost_log (id, project_id, agent_id, model, tokens_in, tokens_out, cost_estimate, task_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    ).run('cid-1', 'p1', 'a1', 'm', 1000, 500, 0.05, t.id, new Date().toISOString());
+    const fetched = tracker.get(t.id)!;
+    expect(fetched.costEur).toBeCloseTo(0.05);
+    expect(fetched.tokensIn).toBe(1000);
+    expect(fetched.tokensOut).toBe(500);
+  });
+
+  it('list includes cost aggregation', () => {
+    const t = tracker.create({ projectId: 'p-cost-list', agentId: 'a1', description: 'list cost' });
+    const db = getDb();
+    db.prepare(
+      'INSERT INTO cost_log (id, project_id, agent_id, model, tokens_in, tokens_out, cost_estimate, task_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    ).run('cid-2', 'p-cost-list', 'a1', 'm', 2000, 800, 0.1, t.id, new Date().toISOString());
+    const tasks = tracker.list('p-cost-list');
+    const found = tasks.find((x) => x.id === t.id);
+    expect(found!.costEur).toBeCloseTo(0.1);
   });
 });

@@ -505,4 +505,48 @@ export class AgentSessionManager {
     if (!handle) return 'offline';
     return handle.runtimeHandle.isStreaming ? 'busy' : 'idle';
   }
+
+  /**
+   * Return session timing metadata for a given agent.
+   * Returns null if no active session exists.
+   */
+  getSessionInfo(agentId: string): { id: string; startedAt: string; idleTimeoutMs: number; msUntilIdle: number } | null {
+    const handle = this.sessions.get(agentId);
+    if (!handle) return null;
+    const elapsed = Date.now() - handle.lastActivityAt;
+    const msUntilIdle = Math.max(0, this.idleTimeoutMs - elapsed);
+    return {
+      id: handle.runtimeHandle.id,
+      startedAt: new Date(handle.createdAt).toISOString(),
+      idleTimeoutMs: this.idleTimeoutMs,
+      msUntilIdle,
+    };
+  }
+
+  /**
+   * Stop an agent session cleanly.
+   * If mid-stream, waits up to 30 s then force-disposes.
+   * Returns the session id that was stopped, or null if there was no session.
+   */
+  async stopAgent(agentId: string): Promise<string | null> {
+    const handle = this.sessions.get(agentId);
+    if (!handle) return null;
+
+    const sessionId = handle.runtimeHandle.id;
+
+    if (handle.runtimeHandle.isStreaming) {
+      // Wait up to 30 s for the current turn to finish
+      const deadline = Date.now() + 30_000;
+      while (handle.runtimeHandle.isStreaming && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+    }
+
+    this.persistSessionMessages(agentId, handle);
+    this.runtime.dispose(handle.runtimeHandle);
+    this.sessions.delete(agentId);
+
+    logger.info({ agentId, sessionId }, 'Agent session stopped via API');
+    return sessionId;
+  }
 }

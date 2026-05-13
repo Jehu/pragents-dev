@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { getDb } from '../../db/sqlite.js';
 import type { SkillRegistry } from '../../skills/registry.js';
 import type { SkillExtractor } from '../../skills/extractor.js';
 import type { EventBuffer } from '../../events/buffer.js';
@@ -7,6 +8,31 @@ import {
   type PragentsSkillFrontmatter as SkillFM,
   type PragentsSkillFrontmatterInput,
 } from '../../skills/schema.js';
+
+/** In-memory cache for the full skills list with usage stats. TTL: 60 s. */
+interface SkillListCache {
+  data: any[];
+  expiresAt: number;
+  since?: string;
+}
+let skillListCache: SkillListCache | null = null;
+
+function getSkillUsageStats(skillName: string, since?: string): { usageCount: number; lastUsedAt: string | null } {
+  const db = getDb();
+  const params: any[] = [skillName];
+  let sinceClause = '';
+  if (since) {
+    sinceClause = ' AND timestamp >= ?';
+    params.push(since);
+  }
+  const row = db.prepare(
+    `SELECT COUNT(*) as usageCount,
+            MAX(timestamp) as lastUsedAt
+     FROM events
+     WHERE type = 'skill.used' AND json_extract(data, '$.skill') = ?${sinceClause}`,
+  ).get(...params) as { usageCount: number; lastUsedAt: string | null };
+  return { usageCount: row?.usageCount ?? 0, lastUsedAt: row?.lastUsedAt ?? null };
+}
 
 export function createSkillsRoute(
   registry: SkillRegistry,
@@ -19,29 +45,45 @@ export function createSkillsRoute(
   r.get('/', (c) => {
     const tag = c.req.query('tag');
     const status = c.req.query('status');
+    const since = c.req.query('since') || undefined;
+
+    // Cache applies only to the unfiltered list (no tag/status/since) — invalidate on mismatch
+    if (!tag && !status && !since && skillListCache && skillListCache.expiresAt > Date.now()) {
+      return c.json(skillListCache.data);
+    }
+
     let skills = tag ? registry.findByTags([tag]) : registry.list();
     if (status) {
       skills = skills.filter((s) => s['x-pragents-status'] === status);
     }
-    return c.json(
-      skills.map((s) => {
-        const extraction = s['x-pragents-extraction'];
-        const tools = (s['allowed-tools'] || '').split(' ').filter(Boolean);
-        return {
-          name: s.name,
-          description: s.description,
-          tags: s['x-pragents-tags'],
-          source_agent: extraction?.source_agent_id || null,
-          extracted_at: extraction?.extracted_at || null,
-          tools,
-          parameters: s['x-pragents-parameters']?.length || 0,
-          scope: s['x-pragents-scope'],
-          status: s['x-pragents-status'],
-          version: s['x-pragents-version'],
-          extraction_metadata: extraction || null,
-        };
-      }),
-    );
+
+    const result = skills.map((s) => {
+      const extraction = s['x-pragents-extraction'];
+      const tools = (s['allowed-tools'] || '').split(' ').filter(Boolean);
+      const usage = getSkillUsageStats(s.name, since);
+      return {
+        name: s.name,
+        description: s.description,
+        tags: s['x-pragents-tags'],
+        source_agent: extraction?.source_agent_id || null,
+        extracted_at: extraction?.extracted_at || null,
+        tools,
+        parameters: s['x-pragents-parameters']?.length || 0,
+        scope: s['x-pragents-scope'],
+        status: s['x-pragents-status'],
+        version: s['x-pragents-version'],
+        extraction_metadata: extraction || null,
+        usageCount: usage.usageCount,
+        lastUsedAt: usage.lastUsedAt,
+      };
+    });
+
+    // Cache only the unfiltered response
+    if (!tag && !status && !since) {
+      skillListCache = { data: result, expiresAt: Date.now() + 60_000 };
+    }
+
+    return c.json(result);
   });
 
   // Get a specific skill (frontmatter + body)

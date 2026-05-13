@@ -19,5 +19,17 @@ export function createCostRoute(costTracker: CostTracker) {
     return c.json(stats);
   });
 
+  r.get('/today', (c) => {
+    const projectId = c.req.query('project') || undefined;
+    const result = costTracker.getDailyCost(undefined, projectId);
+    return c.json(result);
+  });
+
+  r.get('/by-model', (c) => {
+    const since = c.req.query('since') || undefined;
+    const result = costTracker.getCostByModel(since);
+    return c.json(result);
+  });
+
   return r;
 }
