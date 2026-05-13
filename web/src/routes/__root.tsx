@@ -1,10 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { createRootRoute, Outlet, Link, useRouterState } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
-import { useScopeStore } from '../stores/scope';
-import { useEventBusStore } from '../stores/eventBus';
-import { connectSSE, disconnectSSE, isSSEAvailable } from '../hooks/useSSE';
-import { KbdHint, Sparkline } from '../components/ui';
+import { useScopeStore } from '../stores/scope.js';
+import { useEventBusStore } from '../stores/eventBus.js';
+import { useCommandPaletteStore } from '../stores/commandPalette.js';
+import { connectSSE, disconnectSSE, isSSEAvailable } from '../hooks/useSSE.js';
+import { KbdHint, Sparkline } from '../components/ui/index.js';
+import { CommandPalette } from '../components/CommandPalette.js';
 
 // ---------------------------------------------------------------------------
 // Sidebar navigation structure
@@ -180,7 +182,7 @@ function Sidebar({ collapsed }: { collapsed: boolean }) {
 
   return (
     <aside className="w-48 bg-zinc-900/50 border-r border-zinc-800 flex-shrink-0 overflow-y-auto">
-      <nav className="py-3">
+      <nav aria-label="Primary navigation" className="py-3">
         {NAV.map((group) => (
           <div key={group.group} className="mb-3">
             <div className="px-3 pb-1 text-[11px] uppercase tracking-wider text-zinc-500 font-semibold">
@@ -258,6 +260,7 @@ function LiveStrip() {
 
 function RootLayout() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const { setOpen: setPaletteOpen } = useCommandPaletteStore();
 
   // Start SSE connection on mount
   useEffect(() => {
@@ -271,10 +274,25 @@ function RootLayout() {
     document.documentElement.classList.add('dark');
   }, []);
 
+  // Global ⌘K / Ctrl+K listener
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'k' && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        setPaletteOpen(true);
+      }
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [setPaletteOpen]);
+
   return (
     <div className="h-screen flex flex-col bg-zinc-950 text-zinc-200 font-sans overflow-hidden">
+      {/* Command Palette overlay */}
+      <CommandPalette />
+
       {/* Header */}
-      <header className="h-12 bg-zinc-900 border-b border-zinc-800 px-4 flex items-center justify-between flex-shrink-0">
+      <header role="banner" className="h-12 bg-zinc-900 border-b border-zinc-800 px-4 flex items-center justify-between flex-shrink-0">
         <div className="flex items-center gap-4">
           {/* Logo + sidebar toggle */}
           <button
@@ -289,10 +307,14 @@ function RootLayout() {
           <ProjectPicker />
 
           {/* ⌘K search hint */}
-          <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-zinc-800 text-xs text-zinc-500 cursor-pointer hover:bg-zinc-700 transition-colors">
+          <button
+            onClick={() => setPaletteOpen(true)}
+            className="flex items-center gap-1.5 px-2 py-1 rounded bg-zinc-800 text-xs text-zinc-500 cursor-pointer hover:bg-zinc-700 transition-colors"
+            aria-label="Open command palette (⌘K)"
+          >
             <span>Search…</span>
             <KbdHint keys={['⌘', 'K']} />
-          </div>
+          </button>
         </div>
 
         <div className="flex items-center gap-4 text-xs">
@@ -305,7 +327,7 @@ function RootLayout() {
       {/* Body: sidebar + main outlet */}
       <div className="flex-1 flex overflow-hidden min-h-0">
         <Sidebar collapsed={sidebarCollapsed} />
-        <main className="flex-1 overflow-y-auto">
+        <main role="main" className="flex-1 overflow-y-auto">
           <Outlet />
         </main>
       </div>

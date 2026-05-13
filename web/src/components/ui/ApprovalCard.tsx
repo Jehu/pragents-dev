@@ -17,6 +17,7 @@ interface ApprovalCardProps {
   onTertiary?: () => void;
   tertiaryLabel?: string;
   disabled?: boolean;
+  isLoading?: boolean;
 }
 
 export function ApprovalCard({
@@ -28,9 +29,10 @@ export function ApprovalCard({
   onTertiary,
   tertiaryLabel = 'Review',
   disabled = false,
+  isLoading = false,
 }: ApprovalCardProps) {
   return (
-    <div className="bg-zinc-900 border border-zinc-800 hover:border-zinc-700 rounded-lg p-3">
+    <div aria-busy={isLoading} className="bg-zinc-900 border border-zinc-800 hover:border-zinc-700 rounded-lg p-3">
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-start gap-3 flex-1 min-w-0">
           <span

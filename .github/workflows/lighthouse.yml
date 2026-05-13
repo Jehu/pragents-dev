@@ -1,0 +1,44 @@
+# Lighthouse CI — runs on PRs and pushes to main
+# NOTE: Requires a running server at localhost:3000. In CI, start the server
+# in a previous job or service container before this step runs.
+name: Lighthouse Audit
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lighthouse:
+    runs-on: ubuntu-latest
+    # pending server start — this job requires the pragents server running
+    # on port 3000 and the web build served on port 5174 (or similar).
+    # Uncomment and configure the service container when CI infra is ready.
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build web
+        run: cd web && npm run build
+
+      - name: Install lighthouse-ci
+        run: npm install -g @lhci/cli
+
+      - name: Run Lighthouse CI
+        # pending: replace URL with actual served URL once server/CI is configured
+        run: |
+          lhci autorun \
+            --collect.url=http://localhost:5174 \
+            --assert.preset=lighthouse:no-pwa \
+            --assert.assertions.categories:accessibility=warn \
+            --assert.assertions.categories:best-practices=warn
+        continue-on-error: true

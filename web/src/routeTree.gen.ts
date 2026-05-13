@@ -21,7 +21,6 @@ import { Route as MemoryIndexRouteImport } from './routes/memory/index'
 import { Route as InboxIndexRouteImport } from './routes/inbox/index'
 import { Route as HealthIndexRouteImport } from './routes/health/index'
 import { Route as GoalsIndexRouteImport } from './routes/goals/index'
-import { Route as FeedIndexRouteImport } from './routes/feed/index'
 import { Route as CostsIndexRouteImport } from './routes/costs/index'
 import { Route as ChatIndexRouteImport } from './routes/chat/index'
 import { Route as AgentsIndexRouteImport } from './routes/agents/index'
@@ -90,11 +89,6 @@ const GoalsIndexRoute = GoalsIndexRouteImport.update({
   path: '/goals/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const FeedIndexRoute = FeedIndexRouteImport.update({
-  id: '/feed/',
-  path: '/feed/',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const CostsIndexRoute = CostsIndexRouteImport.update({
   id: '/costs/',
   path: '/costs/',
@@ -140,7 +134,6 @@ export interface FileRoutesByFullPath {
   '/agents/': typeof AgentsIndexRoute
   '/chat/': typeof ChatIndexRoute
   '/costs/': typeof CostsIndexRoute
-  '/feed/': typeof FeedIndexRoute
   '/goals/': typeof GoalsIndexRoute
   '/health/': typeof HealthIndexRoute
   '/inbox/': typeof InboxIndexRoute
@@ -162,7 +155,6 @@ export interface FileRoutesByTo {
   '/agents': typeof AgentsIndexRoute
   '/chat': typeof ChatIndexRoute
   '/costs': typeof CostsIndexRoute
-  '/feed': typeof FeedIndexRoute
   '/goals': typeof GoalsIndexRoute
   '/health': typeof HealthIndexRoute
   '/inbox': typeof InboxIndexRoute
@@ -185,7 +177,6 @@ export interface FileRoutesById {
   '/agents/': typeof AgentsIndexRoute
   '/chat/': typeof ChatIndexRoute
   '/costs/': typeof CostsIndexRoute
-  '/feed/': typeof FeedIndexRoute
   '/goals/': typeof GoalsIndexRoute
   '/health/': typeof HealthIndexRoute
   '/inbox/': typeof InboxIndexRoute
@@ -209,7 +200,6 @@ export interface FileRouteTypes {
     | '/agents/'
     | '/chat/'
     | '/costs/'
-    | '/feed/'
     | '/goals/'
     | '/health/'
     | '/inbox/'
@@ -231,7 +221,6 @@ export interface FileRouteTypes {
     | '/agents'
     | '/chat'
     | '/costs'
-    | '/feed'
     | '/goals'
     | '/health'
     | '/inbox'
@@ -253,7 +242,6 @@ export interface FileRouteTypes {
     | '/agents/'
     | '/chat/'
     | '/costs/'
-    | '/feed/'
     | '/goals/'
     | '/health/'
     | '/inbox/'
@@ -276,7 +264,6 @@ export interface RootRouteChildren {
   AgentsIndexRoute: typeof AgentsIndexRoute
   ChatIndexRoute: typeof ChatIndexRoute
   CostsIndexRoute: typeof CostsIndexRoute
-  FeedIndexRoute: typeof FeedIndexRoute
   GoalsIndexRoute: typeof GoalsIndexRoute
   HealthIndexRoute: typeof HealthIndexRoute
   InboxIndexRoute: typeof InboxIndexRoute
@@ -376,13 +363,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof GoalsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/feed/': {
-      id: '/feed/'
-      path: '/feed'
-      fullPath: '/feed/'
-      preLoaderRoute: typeof FeedIndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/costs/': {
       id: '/costs/'
       path: '/costs'
@@ -444,7 +424,6 @@ const rootRouteChildren: RootRouteChildren = {
   AgentsIndexRoute: AgentsIndexRoute,
   ChatIndexRoute: ChatIndexRoute,
   CostsIndexRoute: CostsIndexRoute,
-  FeedIndexRoute: FeedIndexRoute,
   GoalsIndexRoute: GoalsIndexRoute,
   HealthIndexRoute: HealthIndexRoute,
   InboxIndexRoute: InboxIndexRoute,

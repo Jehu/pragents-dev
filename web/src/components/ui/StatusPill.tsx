@@ -40,6 +40,7 @@ interface StatusPillProps {
 export function StatusPill({ status, className = '' }: StatusPillProps) {
   return (
     <span
+      aria-label={status}
       className={`inline-flex items-center text-[11px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded ${STATUS_STYLES[status]} ${className}`}
     >
       {STATUS_LABELS[status]}
