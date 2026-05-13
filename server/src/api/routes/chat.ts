@@ -1,9 +1,11 @@
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
+import { z } from 'zod';
 import type { ConversationManager } from '../../chat/manager.js';
 import type { IntentClassifier } from '../../chat/intent-classifier.js';
 import type { NLDecomposer } from '../../nl/decomposer.js';
 import type { ToolExecutor } from '../../agents/tool-executor.js';
+import type { TaskTracker } from '../../tasks/tracker.js';
 import type { ResolvedAgent } from '../../config/schema.js';
 import type { EventBuffer } from '../../events/buffer.js';
 import { ChatRequestSchema, SSEEventSchema } from '../../chat/schema.js';
@@ -13,7 +15,11 @@ import { logger } from '../../logging/index.js';
 const HEARTBEAT_INTERVAL_MS = 15_000;
 const TOOL_TIMEOUT_MS = 30_000;
 const DECOMPOSER_TIMEOUT_MS = 120_000;
+const TASK_COMPLETION_TIMEOUT_MS = 10 * 60_000; // 10 min per dispatched step
+const TASK_POLL_INTERVAL_MS = 500;
 const MAX_BODY_SIZE = 50 * 1024 * 1024; // 50 MB
+
+const TERMINAL_TASK_STATUSES = new Set(['complete', 'failed', 'needs_review', 'blocked']);
 
 /**
  * Race a promise against a timeout. Rejects with the provided message if the
@@ -29,6 +35,35 @@ function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promi
 }
 
 /**
+ * Poll the tracker until the given task reaches a terminal status. Sequential
+ * step execution lets the confirm path honour declared dependsOn ordering even
+ * though the create_task tool itself has no dependency awareness.
+ */
+async function waitForTaskCompletion(
+  tracker: TaskTracker,
+  taskId: string,
+  timeoutMs: number,
+  pollIntervalMs: number,
+  isAborted: () => boolean,
+): Promise<{ status: string; result: string | null; reason: string | null }> {
+  const deadline = Date.now() + timeoutMs;
+  while (!isAborted()) {
+    const task = tracker.get(taskId);
+    if (!task) {
+      throw new Error(`Task ${taskId} not found while waiting for completion`);
+    }
+    if (TERMINAL_TASK_STATUSES.has(task.status)) {
+      return { status: task.status, result: task.result, reason: task.reason };
+    }
+    if (Date.now() >= deadline) {
+      throw new Error(`Task ${taskId} did not reach terminal state within ${timeoutMs}ms`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+  }
+  throw new Error(`Wait for task ${taskId} aborted`);
+}
+
+/**
  * Create the Chat SSE route.
  *
  * Factory pattern matching the rest of the API routes — injects all
@@ -41,11 +76,25 @@ export function createChatRoute(
   toolExecutor: ToolExecutor,
   agents: ResolvedAgent[],
   eventBuffer: EventBuffer,
+  tracker: TaskTracker,
 ): Hono {
   const app = new Hono();
 
   // Apply body size limit to prevent memory exhaustion DoS
   app.use('*', bodyLimit({ maxSize: MAX_BODY_SIZE }));
+
+  // GET /api/v1/chat/conversations — list recent conversations
+  app.get('/conversations', (c) => {
+    const limit = z.coerce.number().int().min(1).max(100).safeParse(c.req.query('limit'));
+    const projectId = c.req.query('projectId') || undefined;
+
+    const conversations = conversationManager.listRecent(
+      limit.success ? limit.data : 20,
+      projectId,
+    );
+
+    return c.json({ conversations });
+  });
 
   app.post('/', async (c) => {
     // 1. Parse and validate body
@@ -209,30 +258,159 @@ export function createChatRoute(
                 throw new DecomposerError(message);
               }
 
-              const planSteps = plan.steps.map((s) => ({
-                description: s.description,
-                agentId: s.agentId,
-                ...(s.dependsOn != null
-                  ? { dependsOn: Array.isArray(s.dependsOn) ? s.dependsOn[0] : s.dependsOn }
-                  : {}),
-              }));
+              if (confirm) {
+                // ── Confirm path: dispatch each plan step as a task ──
+                //
+                // Steps run sequentially (await each task to terminal state
+                // before dispatching the next). This linearisation honours any
+                // dependsOn the LLM produced — create_task itself has no
+                // dependency awareness, so the chat route enforces it here.
 
-              emit({
-                type: 'message',
-                data: {
-                  subtype: 'plan_proposal',
-                  content: `Here is the proposed plan with ${planSteps.length} step(s):`,
-                  plan: { steps: planSteps },
-                },
-              });
+                // Resolve projectId from conversation if not in request
+                const conv = conversationManager.getConversation(convId);
+                const effectiveProjectId = projectId || conv?.projectId;
 
-              // Persist assistant message with human-readable summary + plan JSON
-              conversationManager.addMessage(
-                convId,
-                'assistant',
-                `Proposed plan with ${planSteps.length} step(s):\n${planSteps.map((s, i) => `${i + 1}. ${s.agentId}: ${s.description}`).join('\n')}`,
-                'plan_proposal',
-              );
+                if (!effectiveProjectId) {
+                  throw new ConfirmError(
+                    'projectId is required to execute a plan — provide it in the request or via the conversation',
+                  );
+                }
+
+                const stepResults: Array<{
+                  agentId: string;
+                  description: string;
+                  taskId?: string;
+                  status?: string;
+                  error?: string;
+                }> = [];
+
+                for (let i = 0; i < plan.steps.length; i++) {
+                  const step = plan.steps[i];
+
+                  emit({
+                    type: 'tool_call',
+                    data: {
+                      tool: 'create_task',
+                      args: {
+                        projectId: effectiveProjectId,
+                        agentId: step.agentId,
+                        description: step.description,
+                      },
+                    },
+                  });
+
+                  let result: string;
+                  let dispatchedTaskId: string | undefined;
+                  try {
+                    result = await toolExecutor.execute('create_task', {
+                      projectId: effectiveProjectId,
+                      agentId: step.agentId,
+                      description: step.description,
+                    });
+                    const parsed = JSON.parse(result);
+                    dispatchedTaskId = parsed.taskId;
+                  } catch (err) {
+                    const errorMsg = err instanceof Error ? err.message : String(err);
+                    result = JSON.stringify({ error: errorMsg });
+                    stepResults.push({
+                      agentId: step.agentId,
+                      description: step.description,
+                      error: errorMsg,
+                    });
+                    emit({
+                      type: 'tool_result',
+                      data: { tool: 'create_task', result },
+                    });
+                    continue;
+                  }
+
+                  emit({
+                    type: 'tool_result',
+                    data: { tool: 'create_task', result },
+                  });
+
+                  if (!dispatchedTaskId) {
+                    stepResults.push({
+                      agentId: step.agentId,
+                      description: step.description,
+                      error: 'create_task returned no taskId',
+                    });
+                    continue;
+                  }
+
+                  try {
+                    const final = await waitForTaskCompletion(
+                      tracker,
+                      dispatchedTaskId,
+                      TASK_COMPLETION_TIMEOUT_MS,
+                      TASK_POLL_INTERVAL_MS,
+                      () => streamClosed,
+                    );
+                    stepResults.push({
+                      agentId: step.agentId,
+                      description: step.description,
+                      taskId: dispatchedTaskId,
+                      status: final.status,
+                      ...(final.status !== 'complete'
+                        ? { error: final.reason || `task ended in status ${final.status}` }
+                        : {}),
+                    });
+                  } catch (err) {
+                    const errorMsg = err instanceof Error ? err.message : String(err);
+                    stepResults.push({
+                      agentId: step.agentId,
+                      description: step.description,
+                      taskId: dispatchedTaskId,
+                      error: errorMsg,
+                    });
+                  }
+                }
+
+                // Emit summary message
+                const summaryLines = stepResults.map((r, i) => {
+                  const idRef = r.taskId ? ` (${r.taskId})` : '';
+                  if (r.error) {
+                    return `${i + 1}. ${r.agentId}: ${r.description} — FAILED${idRef}: ${r.error}`;
+                  }
+                  return `${i + 1}. ${r.agentId}: ${r.description} — ${r.status || 'dispatched'}${idRef}`;
+                });
+                const successCount = stepResults.filter((r) => !r.error).length;
+                const summary = `Plan executed: ${successCount}/${stepResults.length} step(s) completed.\n${summaryLines.join('\n')}`;
+
+                emit({
+                  type: 'message',
+                  data: { subtype: 'text', content: summary },
+                });
+
+                conversationManager.addMessage(convId, 'assistant', summary, 'text');
+              } else {
+                // ── Proposal path: emit plan for user confirmation ──
+
+                const planSteps = plan.steps.map((s) => ({
+                  description: s.description,
+                  agentId: s.agentId,
+                  ...(s.dependsOn != null
+                    ? { dependsOn: Array.isArray(s.dependsOn) ? s.dependsOn[0] : s.dependsOn }
+                    : {}),
+                }));
+
+                emit({
+                  type: 'message',
+                  data: {
+                    subtype: 'plan_proposal',
+                    content: `Here is the proposed plan with ${planSteps.length} step(s):`,
+                    plan: { steps: planSteps },
+                  },
+                });
+
+                // Persist assistant message with human-readable summary
+                conversationManager.addMessage(
+                  convId,
+                  'assistant',
+                  `Proposed plan with ${planSteps.length} step(s):\n${planSteps.map((s, i) => `${i + 1}. ${s.agentId}: ${s.description}`).join('\n')}`,
+                  'plan_proposal',
+                );
+              }
             }
 
             // 4d. Emit done
@@ -245,6 +423,7 @@ export function createChatRoute(
             const code =
               err instanceof ToolError ? 'TOOL_ERROR'
               : err instanceof DecomposerError ? 'DECOMPOSER_ERROR'
+              : err instanceof ConfirmError ? 'CONFIRM_ERROR'
               : 'INTERNAL_ERROR';
 
             // For INTERNAL_ERROR, don't leak raw error details
@@ -308,6 +487,13 @@ class DecomposerError extends Error {
   constructor(message: string) {
     super(`Decomposer error: ${message}`);
     this.name = 'DecomposerError';
+  }
+}
+
+class ConfirmError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ConfirmError';
   }
 }
 

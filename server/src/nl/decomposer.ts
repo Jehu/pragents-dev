@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 export const PlanStepSchema = z.object({
   description: z.string(),
   agentId: z.string(),
-  dependsOn: z.union([z.number().int(), z.array(z.number().int())]).nullable().optional(),
+  dependsOn: z.any().optional(),
 });
 
 export const PlanSchema = z.object({
@@ -18,6 +18,28 @@ export const PlanSchema = z.object({
 
 export type Plan = z.infer<typeof PlanSchema>;
 export type PlanStep = z.infer<typeof PlanStepSchema>;
+
+/**
+ * Normalise `dependsOn` before Zod validation. The LLM occasionally emits
+ * numeric strings (`"0"`) or string arrays (`["1"]`) where the schema wants
+ * integers. Mutates `parsed` in place and returns it.
+ */
+export function normalizePlan(parsed: any): any {
+  if (parsed?.steps && Array.isArray(parsed.steps)) {
+    for (const step of parsed.steps) {
+      if (step.dependsOn != null) {
+        if (typeof step.dependsOn === 'string' && /^\d+$/.test(step.dependsOn)) {
+          step.dependsOn = parseInt(step.dependsOn, 10);
+        } else if (Array.isArray(step.dependsOn)) {
+          step.dependsOn = step.dependsOn.map((v: any) =>
+            typeof v === 'string' && /^\d+$/.test(v) ? parseInt(v, 10) : v,
+          );
+        }
+      }
+    }
+  }
+  return parsed;
+}
 
 export class NLDecomposer {
   async decompose(prompt: string, agents: ResolvedAgent[]): Promise<Plan> {
@@ -123,7 +145,7 @@ Rules: Use agentId from the provided list. Order steps logically. Keep descripti
         parsed = JSON.parse(retryMatch[0]);
       }
 
-      const plan = PlanSchema.parse(parsed);
+      const plan = PlanSchema.parse(normalizePlan(parsed));
       const validIds = new Set(agents.map((a) => a.id));
       for (const step of plan.steps) {
         if (!validIds.has(step.agentId)) {

@@ -9,3 +9,5 @@ pragents.yaml
 .DS_Store
 *.tsbuildinfo
 *.local
+.compound-engineering/*.local.yaml
+CLAUDE.md
