@@ -2,7 +2,7 @@ import { createAgentSession, DefaultResourceLoader, SessionManager } from '@mari
 import type { ResolvedAgent } from '../config/schema.js';
 import { resolveModel } from '../agents/model-resolver.js';
 import { z } from 'zod';
-import { mkdtempSync, rmSync, mkdirSync } from 'node:fs';
+import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { logger } from '../logging/index.js';
@@ -76,6 +76,65 @@ EXAMPLES:
 
 Return ONLY: {"tool":"<tool>","args":{...}}`;
 
+// ---- Session cache ----
+// One persistent in-memory pi-session per model string, reused across calls.
+// Avoids per-call mkdtempSync + session setup overhead (fixes #18).
+
+interface CachedSession {
+  session: any;
+  tmpDir: string;
+}
+
+const sessionCache = new Map<string, CachedSession>();
+
+async function getOrCreateSession(modelString: string): Promise<CachedSession> {
+  const cached = sessionCache.get(modelString);
+  if (cached) return cached;
+
+  const model = resolveModel(modelString);
+  if (!model) throw new Error(`IntentClassifier: model "${modelString}" could not be resolved`);
+
+  const tmpDir = join(tmpdir(), `pragents-intent-${modelString.replace(/[^a-z0-9]/gi, '-')}`);
+  mkdirSync(join(tmpDir, '.pi'), { recursive: true });
+
+  const loader = new DefaultResourceLoader({
+    cwd: tmpDir,
+    agentDir: join(tmpDir, '.pi'),
+    noExtensions: true,
+    noSkills: true,
+    noPromptTemplates: true,
+    noThemes: true,
+    noContextFiles: true,
+    systemPromptOverride: () => SYSTEM_PROMPT,
+  });
+  await loader.reload();
+
+  const { session } = await createAgentSession({
+    cwd: tmpDir,
+    resourceLoader: loader,
+    sessionManager: SessionManager.inMemory() as any,
+    model: model as any,
+    thinkingLevel: 'off',
+    noTools: 'all',
+  });
+
+  const entry: CachedSession = { session, tmpDir };
+  sessionCache.set(modelString, entry);
+  logger.info({ modelString }, 'IntentClassifier: created and cached pi-session');
+  return entry;
+}
+
+/**
+ * Dispose all cached sessions. Call this on server shutdown.
+ */
+export async function shutdownClassifierSessions(): Promise<void> {
+  for (const [modelString, { session }] of sessionCache) {
+    try { session.dispose(); } catch { /* ignore */ }
+    logger.info({ modelString }, 'IntentClassifier: disposed cached session');
+  }
+  sessionCache.clear();
+}
+
 export class IntentClassifier {
   private agents: ResolvedAgent[];
   private modelOverride: string | undefined;
@@ -99,41 +158,22 @@ export class IntentClassifier {
   async classify(message: string): Promise<IntentResult | null> {
     if (!message?.trim()) return null;
 
-    // Pick the fastest/cheapest available model and resolve to pi-ai Model object
+    // Pick the fastest/cheapest available model
     const modelString = this.pickModelString();
-    const model = resolveModel(modelString);
-    if (!model) {
-      logger.warn({ modelString },
-        'IntentClassifier: model could not be resolved, skipping classification');
+    if (!modelString) {
+      logger.warn('IntentClassifier: no model configured, skipping classification');
       return null;
     }
 
-    // Setup temp dir for SDK session
-    const tmpDir = mkdtempSync(join(tmpdir(), 'pragents-intent-'));
-    mkdirSync(join(tmpDir, '.pi'), { recursive: true });
-
-    const loader = new DefaultResourceLoader({
-      cwd: tmpDir,
-      agentDir: join(tmpDir, '.pi'),
-      noExtensions: true,
-      noSkills: true,
-      noPromptTemplates: true,
-      noThemes: true,
-      noContextFiles: true,
-      systemPromptOverride: () => SYSTEM_PROMPT,
-    });
-    await loader.reload();
-
-    const { session } = await createAgentSession({
-      cwd: tmpDir,
-      resourceLoader: loader,
-      sessionManager: SessionManager.inMemory() as any,
-      model: model as any,
-      // Classification doesn't need reasoning or tools — disable both to
-      // force the model to answer with plain text JSON, not tool calls.
-      thinkingLevel: 'off',
-      noTools: 'all',
-    });
+    // Reuse cached session for this model (avoids per-call tmpdir + session setup)
+    let session: any;
+    try {
+      ({ session } = await getOrCreateSession(modelString));
+    } catch (err) {
+      logger.warn({ err, modelString },
+        'IntentClassifier: model could not be resolved, skipping classification');
+      return null;
+    }
 
     try {
       let responseText = '';
@@ -193,9 +233,6 @@ export class IntentClassifier {
     } catch (err) {
       logger.warn({ err }, 'IntentClassifier: session failed');
       return null;
-    } finally {
-      try { session.dispose(); } catch { /* ignore */ }
-      try { rmSync(tmpDir, { recursive: true }); } catch { /* ignore */ }
     }
   }
 

@@ -33,7 +33,8 @@ import { SkillAutoExtractor, createSemanticCompareFn } from './skills/auto-extra
 import { createSkillsRoute } from './api/routes/skills.js';
 import { createChatRoute } from './api/routes/chat.js';
 import { ConversationManager } from './chat/manager.js';
-import { IntentClassifier } from './chat/intent-classifier.js';
+import { IntentClassifier, shutdownClassifierSessions } from './chat/intent-classifier.js';
+import { shutdownDecomposerSessions } from './nl/decomposer.js';
 import { createAgentSession, DefaultResourceLoader, SessionManager } from '@mariozechner/pi-coding-agent';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
@@ -287,6 +288,8 @@ export async function startServer() {
       await new Promise(r => setTimeout(r, 500));
     }
     await sessionMgr.disposeAll();
+    await shutdownClassifierSessions();
+    await shutdownDecomposerSessions();
     closeDb();
     logger.info('Shutdown complete');
     process.exit(0);

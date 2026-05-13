@@ -2,9 +2,10 @@ import { createAgentSession, DefaultResourceLoader, SessionManager } from '@mari
 import type { ResolvedAgent } from '../config/schema.js';
 import { resolveModel } from '../agents/model-resolver.js';
 import { z } from 'zod';
-import { mkdtempSync, rmSync, mkdirSync } from 'node:fs';
+import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { logger } from '../logging/index.js';
 
 export const PlanStepSchema = z.object({
   description: z.string(),
@@ -41,6 +42,68 @@ export function normalizePlan(parsed: any): any {
   return parsed;
 }
 
+// ---- System prompt (module-level constant, same for every call) ----
+
+const DECOMPOSER_SYSTEM_PROMPT = `You are a task planner. Return ONLY valid JSON with this structure:
+{"steps":[{"description":"...","agentId":"id from list","dependsOn":null}]}
+
+Rules: Use agentId from the provided list. Order steps logically. Keep descriptions concise. No markdown, no explanation — ONLY the JSON object.`;
+
+// ---- Session cache ----
+// One persistent in-memory pi-session per model string, reused across calls.
+// Avoids per-call mkdtempSync + session setup overhead (fixes #18).
+
+interface CachedSession {
+  session: any;
+  tmpDir: string;
+}
+
+const sessionCache = new Map<string, CachedSession>();
+
+async function getOrCreateSession(modelString: string): Promise<CachedSession> {
+  const cached = sessionCache.get(modelString);
+  if (cached) return cached;
+
+  const model = resolveModel(modelString);
+  if (!model) throw new Error(`NLDecomposer: model "${modelString}" could not be resolved against the pi-ai registry`);
+
+  const tmpDir = join(tmpdir(), `pragents-nl-${modelString.replace(/[^a-z0-9]/gi, '-')}`);
+  mkdirSync(join(tmpDir, '.pi'), { recursive: true });
+
+  const loader = new DefaultResourceLoader({
+    cwd: tmpDir,
+    agentDir: join(tmpDir, '.pi'),
+    noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true,
+    systemPromptOverride: () => DECOMPOSER_SYSTEM_PROMPT,
+  });
+  await loader.reload();
+
+  const { session } = await createAgentSession({
+    cwd: tmpDir,
+    resourceLoader: loader,
+    sessionManager: SessionManager.inMemory() as any,
+    model: model as any,
+    thinkingLevel: 'off',
+    noTools: 'all',
+  });
+
+  const entry: CachedSession = { session, tmpDir };
+  sessionCache.set(modelString, entry);
+  logger.info({ modelString }, 'NLDecomposer: created and cached pi-session');
+  return entry;
+}
+
+/**
+ * Dispose all cached sessions. Call this on server shutdown.
+ */
+export async function shutdownDecomposerSessions(): Promise<void> {
+  for (const [modelString, { session }] of sessionCache) {
+    try { session.dispose(); } catch { /* ignore */ }
+    logger.info({ modelString }, 'NLDecomposer: disposed cached session');
+  }
+  sessionCache.clear();
+}
+
 export class NLDecomposer {
   async decompose(prompt: string, agents: ResolvedAgent[]): Promise<Plan> {
     if (agents.length === 0) throw new Error('No agents configured');
@@ -50,44 +113,15 @@ export class NLDecomposer {
       a.model?.includes('haiku') || a.model?.includes('flash'),
     );
     const modelString = fastAgent?.model || agents[0].model;
-    const model = resolveModel(modelString);
-    if (!model) {
-      throw new Error(`NLDecomposer: model "${modelString}" could not be resolved against the pi-ai registry`);
-    }
 
     const agentList = agents
       .map((a) => `- ${a.id} (${a.type}): ${a.skills.join(', ') || 'general'}`)
       .join('\n');
 
-    const systemPrompt = `You are a task planner. Return ONLY valid JSON with this structure:
-{"steps":[{"description":"...","agentId":"id from list","dependsOn":null}]}
-
-Rules: Use agentId from the provided list. Order steps logically. Keep descriptions concise. No markdown, no explanation — ONLY the JSON object.`;
-
     const userMessage = `Available agents:\n${agentList}\n\nUser request: ${prompt}`;
 
-    // Setup temp dir for SDK session
-    const tmpDir = mkdtempSync(join(tmpdir(), 'pragents-nl-'));
-    mkdirSync(join(tmpDir, '.pi'), { recursive: true });
-
-    const loader = new DefaultResourceLoader({
-      cwd: tmpDir,
-      agentDir: join(tmpDir, '.pi'),
-      noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true,
-      systemPromptOverride: () => systemPrompt,
-    });
-    await loader.reload();
-
-    const { session } = await createAgentSession({
-      cwd: tmpDir,
-      resourceLoader: loader,
-      sessionManager: SessionManager.inMemory() as any,
-      model: model as any,
-      // Disable reasoning and tools — for plan generation we want direct
-      // JSON output, not reasoning chains or tool calls.
-      thinkingLevel: 'off',
-      noTools: 'all',
-    });
+    // Reuse cached session for this model (avoids per-call tmpdir + session setup)
+    const { session } = await getOrCreateSession(modelString);
 
     try {
       let responseText = '';
@@ -105,10 +139,9 @@ Rules: Use agentId from the provided list. Order steps logically. Keep descripti
           }
           if (event.type === 'agent_end') resolve(responseText);
         });
-        // 120s timeout with cleanup
+        // 120s timeout
         setTimeout(() => {
           unsubscribe();
-          try { session.dispose(); } catch {}
           resolve(responseText || '');
         }, 120000);
       });
@@ -155,9 +188,9 @@ Rules: Use agentId from the provided list. Order steps logically. Keep descripti
       }
 
       return plan;
-    } finally {
-      session.dispose();
-      try { rmSync(tmpDir, { recursive: true }); } catch {}
+    } catch (err) {
+      logger.warn({ err }, 'NLDecomposer: session failed');
+      throw err;
     }
   }
 }
