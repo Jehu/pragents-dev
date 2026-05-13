@@ -87,10 +87,12 @@ export function createChatRoute(
   app.get('/conversations', (c) => {
     const limit = z.coerce.number().int().min(1).max(100).safeParse(c.req.query('limit'));
     const projectId = c.req.query('projectId') || undefined;
+    const agentId = c.req.query('agentId') || undefined;
 
     const conversations = conversationManager.listRecent(
       limit.success ? limit.data : 20,
       projectId,
+      agentId,
     );
 
     return c.json({ conversations });
@@ -110,11 +112,13 @@ export function createChatRoute(
       return c.json({ error: parsed.error.issues[0]?.message || 'Invalid request' }, 400);
     }
 
-    const { message, conversationId, projectId, attachments, confirm, modifications } =
+    const { message, conversationId, agentId, projectId, attachments, confirm, modifications } =
       parsed.data;
 
-    // 2. Resolve conversation
-    const convId = conversationManager.getOrCreate(conversationId, projectId);
+    // 2. Resolve conversation — scoped per agentId when provided so that
+    //    parallel users of different agents never share the same conversation,
+    //    and reconnecting clients recover their prior session automatically.
+    const convId = conversationManager.getOrCreate(conversationId, projectId, agentId);
 
     // 3. Build SSE stream
     const encoder = new TextEncoder();

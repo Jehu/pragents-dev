@@ -36,6 +36,7 @@ export type Attachment = z.infer<typeof AttachmentSchema>;
 export const ChatRequestSchema = z.object({
   message: z.string().min(1, 'Message must not be empty'),
   conversationId: z.string().optional(),
+  agentId: z.string().optional(),
   projectId: z.string().optional(),
   attachments: z.array(AttachmentSchema).optional(),
   confirm: z.boolean().optional(),

@@ -701,6 +701,77 @@ describe('Chat SSE Route — POST /api/v1/chat', () => {
     expect(errorEvent!.data.message).toContain('query_tasks');
   });
 
+  // ---- U16: per-agent conversationId isolation ----
+
+  it('U16-a: two different agentIds get separate conversations', async () => {
+    (mockClassifier.classify as any).mockResolvedValue({ tool: 'list_agents', args: {} });
+    const app = createApp();
+
+    const res1 = await app.request('/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: 'hello', agentId: 'agent-alpha' }),
+    });
+    const text1 = await readStreamText(res1);
+    const convId1 = parseSSEStream(text1).find((e) => e.type === 'done')?.data?.conversationId;
+
+    const res2 = await app.request('/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: 'hello', agentId: 'agent-beta' }),
+    });
+    const text2 = await readStreamText(res2);
+    const convId2 = parseSSEStream(text2).find((e) => e.type === 'done')?.data?.conversationId;
+
+    expect(convId1).toBeTruthy();
+    expect(convId2).toBeTruthy();
+    expect(convId1).not.toBe(convId2);
+  });
+
+  it('U16-b: same agentId on reconnect reuses its conversation (no conversationId in request)', async () => {
+    (mockClassifier.classify as any).mockResolvedValue({ tool: 'list_agents', args: {} });
+    const app = createApp();
+    const agentId = `agent-reconnect-${Date.now()}`;
+
+    // First request — establishes the conversation
+    const res1 = await app.request('/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: 'first', agentId }),
+    });
+    const convId1 = parseSSEStream(await readStreamText(res1)).find((e) => e.type === 'done')?.data?.conversationId;
+
+    // Second request — reconnect without explicit conversationId
+    const res2 = await app.request('/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: 'second', agentId }),
+    });
+    const convId2 = parseSSEStream(await readStreamText(res2)).find((e) => e.type === 'done')?.data?.conversationId;
+
+    expect(convId1).toBeTruthy();
+    expect(convId2).toBe(convId1);
+
+    // History should have 4 messages: 2 user + 2 assistant
+    const history = conversationManager.getHistory(convId1!);
+    expect(history.length).toBe(4);
+  });
+
+  it('U15: new ConversationManager instance recovers agentId conversation from DB', async () => {
+    (mockClassifier.classify as any).mockResolvedValue({ tool: 'list_agents', args: {} });
+    const agentId = `agent-persist-${Date.now()}`;
+
+    // First manager: create conversation
+    const mgr1 = new ConversationManager();
+    const convId = mgr1.getOrCreate(undefined, undefined, agentId);
+
+    // Second manager: simulates server restart — in-memory map is empty, must hit DB
+    const mgr2 = new ConversationManager();
+    const recovered = mgr2.getOrCreate(undefined, undefined, agentId);
+
+    expect(recovered).toBe(convId);
+  });
+
   // ---- GET /api/v1/chat/conversations ----
 
   it('lists recent conversations ordered by last_activity_at DESC', async () => {
