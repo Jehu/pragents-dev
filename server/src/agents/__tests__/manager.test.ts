@@ -110,6 +110,134 @@ describe('AgentSessionManager', () => {
   });
 });
 
+describe('Token budget enforcement in dispatch', () => {
+  const tmpDir = mkdtempSync(join(tmpdir(), 'pragents-budget-test-'));
+
+  beforeAll(() => {
+    initDb(join(tmpDir, 'test.db'));
+  });
+
+  afterAll(() => {
+    closeDb();
+    rmSync(tmpDir, { recursive: true });
+  });
+
+  it('blocks dispatch and throws when cumulative token usage meets budget', async () => {
+    const memory = new MemoryEngine(10);
+    const mgr = new AgentSessionManager(memory);
+
+    const mockCostTracker = {
+      getAgentCost: vi.fn().mockReturnValue({ tokensIn: 30000, tokensOut: 10001, cost: 0, calls: 5 }),
+      record: vi.fn(),
+    };
+    mgr.setCostTracker(mockCostTracker as any);
+
+    const agentOverBudget: ResolvedAgent = { ...mockAgent, tokenBudget: 40000 };
+
+    await expect(mgr.dispatch(agentOverBudget, 'Some task')).rejects.toThrow('Token budget exceeded');
+    expect(mockCostTracker.getAgentCost).toHaveBeenCalledWith(agentOverBudget.id);
+  });
+
+  it('emits budget.exceeded event when budget is exceeded', async () => {
+    const memory = new MemoryEngine(10);
+    const mgr = new AgentSessionManager(memory);
+
+    const mockCostTracker = {
+      getAgentCost: vi.fn().mockReturnValue({ tokensIn: 25000, tokensOut: 15001, cost: 0, calls: 3 }),
+      record: vi.fn(),
+    };
+    mgr.setCostTracker(mockCostTracker as any);
+
+    const emittedEvents: any[] = [];
+    mgr.setEventCallback((event) => emittedEvents.push(event));
+
+    const agentOverBudget: ResolvedAgent = { ...mockAgent, tokenBudget: 40000 };
+
+    await expect(mgr.dispatch(agentOverBudget, 'Some task')).rejects.toThrow('Token budget exceeded');
+
+    expect(emittedEvents).toHaveLength(1);
+    expect(emittedEvents[0].type).toBe('budget.exceeded');
+    expect(emittedEvents[0].agentId).toBe(agentOverBudget.id);
+    expect(emittedEvents[0].used).toBe(40001);
+    expect(emittedEvents[0].budget).toBe(40000);
+  });
+
+  it('logs a pino warn when budget is exceeded', async () => {
+    const memory = new MemoryEngine(10);
+    const mgr = new AgentSessionManager(memory);
+
+    const mockCostTracker = {
+      getAgentCost: vi.fn().mockReturnValue({ tokensIn: 40000, tokensOut: 1, cost: 0, calls: 10 }),
+      record: vi.fn(),
+    };
+    mgr.setCostTracker(mockCostTracker as any);
+
+    const agentOverBudget: ResolvedAgent = { ...mockAgent, tokenBudget: 40000 };
+
+    await expect(mgr.dispatch(agentOverBudget, 'Some task')).rejects.toThrow('Token budget exceeded');
+
+    expect(mockWarn).toHaveBeenCalledWith(
+      expect.objectContaining({ agentId: agentOverBudget.id, used: 40001, budget: 40000 }),
+      'Token budget exceeded — dispatch blocked',
+    );
+  });
+
+  it('proceeds with dispatch when token usage is below budget', async () => {
+    const { createAgentSession, DefaultResourceLoader } = await import('@mariozechner/pi-coding-agent');
+    const mockSession = {
+      subscribe: vi.fn((cb: any) => {
+        setTimeout(() => cb({ type: 'agent_end' }), 10);
+        return () => {};
+      }),
+      prompt: vi.fn().mockResolvedValue(undefined),
+      dispose: vi.fn(),
+      isStreaming: false,
+    };
+    (createAgentSession as any).mockResolvedValue({ session: mockSession });
+    (DefaultResourceLoader as any).mockImplementation(function () {
+      return { reload: vi.fn().mockResolvedValue(undefined) };
+    });
+
+    const memory = new MemoryEngine(10);
+    const mgr = new AgentSessionManager(memory);
+
+    const mockCostTracker = {
+      getAgentCost: vi.fn().mockReturnValue({ tokensIn: 5000, tokensOut: 3000, cost: 0, calls: 2 }),
+      record: vi.fn(),
+    };
+    mgr.setCostTracker(mockCostTracker as any);
+
+    const agentUnderBudget: ResolvedAgent = { ...mockAgent, tokenBudget: 40000 };
+
+    await expect(mgr.dispatch(agentUnderBudget, 'Some task')).resolves.toBeDefined();
+    expect(mockSession.prompt).toHaveBeenCalled();
+  });
+
+  it('skips budget check when no costTracker is set', async () => {
+    const { createAgentSession, DefaultResourceLoader } = await import('@mariozechner/pi-coding-agent');
+    const mockSession = {
+      subscribe: vi.fn((cb: any) => {
+        setTimeout(() => cb({ type: 'agent_end' }), 10);
+        return () => {};
+      }),
+      prompt: vi.fn().mockResolvedValue(undefined),
+      dispose: vi.fn(),
+      isStreaming: false,
+    };
+    (createAgentSession as any).mockResolvedValue({ session: mockSession });
+    (DefaultResourceLoader as any).mockImplementation(function () {
+      return { reload: vi.fn().mockResolvedValue(undefined) };
+    });
+
+    const memory = new MemoryEngine(10);
+    const mgr = new AgentSessionManager(memory);
+    // No costTracker set — budget check must be skipped
+
+    await expect(mgr.dispatch(mockAgent, 'Some task')).resolves.toBeDefined();
+    expect(mockSession.prompt).toHaveBeenCalled();
+  });
+});
+
 describe('AgentSessionManager.extractRememberedFacts', () => {
   it('extracts single REMEMBER fact from response', () => {
     const response = [

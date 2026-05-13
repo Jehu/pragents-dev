@@ -168,10 +168,33 @@ export class AgentSessionManager {
   }
 
   async dispatch(agent: ResolvedAgent, task: string): Promise<string> {
+    // Enforce token budget before dispatching
+    if (agent.tokenBudget && this.costTracker) {
+      const usage = this.costTracker.getAgentCost(agent.id);
+      const used = (usage.tokensIn ?? 0) + (usage.tokensOut ?? 0);
+      if (used >= agent.tokenBudget) {
+        logger.warn(
+          { agentId: agent.id, used, budget: agent.tokenBudget },
+          'Token budget exceeded — dispatch blocked',
+        );
+        if (this.onEvent) {
+          this.onEvent({
+            agentId: agent.id,
+            projectId: agent.projectId,
+            type: 'budget.exceeded',
+            used,
+            budget: agent.tokenBudget,
+            timestamp: new Date().toISOString(),
+          });
+        }
+        throw new Error('Token budget exceeded');
+      }
+    }
+
     const handle = await this.getOrCreate(agent);
 
     // Assemble memory context — respect token budget
-    const facts = await this.memory.recall(task, agent.projectId, 10);
+    const facts = await this.memory.recall(task, agent.projectId, 10, agent);
     const budget = agent.tokenBudget || 40000;
     const taskTokens = Math.ceil(task.length / 4);
     const remainingBudget = Math.max(budget - taskTokens - 500, 500); // Reserve 500 for system prompt overhead
@@ -245,7 +268,11 @@ export class AgentSessionManager {
     // Auto-fact collection: parse REMEMBER lines from agent response
     const rememberedFacts = AgentSessionManager.extractRememberedFacts(response, agent.id);
     for (const fact of rememberedFacts) {
-      this.memory.remember(fact.scope, fact.category, fact.content, agent.id);
+      try {
+        this.memory.remember(fact.scope, fact.category, fact.content, agent.id, agent);
+      } catch (err: any) {
+        logger.warn({ agentId: agent.id, scope: fact.scope, err: err?.message }, 'Skipped auto-remembered fact due to scope policy');
+      }
     }
     if (rememberedFacts.length > 0) {
       logger.info({ agentId: agent.id, count: rememberedFacts.length }, 'Agent auto-remembered facts');
