@@ -55,6 +55,10 @@ const CompanyConfig = z.object({
   memory: MemoryConfig.optional(),
   autoApproveSkills: z.boolean().optional().default(false),
   similarityThreshold: z.number().min(0).max(1).optional().default(0.8),
+  skillApproval: z.object({
+    confidenceThreshold: z.number().min(0).max(1).default(0.9),
+    blockedTools: z.array(z.string()).default(['bash', 'write', 'computer']),
+  }).optional(),
 });
 
 const ProjectConfig = z.object({
@@ -78,6 +82,12 @@ const ChatConfig = z.object({
    * first agent's model when omitted.
    */
   classifierModel: z.string().optional(),
+  /**
+   * Minimum confidence score (0.0–1.0) required for the IntentClassifier to
+   * route to a specific tool. Results below this threshold fall back to the
+   * "complex" (full agent) path. Defaults to 0.7.
+   */
+  classifierThreshold: z.number().min(0).max(1).default(0.7),
 });
 
 const InterfacesConfig = z.object({

@@ -90,7 +90,7 @@ describe('IntentClassifier.classify — edge cases', () => {
 
   it('returns correct intent for a known query_tasks message', async () => {
     const { createAgentSession, DefaultResourceLoader } = await import('@mariozechner/pi-coding-agent');
-    const mockSession = buildMockSession('{"tool":"query_tasks","args":{"status":"failed"}}');
+    const mockSession = buildMockSession('{"tool":"query_tasks","args":{"status":"failed"},"confidence":0.97}');
     (createAgentSession as any).mockResolvedValue({ session: mockSession });
     (DefaultResourceLoader as any).mockImplementation(function () {
       return { reload: vi.fn().mockResolvedValue(undefined) };
@@ -100,11 +100,12 @@ describe('IntentClassifier.classify — edge cases', () => {
     const result = await classifier.classify('Which tasks are failed?');
     expect(result).not.toBeNull();
     expect(result!.tool).toBe('query_tasks');
+    expect(result!.confidence).toBeGreaterThanOrEqual(0.7);
   });
 
   it('returns complex for a message that matches no specific tool', async () => {
     const { createAgentSession, DefaultResourceLoader } = await import('@mariozechner/pi-coding-agent');
-    const mockSession = buildMockSession('{"tool":"complex","args":{}}');
+    const mockSession = buildMockSession('{"tool":"complex","args":{},"confidence":0.95}');
     (createAgentSession as any).mockResolvedValue({ session: mockSession });
     (DefaultResourceLoader as any).mockImplementation(function () {
       return { reload: vi.fn().mockResolvedValue(undefined) };
@@ -114,6 +115,51 @@ describe('IntentClassifier.classify — edge cases', () => {
     const result = await classifier.classify('Build me a landing page with animations');
     expect(result).not.toBeNull();
     expect(result!.tool).toBe('complex');
+  });
+
+  it('returns null when confidence is below threshold', async () => {
+    const { createAgentSession, DefaultResourceLoader } = await import('@mariozechner/pi-coding-agent');
+    const mockSession = buildMockSession('{"tool":"query_tasks","args":{},"confidence":0.4}');
+    (createAgentSession as any).mockResolvedValue({ session: mockSession });
+    (DefaultResourceLoader as any).mockImplementation(function () {
+      return { reload: vi.fn().mockResolvedValue(undefined) };
+    });
+
+    const classifier = makeClassifier();
+    const result = await classifier.classify('Irgendwas mit Tasks oder so');
+    expect(result).toBeNull();
+  });
+
+  it('respects a custom threshold', async () => {
+    const { createAgentSession, DefaultResourceLoader } = await import('@mariozechner/pi-coding-agent');
+    // confidence 0.5 — below default 0.7 but above custom threshold 0.4
+    const mockSession = buildMockSession('{"tool":"list_agents","args":{},"confidence":0.5}');
+    (createAgentSession as any).mockResolvedValue({ session: mockSession });
+    (DefaultResourceLoader as any).mockImplementation(function () {
+      return { reload: vi.fn().mockResolvedValue(undefined) };
+    });
+
+    const classifier = new (await import('../intent-classifier.js')).IntentClassifier(
+      [mockAgent], undefined, 0.4,
+    );
+    const result = await classifier.classify('show agents maybe?');
+    expect(result).not.toBeNull();
+    expect(result!.tool).toBe('list_agents');
+  });
+
+  it('defaults confidence to 1 when field is absent from response (backward compat)', async () => {
+    const { createAgentSession, DefaultResourceLoader } = await import('@mariozechner/pi-coding-agent');
+    // Model omits confidence entirely — schema default should kick in
+    const mockSession = buildMockSession('{"tool":"list_workflows","args":{}}');
+    (createAgentSession as any).mockResolvedValue({ session: mockSession });
+    (DefaultResourceLoader as any).mockImplementation(function () {
+      return { reload: vi.fn().mockResolvedValue(undefined) };
+    });
+
+    const classifier = makeClassifier();
+    const result = await classifier.classify('show workflows');
+    expect(result).not.toBeNull();
+    expect(result!.confidence).toBe(1);
   });
 
   it('returns null when response contains no JSON', async () => {
@@ -141,9 +187,10 @@ describe('IntentClassifier.classify — edge cases', () => {
     const classifier = makeClassifier();
     const result = await classifier.classify('show agents');
     // The classifier should still return something with the valid tool
-    // (recovery path: invalid schema but valid tool → empty args)
+    // (recovery path: invalid schema but valid tool → empty args, confidence 1)
     if (result !== null) {
       expect(result.tool).toBe('list_agents');
+      expect(result.confidence).toBe(1);
     }
     // null is also acceptable if Zod coercion rejects the payload entirely
   });
@@ -171,13 +218,13 @@ describe('IntentResultSchema', () => {
       'list_events', 'complex',
     ];
     for (const tool of tools) {
-      const parsed = IntentResultSchema.safeParse({ tool, args: {} });
+      const parsed = IntentResultSchema.safeParse({ tool, args: {}, confidence: 0.9 });
       expect(parsed.success, `Expected tool "${tool}" to be valid`).toBe(true);
     }
   });
 
   it('rejects unknown tool names', () => {
-    const parsed = IntentResultSchema.safeParse({ tool: 'fly_to_moon', args: {} });
+    const parsed = IntentResultSchema.safeParse({ tool: 'fly_to_moon', args: {}, confidence: 0.9 });
     expect(parsed.success).toBe(false);
   });
 
@@ -186,6 +233,28 @@ describe('IntentResultSchema', () => {
     expect(parsed.success).toBe(true);
     if (parsed.success) {
       expect(parsed.data.args).toEqual({});
+    }
+  });
+
+  it('defaults confidence to 1 when omitted', () => {
+    const parsed = IntentResultSchema.safeParse({ tool: 'list_agents', args: {} });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.confidence).toBe(1);
+    }
+  });
+
+  it('accepts valid confidence values', () => {
+    for (const confidence of [0, 0.5, 0.7, 1]) {
+      const parsed = IntentResultSchema.safeParse({ tool: 'list_agents', args: {}, confidence });
+      expect(parsed.success, `Expected confidence ${confidence} to be valid`).toBe(true);
+    }
+  });
+
+  it('rejects confidence values outside 0–1', () => {
+    for (const confidence of [-0.1, 1.1, 2]) {
+      const parsed = IntentResultSchema.safeParse({ tool: 'list_agents', args: {}, confidence });
+      expect(parsed.success, `Expected confidence ${confidence} to be rejected`).toBe(false);
     }
   });
 });

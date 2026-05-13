@@ -183,6 +183,12 @@ export async function startServer() {
   // Auto-extraction: hooks into session disposal and PM monitor
   const autoApprove = config.company.autoApproveSkills ?? false;
   const similarityThreshold = config.company.similarityThreshold ?? 0.8;
+  const skillApprovalCfg = config.company.skillApproval
+    ? {
+        confidenceThreshold: config.company.skillApproval.confidenceThreshold,
+        blockedTools: config.company.skillApproval.blockedTools,
+      }
+    : undefined;
   const semanticCompare = createSemanticCompareFn(createAgentSession, DefaultResourceLoader, SessionManager);
   const skillAutoExtractor = new SkillAutoExtractor(
     skillExtractor,
@@ -191,6 +197,7 @@ export async function startServer() {
     autoApprove,
     semanticCompare,
     similarityThreshold,
+    skillApprovalCfg,
   );
   sessionMgr.setAutoExtractor(skillAutoExtractor);
   goalScheduler.setAutoExtractor(skillAutoExtractor);
@@ -199,10 +206,14 @@ export async function startServer() {
   // Chat Protocol
   const conversationManager = new ConversationManager();
   const classifierModel = config.chat?.classifierModel;
+  const classifierThreshold = config.chat?.classifierThreshold;
   if (classifierModel) {
     logger.info({ model: classifierModel }, 'IntentClassifier model override active');
   }
-  const classifier = new IntentClassifier(agents, classifierModel);
+  if (classifierThreshold !== undefined) {
+    logger.info({ threshold: classifierThreshold }, 'IntentClassifier confidence threshold configured');
+  }
+  const classifier = new IntentClassifier(agents, classifierModel, classifierThreshold);
   const chatRoute = createChatRoute(
     conversationManager,
     classifier,

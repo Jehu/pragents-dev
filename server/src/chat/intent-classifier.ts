@@ -27,6 +27,7 @@ export const IntentResultSchema = z.object({
     'complex',
   ]),
   args: z.record(z.unknown()).optional().default({}),
+  confidence: z.number().min(0).max(1).default(1),
   explanation: z.string().optional(),
 });
 
@@ -62,19 +63,26 @@ Available tools:
 - "list_events" — show recent activity
 - "complex" — anything that doesn't fit the above (building, planning, analyzing, chit-chat)
 
-EXAMPLES:
-"Zeig alle Agents" → {"tool":"list_agents","args":{}}
-"Welche Tasks sind failed?" → {"tool":"query_tasks","args":{"status":"failed"}}
-"Was kostet das?" → {"tool":"get_cost_summary","args":{}}
-"Start den weekly-article Workflow" → {"tool":"run_workflow","args":{"name":"weekly-article"}}
-"Erstell einen Task für SEO" → {"tool":"create_task","args":{"description":"SEO task"}}
-"Was weißt du über den API Bug?" → {"tool":"search_memory","args":{"query":"API Bug"}}
-"Merk dir: Port 3000 ist der API-Server" → {"tool":"remember_fact","args":{"content":"Port 3000 ist der API-Server"}}
-"Bau eine Landing Page" → {"tool":"complex","args":{}}
-"Optimier meine SEO" → {"tool":"complex","args":{}}
-"Hallo" → {"tool":"complex","args":{}}
+CONFIDENCE:
+After picking the tool, rate your certainty with a "confidence" field (0.0–1.0).
+- 1.0 = the message maps unambiguously to exactly one tool
+- 0.7 = fairly confident, but some ambiguity
+- < 0.7 = uncertain — prefer "complex" with low confidence over forcing a wrong tool
 
-Return ONLY: {"tool":"<tool>","args":{...}}`;
+EXAMPLES:
+"Zeig alle Agents" → {"tool":"list_agents","args":{},"confidence":0.98}
+"Welche Tasks sind failed?" → {"tool":"query_tasks","args":{"status":"failed"},"confidence":0.97}
+"Was kostet das?" → {"tool":"get_cost_summary","args":{},"confidence":0.92}
+"Start den weekly-article Workflow" → {"tool":"run_workflow","args":{"name":"weekly-article"},"confidence":0.95}
+"Erstell einen Task für SEO" → {"tool":"create_task","args":{"description":"SEO task"},"confidence":0.93}
+"Was weißt du über den API Bug?" → {"tool":"search_memory","args":{"query":"API Bug"},"confidence":0.9}
+"Merk dir: Port 3000 ist der API-Server" → {"tool":"remember_fact","args":{"content":"Port 3000 ist der API-Server"},"confidence":0.97}
+"Bau eine Landing Page" → {"tool":"complex","args":{},"confidence":0.95}
+"Optimier meine SEO" → {"tool":"complex","args":{},"confidence":0.85}
+"Hallo" → {"tool":"complex","args":{},"confidence":0.99}
+"Irgendwas mit Tasks oder so" → {"tool":"complex","args":{},"confidence":0.45}
+
+Return ONLY: {"tool":"<tool>","args":{...},"confidence":<0.0-1.0>}`;
 
 // ---- Session cache ----
 // One persistent in-memory pi-session per model string, reused across calls.
@@ -135,9 +143,12 @@ export async function shutdownClassifierSessions(): Promise<void> {
   sessionCache.clear();
 }
 
+const DEFAULT_CONFIDENCE_THRESHOLD = 0.7;
+
 export class IntentClassifier {
   private agents: ResolvedAgent[];
   private modelOverride: string | undefined;
+  private threshold: number;
 
   /**
    * @param agents — the configured agents (used as fallback model source)
@@ -145,15 +156,20 @@ export class IntentClassifier {
    *   for classification instead of the first agent's model. Useful for
    *   running a fast/cheap model (e.g. claude-haiku) for routing while
    *   agents use stronger models for actual work.
+   * @param threshold — minimum confidence score (0.0–1.0) required to route
+   *   to a specific tool. Results below this threshold fall back to the
+   *   complex/full-agent path (null return). Defaults to 0.7.
    */
-  constructor(agents: ResolvedAgent[], modelOverride?: string) {
+  constructor(agents: ResolvedAgent[], modelOverride?: string, threshold?: number) {
     this.agents = agents;
     this.modelOverride = modelOverride;
+    this.threshold = threshold ?? DEFAULT_CONFIDENCE_THRESHOLD;
   }
 
   /**
    * Classify a chat message into a tool intent or "complex".
-   * Returns null if classification fails (graceful degradation → route to NL Decomposer).
+   * Returns null if classification fails or confidence is below threshold
+   * (graceful degradation → route to NL Decomposer).
    */
   async classify(message: string): Promise<IntentResult | null> {
     if (!message?.trim()) return null;
@@ -224,8 +240,17 @@ export class IntentClassifier {
           'IntentClassifier: invalid classification result');
         // Try to recover: if tool is valid but args aren't, use empty args
         if (parsed.tool && IntentResultSchema.shape.tool.safeParse(parsed.tool).success) {
-          return { tool: parsed.tool, args: {} };
+          return { tool: parsed.tool, args: {}, confidence: 1 };
         }
+        return null;
+      }
+
+      // Confidence gate: fall back to complex path when classifier is uncertain
+      if (result.data.confidence < this.threshold) {
+        logger.warn(
+          { confidence: result.data.confidence, tool: result.data.tool, threshold: this.threshold },
+          'Intent classifier confidence below threshold — falling back to complex',
+        );
         return null;
       }
 
