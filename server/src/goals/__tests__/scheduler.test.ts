@@ -161,3 +161,105 @@ describe('GoalScheduler pmCheck auto-extraction', () => {
     expect(mockAutoExtractor.tryExtract).not.toHaveBeenCalled();
   });
 });
+
+describe('GoalScheduler pmCheck deadline escalation', () => {
+  const tmpDir = mkdtempSync(join(tmpdir(), 'pragents-scheduler-deadline-test-'));
+
+  beforeAll(() => {
+    initDb(join(tmpDir, 'test.db'));
+  });
+
+  afterAll(() => {
+    closeDb();
+    rmSync(tmpDir, { recursive: true });
+  });
+
+  beforeEach(() => {
+    getDb().exec('DELETE FROM goal_runs');
+  });
+
+  function buildScheduler(sessionMgrOverrides?: Partial<{ dispatch: any }>) {
+    const dispatch = vi.fn().mockResolvedValue('OK');
+    const mockSessionMgr = {
+      dispatch,
+      getSessionMessages: vi.fn().mockReturnValue(null),
+      setAutoExtractor: vi.fn(),
+      ...(sessionMgrOverrides ?? {}),
+    };
+    const deps = {
+      wfRegistry: { get: vi.fn().mockReturnValue(null) } as any,
+      wfEngine: { execute: vi.fn(), waitForGate: vi.fn() } as any,
+      eventBuffer: { push: vi.fn(), getRecent: vi.fn().mockReturnValue([]), getSince: vi.fn().mockReturnValue([]) } as any,
+      sessionMgr: mockSessionMgr as any,
+      agents: [mockPM],
+    };
+    const scheduler = new GoalScheduler(deps.wfRegistry, deps.wfEngine, deps.eventBuffer, deps.sessionMgr, deps.agents);
+    return { scheduler, dispatch, deps };
+  }
+
+  it('escalates to PM when goal run has passed its deadline', async () => {
+    const db = getDb();
+    const goalRunId = 'gr-overdue';
+    const wfRunId = 'wf-overdue';
+    db.prepare(
+      "INSERT INTO goal_runs (id, goal_id, workflow_run_id, status) VALUES (?, ?, ?, 'running')",
+    ).run(goalRunId, 'daily-report', wfRunId);
+
+    const { scheduler, dispatch } = buildScheduler();
+
+    // Set up internal state: goal is overdue (deadline 1 ms ago)
+    (scheduler as any).goals = [
+      { id: 'daily-report', cadence: '0 8 * * *', workflow: 'daily', description: 'Daily report', warn_before_ms: 7200000 },
+    ];
+    (scheduler as any).activeGoalRuns.set(wfRunId, {
+      goalRunId,
+      deadline: new Date(Date.now() - 1), // already past
+      goalId: 'daily-report',
+    });
+
+    await (scheduler as any).pmCheck();
+
+    // PM should be dispatched with escalation message
+    expect(dispatch).toHaveBeenCalledWith(
+      mockPM,
+      expect.stringContaining('daily-report'),
+    );
+    expect(dispatch.mock.calls[0][1]).toMatch(/passed its deadline/);
+
+    // Run should be removed from activeGoalRuns
+    expect((scheduler as any).activeGoalRuns.has(wfRunId)).toBe(false);
+
+    // DB row should be marked escalated
+    const row = db.prepare('SELECT status FROM goal_runs WHERE id = ?').get(goalRunId) as any;
+    expect(row.status).toBe('escalated');
+  });
+
+  it('does not escalate when goal run is not yet due', async () => {
+    const db = getDb();
+    const goalRunId = 'gr-future';
+    const wfRunId = 'wf-future';
+    db.prepare(
+      "INSERT INTO goal_runs (id, goal_id, workflow_run_id, status) VALUES (?, ?, ?, 'running')",
+    ).run(goalRunId, 'weekly-report', wfRunId);
+
+    const { scheduler, dispatch } = buildScheduler();
+
+    (scheduler as any).goals = [
+      { id: 'weekly-report', cadence: '0 8 * * 1', workflow: 'weekly', description: 'Weekly report', warn_before_ms: 7200000 },
+    ];
+    // Deadline far in the future — outside the warn window too
+    (scheduler as any).activeGoalRuns.set(wfRunId, {
+      goalRunId,
+      deadline: new Date(Date.now() + 86400000 * 2), // 2 days ahead
+      goalId: 'weekly-report',
+    });
+
+    await (scheduler as any).pmCheck();
+
+    // No PM dispatch for a not-yet-due goal
+    expect(dispatch).not.toHaveBeenCalled();
+
+    // Run should still be in activeGoalRuns
+    expect((scheduler as any).activeGoalRuns.has(wfRunId)).toBe(true);
+  });
+});
