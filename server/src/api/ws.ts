@@ -1,15 +1,55 @@
 import { EventBuffer, type PragentsEvent } from '../events/buffer.js';
 import { logger } from '../logging/index.js';
+import { checkWsAuth } from './middleware/auth.js';
 
 // Hot-reload safe singleton: survives tsx-watch module re-execution (issue #32)
 const g = globalThis as any;
 if (!g.__pragentsWsClients) g.__pragentsWsClients = new Set<any>();
 const wsClients: Set<any> = g.__pragentsWsClients;
 
-export async function setupWebSocket(app: any, buffer: EventBuffer) {
+export async function setupWebSocket(
+  app: any,
+  buffer: EventBuffer,
+  getToken: () => string = () => process.env.PRAGENTS_API_TOKEN || '',
+) {
   try {
     const { createNodeWebSocket } = await import('@hono/node-ws');
     const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app });
+
+    // Auth gate: runs before the upgrade. On failure we return 401 instead of
+    // accepting the socket — the client never gets a connection.
+    app.use('/ws', async (c: any, next: any) => {
+      const expected = getToken();
+      const incoming = (c.env as any)?.incoming;
+      const result = checkWsAuth(
+        {
+          url: c.req.url,
+          headers: incoming?.headers ?? Object.fromEntries(
+            // Hono's c.req.raw.headers is a Headers instance; flatten for our helper.
+            (() => {
+              try {
+                const h: Headers = c.req.raw.headers;
+                return [...h.entries()];
+              } catch {
+                return [];
+              }
+            })(),
+          ),
+          socket: incoming?.socket,
+        },
+        expected,
+      );
+      if (!result.ok) {
+        return c.json(
+          {
+            error: 'Unauthorized',
+            hint: 'set PRAGENTS_API_TOKEN env or use Authorization: Bearer header',
+          },
+          401,
+        );
+      }
+      return next();
+    });
 
     app.get(
       '/ws',

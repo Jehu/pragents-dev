@@ -33,6 +33,7 @@ import { SkillExtractor } from './skills/extractor.js';
 import { SkillAutoExtractor, createSemanticCompareFn } from './skills/auto-extractor.js';
 import { createSkillsRoute } from './api/routes/skills.js';
 import { createChatRoute } from './api/routes/chat.js';
+import { authMiddleware, getOrCreateApiToken } from './api/middleware/auth.js';
 import { ConversationManager } from './chat/manager.js';
 import { IntentClassifier, shutdownClassifierSessions } from './chat/intent-classifier.js';
 import { shutdownDecomposerSessions } from './nl/decomposer.js';
@@ -64,6 +65,9 @@ export async function startServer() {
     }
     logger.info({ path: envPath }, 'Env loaded');
   }
+
+  // Ensure an API token exists (generates + persists if missing)
+  const apiToken = getOrCreateApiToken(envPath);
 
   const { config, agents } = loadConfig();
 
@@ -227,7 +231,13 @@ export async function startServer() {
 
   // Build API
   const app = new Hono();
-  const wsInject = await setupWebSocket(app, eventBuffer);
+
+  // API token auth — guards /api/* (covers SSE at /api/v1/events/stream).
+  // Localhost requests bypass. WebSocket has its own check (see setupWebSocket).
+  const auth = authMiddleware(() => process.env.PRAGENTS_API_TOKEN || apiToken);
+  app.use('/api/*', auth);
+
+  const wsInject = await setupWebSocket(app, eventBuffer, () => process.env.PRAGENTS_API_TOKEN || apiToken);
   if (wsInject) logger.info('WebSocket endpoint ready');
 
   app.route('/', createHealthRoute(memory));
