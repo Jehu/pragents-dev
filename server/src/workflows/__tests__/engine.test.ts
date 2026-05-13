@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 function agent(id: string, type: AgentType, skills: string[], projectId = 'test-project'): ResolvedAgent {
-  return { id, projectId, type, model: 'test/model', personality: '', memory: {}, skills, projectDir: '/tmp/test-project', tokenBudget: 40000 };
+  return { id, projectId, type, model: 'test/model', personality: '', memory: {}, skills, projectDir: '/tmp/test-project', tokenBudget: 40000, keepWarm: false };
 }
 
 const agents = [

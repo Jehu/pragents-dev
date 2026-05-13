@@ -18,6 +18,9 @@ company:
     pm:
       type: pm
       model: deepseek/deepseek-v4-flash
+      # PM has cron-driven goals — keep the session warm so each scheduled
+      # tick skips the cold-start cost. See `pool.maxWarmSessions` below.
+      keepWarm: true
       personality: |
         Du bist der Projekt-Manager. Priorisiere Aufgaben, prüfe
         Ergebnisse und tracke Fortschritt.
@@ -99,6 +102,12 @@ interfaces:
   web:
     port: 3000
     host: localhost
+
+# Session pool configuration. `maxWarmSessions` caps the number of agents that
+# may be marked `keepWarm: true` at once. If more agents request keepWarm than
+# this cap allows, the extras stay cold and a warning is logged.
+pool:
+  maxWarmSessions: 10
 
 costs:
   anthropic/claude-sonnet: { in: 3.0, out: 15.0 }

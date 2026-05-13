@@ -19,6 +19,13 @@ export interface SessionHandle {
   createdAt: number;
   lastActivityAt: number;
   stale?: boolean;
+  /**
+   * When true, this session was spawned for a keepWarm agent and must not be
+   * recycled by the idle-shutdown sweep. It will only be disposed by
+   * disposeAll() (server shutdown) or by stale-flag restart after a config
+   * reload (see #35).
+   */
+  warm?: boolean;
 }
 
 export class AgentSessionManager {
@@ -26,14 +33,25 @@ export class AgentSessionManager {
   private idleTimeoutMs: number;
   private memory: MemoryEngine;
   private onEvent: ((event: any) => void) | null = null;
+  /**
+   * Maximum number of concurrent keepWarm sessions. Beyond this cap,
+   * additional keepWarm agents stay cold. Configured via
+   * `pool.maxWarmSessions` in pragents.yaml (default 10).
+   */
+  private maxWarmSessions: number;
 
   private costTracker: CostTracker | null = null;
   private toolExecutor: ToolExecutor | null = null;
   private autoExtractor: SkillAutoExtractor | null = null;
 
-  constructor(memory: MemoryEngine, idleTimeoutMs: number = 10 * 60 * 1000) {
+  constructor(
+    memory: MemoryEngine,
+    idleTimeoutMs: number = 10 * 60 * 1000,
+    maxWarmSessions: number = 10,
+  ) {
     this.memory = memory;
     this.idleTimeoutMs = idleTimeoutMs;
+    this.maxWarmSessions = maxWarmSessions;
   }
 
   setToolExecutor(te: ToolExecutor): void {
@@ -155,16 +173,76 @@ export class AgentSessionManager {
       }
     });
 
+    // Only honor keepWarm if the warm-session cap has not been reached.
+    // Sessions already in the pool count toward the cap; the agent we are
+    // about to add does not yet — so the comparison is `<`, not `<=`.
+    let warm = false;
+    if (agent.keepWarm) {
+      const warmCount = this.countWarmSessions();
+      if (warmCount < this.maxWarmSessions) {
+        warm = true;
+      } else {
+        logger.warn(
+          { agentId: agent.id, cap: this.maxWarmSessions, warmCount },
+          'Warm-session cap reached; subsequent keepWarm agents will stay cold',
+        );
+      }
+    }
+
     const handle: SessionHandle = {
       agentId: agent.id,
       session,
       loader,
       createdAt: Date.now(),
       lastActivityAt: Date.now(),
+      warm,
     };
 
     this.sessions.set(agent.id, handle);
     return handle;
+  }
+
+  private countWarmSessions(): number {
+    let count = 0;
+    for (const h of this.sessions.values()) {
+      if (h.warm) count++;
+    }
+    return count;
+  }
+
+  /**
+   * Pre-spawn sessions for all agents flagged `keepWarm: true`, up to the
+   * configured pool cap. Best-effort: a single spawn failure logs a warning
+   * but does not abort the loop or block server startup. Spawns are
+   * sequential to avoid a RAM spike on boot.
+   */
+  async prewarmKeepWarmAgents(agents: ResolvedAgent[]): Promise<void> {
+    const keepWarmAgents = agents.filter((a) => a.keepWarm);
+    if (keepWarmAgents.length === 0) return;
+
+    logger.info(
+      { count: keepWarmAgents.length, cap: this.maxWarmSessions },
+      'Pre-spawning keepWarm agent sessions',
+    );
+
+    for (const agent of keepWarmAgents) {
+      if (this.countWarmSessions() >= this.maxWarmSessions) {
+        logger.warn(
+          { agentId: agent.id, cap: this.maxWarmSessions },
+          'Warm-session cap reached; subsequent keepWarm agents will stay cold',
+        );
+        continue;
+      }
+      try {
+        await this.getOrCreate(agent);
+        logger.info({ agentId: agent.id }, 'KeepWarm agent pre-spawned');
+      } catch (err: any) {
+        logger.warn(
+          { agentId: agent.id, err: err?.message || String(err) },
+          'Failed to pre-spawn keepWarm agent — will spawn on first dispatch',
+        );
+      }
+    }
   }
 
   async dispatch(agent: ResolvedAgent, task: string): Promise<string> {
@@ -372,6 +450,10 @@ export class AgentSessionManager {
     const disposed: string[] = [];
 
     for (const [id, handle] of this.sessions) {
+      // KeepWarm sessions never participate in the idle sweep. Stale-flag
+      // restart (see #35) still applies via getOrCreate(), so a warm agent
+      // gets a fresh session on the next dispatch after config reload.
+      if (handle.warm) continue;
       if (!handle.session.isStreaming && now - handle.lastActivityAt > this.idleTimeoutMs) {
         this.persistSessionMessages(id, handle);
 

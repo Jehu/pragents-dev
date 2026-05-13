@@ -96,7 +96,8 @@ export async function startServer() {
   };
   const memory = new MemoryEngine(memoryConfig);
   const eventBuffer = new EventBuffer(1000);
-  const sessionMgr = new AgentSessionManager(memory);
+  const maxWarmSessions = config.pool?.maxWarmSessions ?? 10;
+  const sessionMgr = new AgentSessionManager(memory, undefined, maxWarmSessions);
   const router = new SkillRouter(agents);
 
   sessionMgr.setEventCallback((event: any) => {
@@ -312,6 +313,13 @@ export async function startServer() {
     wsInject(service);
     logger.info('WebSocket upgrade injected');
   }
+
+  // Pre-spawn keepWarm agent sessions (best-effort). Sequential awaits inside
+  // the method avoid a RAM spike from many parallel pi sessions. Failures of
+  // individual agents are logged but do not block server startup.
+  sessionMgr.prewarmKeepWarmAgents(agents).catch((err) => {
+    logger.warn({ err: err?.message || String(err) }, 'KeepWarm pre-spawn loop failed');
+  });
 
   const shutdown = async () => {
     logger.info('Shutting down...');

@@ -35,6 +35,7 @@ const mockAgent: ResolvedAgent = {
   skills: [],
   projectDir: '/tmp/test',
   tokenBudget: 10000,
+  keepWarm: false,
 };
 
 function makeClassifier(agents = [mockAgent], modelOverride?: string) {

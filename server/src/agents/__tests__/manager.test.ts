@@ -40,6 +40,7 @@ const mockAgent: ResolvedAgent = {
   skills: ['typescript'],
   projectDir: '/tmp/test-project',
   tokenBudget: 40000,
+  keepWarm: false,
 };
 
 describe('AgentSessionManager', () => {
@@ -641,5 +642,203 @@ describe('AgentSessionManager.persistSessionMessages — pi-SDK accessor guard',
     expect(persisted).not.toBeNull();
     expect(persisted).toHaveLength(2);
     expect(persisted![0].role).toBe('user');
+  });
+});
+
+describe('AgentSessionManager keepWarm + session pool', () => {
+  const tmpDir = mkdtempSync(join(tmpdir(), 'pragents-warm-test-'));
+
+  beforeAll(() => {
+    initDb(join(tmpDir, 'test.db'));
+  });
+
+  afterAll(() => {
+    closeDb();
+    rmSync(tmpDir, { recursive: true });
+  });
+
+  beforeEach(() => {
+    mockWarn.mockClear();
+  });
+
+  const makeMockSession = () => ({
+    subscribe: vi.fn(() => () => {}),
+    prompt: vi.fn().mockResolvedValue(undefined),
+    dispose: vi.fn(),
+    isStreaming: false,
+    agent: { state: { messages: [] } },
+  });
+
+  it('keepWarm agent does not get idle-shut-down by disposeIdle', async () => {
+    const { createAgentSession, DefaultResourceLoader } = await import('@mariozechner/pi-coding-agent');
+    const mockSession = makeMockSession();
+    (createAgentSession as any).mockResolvedValue({ session: mockSession });
+    (DefaultResourceLoader as any).mockImplementation(function () {
+      return { reload: vi.fn().mockResolvedValue(undefined) };
+    });
+
+    const memory = new MemoryEngine(10);
+    // idleTimeoutMs = 0 → without keepWarm protection, any non-streaming session
+    // would be reaped on the very next disposeIdle() tick.
+    const mgr = new AgentSessionManager(memory, 0, 10);
+
+    const warmAgent: ResolvedAgent = { ...mockAgent, id: 'pm@warm', keepWarm: true };
+    await mgr.getOrCreate(warmAgent);
+    await new Promise((r) => setTimeout(r, 2));
+
+    const disposed = await mgr.disposeIdle();
+    expect(disposed).toHaveLength(0);
+    expect(mockSession.dispose).not.toHaveBeenCalled();
+    expect(mgr.getActiveAgents()).toContain('pm@warm');
+  });
+
+  it('cold agent is still idle-shut-down when keepWarm = false', async () => {
+    const { createAgentSession, DefaultResourceLoader } = await import('@mariozechner/pi-coding-agent');
+    const mockSession = makeMockSession();
+    (createAgentSession as any).mockResolvedValue({ session: mockSession });
+    (DefaultResourceLoader as any).mockImplementation(function () {
+      return { reload: vi.fn().mockResolvedValue(undefined) };
+    });
+
+    const memory = new MemoryEngine(10);
+    const mgr = new AgentSessionManager(memory, 0, 10);
+
+    const coldAgent: ResolvedAgent = { ...mockAgent, id: 'dev@cold', keepWarm: false };
+    await mgr.getOrCreate(coldAgent);
+    await new Promise((r) => setTimeout(r, 2));
+
+    const disposed = await mgr.disposeIdle();
+    expect(disposed).toContain('dev@cold');
+    expect(mockSession.dispose).toHaveBeenCalled();
+  });
+
+  it('pool cap is respected — extra keepWarm agents stay cold and a warn is logged', async () => {
+    const { createAgentSession, DefaultResourceLoader } = await import('@mariozechner/pi-coding-agent');
+    (createAgentSession as any).mockImplementation(() => Promise.resolve({ session: makeMockSession() }));
+    (DefaultResourceLoader as any).mockImplementation(function () {
+      return { reload: vi.fn().mockResolvedValue(undefined) };
+    });
+
+    const memory = new MemoryEngine(10);
+    const cap = 2;
+    const mgr = new AgentSessionManager(memory, 60_000, cap);
+
+    const a1: ResolvedAgent = { ...mockAgent, id: 'warm@1', keepWarm: true };
+    const a2: ResolvedAgent = { ...mockAgent, id: 'warm@2', keepWarm: true };
+    const a3: ResolvedAgent = { ...mockAgent, id: 'warm@3', keepWarm: true };
+
+    await mgr.getOrCreate(a1);
+    await mgr.getOrCreate(a2);
+    await mgr.getOrCreate(a3);
+
+    // Third agent must NOT be marked warm — verify by running idle sweep with
+    // a 0-timeout manager-state mutation: simulate idle-eligibility.
+    // We assert it via disposeIdle: a3 should be disposable, a1/a2 should not.
+    const mgr2 = new AgentSessionManager(memory, 0, cap);
+    // Re-use the existing session map shape via fresh creates — fake it:
+    await mgr2.getOrCreate(a1);
+    await mgr2.getOrCreate(a2);
+    await mgr2.getOrCreate(a3);
+    await new Promise((r) => setTimeout(r, 2));
+    const disposed = await mgr2.disposeIdle();
+    expect(disposed).toContain('warm@3');
+    expect(disposed).not.toContain('warm@1');
+    expect(disposed).not.toContain('warm@2');
+
+    // Warn must mention the cap
+    expect(mockWarn).toHaveBeenCalledWith(
+      expect.objectContaining({ cap, agentId: 'warm@3' }),
+      'Warm-session cap reached; subsequent keepWarm agents will stay cold',
+    );
+  });
+
+  it('prewarmKeepWarmAgents spawns sessions for all keepWarm agents', async () => {
+    const { createAgentSession, DefaultResourceLoader } = await import('@mariozechner/pi-coding-agent');
+    (createAgentSession as any).mockImplementation(() => Promise.resolve({ session: makeMockSession() }));
+    (DefaultResourceLoader as any).mockImplementation(function () {
+      return { reload: vi.fn().mockResolvedValue(undefined) };
+    });
+    (createAgentSession as any).mockClear();
+
+    const memory = new MemoryEngine(10);
+    const mgr = new AgentSessionManager(memory, 60_000, 10);
+
+    const warm1: ResolvedAgent = { ...mockAgent, id: 'pm@a', keepWarm: true };
+    const warm2: ResolvedAgent = { ...mockAgent, id: 'pm@b', keepWarm: true };
+    const cold: ResolvedAgent = { ...mockAgent, id: 'dev@c', keepWarm: false };
+
+    await mgr.prewarmKeepWarmAgents([warm1, warm2, cold]);
+
+    expect((createAgentSession as any).mock.calls.length).toBe(2);
+    expect(mgr.getActiveAgents()).toEqual(expect.arrayContaining(['pm@a', 'pm@b']));
+    expect(mgr.getActiveAgents()).not.toContain('dev@c');
+  });
+
+  it('prewarmKeepWarmAgents survives a single agent spawn failure', async () => {
+    const { createAgentSession, DefaultResourceLoader } = await import('@mariozechner/pi-coding-agent');
+    let n = 0;
+    (createAgentSession as any).mockImplementation(() => {
+      n++;
+      if (n === 1) return Promise.reject(new Error('spawn boom'));
+      return Promise.resolve({ session: makeMockSession() });
+    });
+    (DefaultResourceLoader as any).mockImplementation(function () {
+      return { reload: vi.fn().mockResolvedValue(undefined) };
+    });
+
+    const memory = new MemoryEngine(10);
+    const mgr = new AgentSessionManager(memory, 60_000, 10);
+
+    const warm1: ResolvedAgent = { ...mockAgent, id: 'pm@boom', keepWarm: true };
+    const warm2: ResolvedAgent = { ...mockAgent, id: 'pm@ok', keepWarm: true };
+
+    await expect(mgr.prewarmKeepWarmAgents([warm1, warm2])).resolves.toBeUndefined();
+    expect(mgr.getActiveAgents()).toContain('pm@ok');
+    expect(mgr.getActiveAgents()).not.toContain('pm@boom');
+    expect(mockWarn).toHaveBeenCalledWith(
+      expect.objectContaining({ agentId: 'pm@boom' }),
+      'Failed to pre-spawn keepWarm agent — will spawn on first dispatch',
+    );
+  });
+
+  it('prewarmKeepWarmAgents is a no-op when no agents are keepWarm', async () => {
+    const { createAgentSession } = await import('@mariozechner/pi-coding-agent');
+    (createAgentSession as any).mockClear();
+
+    const memory = new MemoryEngine(10);
+    const mgr = new AgentSessionManager(memory, 60_000, 10);
+
+    await mgr.prewarmKeepWarmAgents([{ ...mockAgent, keepWarm: false }]);
+    expect((createAgentSession as any)).not.toHaveBeenCalled();
+    expect(mgr.getActiveAgents()).toHaveLength(0);
+  });
+
+  it('warm session is still respawned via markStale (config reload)', async () => {
+    const { createAgentSession, DefaultResourceLoader } = await import('@mariozechner/pi-coding-agent');
+    const session1 = makeMockSession();
+    const session2 = makeMockSession();
+    (createAgentSession as any)
+      .mockResolvedValueOnce({ session: session1 })
+      .mockResolvedValueOnce({ session: session2 });
+    (DefaultResourceLoader as any).mockImplementation(function () {
+      return { reload: vi.fn().mockResolvedValue(undefined) };
+    });
+
+    const memory = new MemoryEngine(10);
+    const mgr = new AgentSessionManager(memory, 60_000, 10);
+
+    const warmAgent: ResolvedAgent = { ...mockAgent, id: 'pm@stale-warm', keepWarm: true };
+    const first = await mgr.getOrCreate(warmAgent);
+    expect(first.session).toBe(session1);
+    expect(first.warm).toBe(true);
+
+    // Simulate config reload: agent's session marked stale.
+    mgr.markStale(warmAgent.id);
+
+    // Next dispatch/getOrCreate must dispose the stale warm session and spawn a fresh one.
+    const second = await mgr.getOrCreate(warmAgent);
+    expect(session1.dispose).toHaveBeenCalledTimes(1);
+    expect(second.session).toBe(session2);
+    expect(second.warm).toBe(true);
   });
 });

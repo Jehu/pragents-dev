@@ -18,6 +18,7 @@ function makeAgent(overrides: Partial<ResolvedAgent> = {}): ResolvedAgent {
     skills: [],
     projectDir: '/tmp',
     tokenBudget: 40000,
+    keepWarm: false,
     ...overrides,
   };
 }

@@ -16,6 +16,7 @@ const mockPM: ResolvedAgent = {
   skills: [],
   projectDir: '/tmp/test',
   tokenBudget: 30000,
+  keepWarm: false,
 };
 
 describe('GoalScheduler pmCheck auto-extraction', () => {

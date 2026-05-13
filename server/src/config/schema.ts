@@ -20,6 +20,12 @@ const AgentConfig = z.object({
   memory: MemoryAccess.optional(),
   skills: z.array(z.string()).optional(),
   tokenBudget: z.number().int().positive().optional(),
+  /**
+   * When true, the agent's session is pre-spawned on server boot and never
+   * idle-shutdown. Useful for cron-driven goal agents that pay a high
+   * cold-start cost on every wakeup. Default: false.
+   */
+  keepWarm: z.boolean().optional().default(false),
 });
 
 const CompanyAgentConfig = AgentConfig.extend({
@@ -104,12 +110,22 @@ const CostRate = z.object({
   out: z.number(),
 });
 
+const PoolConfig = z.object({
+  /**
+   * Maximum number of agent sessions that may be marked keepWarm at once.
+   * If more agents request keepWarm than this cap allows, the extras stay
+   * cold and a warning is logged. Default: 10.
+   */
+  maxWarmSessions: z.number().int().positive().default(10),
+});
+
 export const PragentsConfig = z.object({
   company: CompanyConfig,
   projects: z.record(z.string(), ProjectConfig).default({}),
   interfaces: InterfacesConfig.default({}),
   chat: ChatConfig.optional(),
   costs: z.record(z.string(), CostRate).optional(),
+  pool: PoolConfig.optional(),
 });
 
 export type PragentsConfig = z.infer<typeof PragentsConfig>;
@@ -128,6 +144,7 @@ export interface ResolvedAgent {
   skills: string[];
   projectDir: string;
   tokenBudget: number;
+  keepWarm: boolean;
 }
 
 const TOKEN_BUDGETS: Record<string, number> = {
@@ -173,6 +190,7 @@ export function resolveAgent(
     skills: agentConfig.skills ?? [],
     projectDir: (projectConfig.directory || process.env.HOME || '/tmp').replace(/^~/, process.env.HOME || ''),
     tokenBudget: agentConfig.tokenBudget || TOKEN_BUDGETS[agentConfig.type] || TOKEN_BUDGETS.default,
+    keepWarm: agentConfig.keepWarm ?? false,
   };
 }
 

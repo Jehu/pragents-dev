@@ -68,6 +68,7 @@ function createMockAgents(): ResolvedAgent[] {
       skills: ['coding'],
       projectDir: '/tmp',
       tokenBudget: 40000,
+      keepWarm: false,
     },
   ];
 }
