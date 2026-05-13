@@ -3,13 +3,18 @@
  *
  * Uses the native EventSource API to connect to GET /api/v1/events/stream.
  * Falls back gracefully if SSE is unavailable.
+ * Pushes all received events into the eventBus Zustand store.
  */
+
+import { useEventBusStore, type SseEvent } from '../stores/eventBus';
 
 type EventCallback = (event: any) => void;
 
 let es: EventSource | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let retryDelay = 1000;
+let maxRetries = 30;
+let retryCount = 0;
 const listeners: EventCallback[] = [];
 
 export interface SSEOptions {
@@ -31,32 +36,52 @@ function buildURL(project?: string): string {
   return base;
 }
 
+function normalizeToBusEvent(raw: any): SseEvent {
+  return {
+    id: raw.id,
+    type: raw.type ?? 'unknown',
+    agentId: raw.agentId ?? raw.agent_id,
+    projectId: raw.projectId ?? raw.project_id,
+    taskId: raw.taskId ?? raw.task_id,
+    data: raw,
+    ts: raw.ts ?? Date.now(),
+  };
+}
+
 export function connectSSE(options: SSEOptions = {}): void {
   if (options.onEvent) listeners.push(options.onEvent);
+
+  const store = useEventBusStore.getState();
+  store.setConnectionStatus('connecting');
 
   const url = buildURL(options.project);
 
   try {
     es = new EventSource(url);
   } catch {
+    store.setConnectionStatus('disconnected');
     return;
   }
 
   es.onopen = () => {
-    (window as any).__sseRetries = 0;
+    retryCount = 0;
     retryDelay = 1000;
+    useEventBusStore.getState().setConnectionStatus('connected');
     options.onConnect?.();
     listeners.forEach((l) => l({ type: 'sse_connected' }));
   };
 
   es.onmessage = (event) => {
     try {
-      const data = JSON.parse(event.data);
-      listeners.forEach((l) => l(data));
+      const raw = JSON.parse(event.data);
+      // Push to event bus store
+      useEventBusStore.getState().pushEvent(normalizeToBusEvent(raw));
+      listeners.forEach((l) => l(raw));
     } catch { /* ignore malformed data */ }
   };
 
   es.onerror = () => {
+    useEventBusStore.getState().setConnectionStatus('disconnected');
     options.onDisconnect?.();
     listeners.forEach((l) => l({ type: 'sse_disconnected' }));
     scheduleReconnect(options);
@@ -65,27 +90,39 @@ export function connectSSE(options: SSEOptions = {}): void {
 
 function scheduleReconnect(options: SSEOptions): void {
   if (reconnectTimer) return;
-  // Max 15 reconnects then stop
-  let retryCount = (window as any).__sseRetries || 0;
-  if (retryCount >= 15) return;
-  (window as any).__sseRetries = retryCount + 1;
+  if (retryCount >= maxRetries) return;
+  retryCount++;
+
   // EventSource auto-reconnects, but if it fails completely, we recreate
   if (es) {
     es.close();
     es = null;
   }
+
+  const delay = Math.min(retryDelay * Math.pow(2, Math.min(retryCount - 1, 5)), 30_000);
+  const jitter = Math.random() * 1000;
+
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
-    retryDelay = Math.min(retryDelay * 2, 30000);
+    retryDelay = delay;
+    useEventBusStore.getState().setConnectionStatus('connecting');
     connectSSE(options);
-  }, retryDelay + Math.random() * 1000);
+  }, delay + jitter);
 }
 
 export function disconnectSSE(): void {
   if (reconnectTimer) clearTimeout(reconnectTimer);
   reconnectTimer = null;
+  retryCount = maxRetries; // prevent further reconnects
   es?.close();
   es = null;
+  useEventBusStore.getState().setConnectionStatus('disconnected');
+}
+
+/** Reset retry counter (call after explicit re-connect) */
+export function resetSSERetries(): void {
+  retryCount = 0;
+  retryDelay = 1000;
 }
 
 /**

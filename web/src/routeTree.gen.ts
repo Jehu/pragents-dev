@@ -13,10 +13,22 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as WorkflowsIndexRouteImport } from './routes/workflows/index'
 import { Route as TracesIndexRouteImport } from './routes/traces/index'
 import { Route as TasksIndexRouteImport } from './routes/tasks/index'
+import { Route as SkillsIndexRouteImport } from './routes/skills/index'
+import { Route as PlansIndexRouteImport } from './routes/plans/index'
+import { Route as OverviewIndexRouteImport } from './routes/overview/index'
+import { Route as MetricsIndexRouteImport } from './routes/metrics/index'
 import { Route as MemoryIndexRouteImport } from './routes/memory/index'
+import { Route as InboxIndexRouteImport } from './routes/inbox/index'
+import { Route as HealthIndexRouteImport } from './routes/health/index'
+import { Route as GoalsIndexRouteImport } from './routes/goals/index'
 import { Route as FeedIndexRouteImport } from './routes/feed/index'
+import { Route as CostsIndexRouteImport } from './routes/costs/index'
+import { Route as ChatIndexRouteImport } from './routes/chat/index'
+import { Route as AgentsIndexRouteImport } from './routes/agents/index'
 import { Route as TracesTraceIdRouteImport } from './routes/traces/$traceId'
 import { Route as TasksTaskIdRouteImport } from './routes/tasks/$taskId'
+import { Route as PlansPlanIdRouteImport } from './routes/plans/$planId'
+import { Route as AgentsAgentIdRouteImport } from './routes/agents/$agentId'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -38,14 +50,64 @@ const TasksIndexRoute = TasksIndexRouteImport.update({
   path: '/tasks/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SkillsIndexRoute = SkillsIndexRouteImport.update({
+  id: '/skills/',
+  path: '/skills/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PlansIndexRoute = PlansIndexRouteImport.update({
+  id: '/plans/',
+  path: '/plans/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const OverviewIndexRoute = OverviewIndexRouteImport.update({
+  id: '/overview/',
+  path: '/overview/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MetricsIndexRoute = MetricsIndexRouteImport.update({
+  id: '/metrics/',
+  path: '/metrics/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const MemoryIndexRoute = MemoryIndexRouteImport.update({
   id: '/memory/',
   path: '/memory/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const InboxIndexRoute = InboxIndexRouteImport.update({
+  id: '/inbox/',
+  path: '/inbox/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const HealthIndexRoute = HealthIndexRouteImport.update({
+  id: '/health/',
+  path: '/health/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const GoalsIndexRoute = GoalsIndexRouteImport.update({
+  id: '/goals/',
+  path: '/goals/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const FeedIndexRoute = FeedIndexRouteImport.update({
   id: '/feed/',
   path: '/feed/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CostsIndexRoute = CostsIndexRouteImport.update({
+  id: '/costs/',
+  path: '/costs/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ChatIndexRoute = ChatIndexRouteImport.update({
+  id: '/chat/',
+  path: '/chat/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AgentsIndexRoute = AgentsIndexRouteImport.update({
+  id: '/agents/',
+  path: '/agents/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const TracesTraceIdRoute = TracesTraceIdRouteImport.update({
@@ -58,23 +120,57 @@ const TasksTaskIdRoute = TasksTaskIdRouteImport.update({
   path: '/tasks/$taskId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PlansPlanIdRoute = PlansPlanIdRouteImport.update({
+  id: '/plans/$planId',
+  path: '/plans/$planId',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AgentsAgentIdRoute = AgentsAgentIdRouteImport.update({
+  id: '/agents/$agentId',
+  path: '/agents/$agentId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/agents/$agentId': typeof AgentsAgentIdRoute
+  '/plans/$planId': typeof PlansPlanIdRoute
   '/tasks/$taskId': typeof TasksTaskIdRoute
   '/traces/$traceId': typeof TracesTraceIdRoute
+  '/agents/': typeof AgentsIndexRoute
+  '/chat/': typeof ChatIndexRoute
+  '/costs/': typeof CostsIndexRoute
   '/feed/': typeof FeedIndexRoute
+  '/goals/': typeof GoalsIndexRoute
+  '/health/': typeof HealthIndexRoute
+  '/inbox/': typeof InboxIndexRoute
   '/memory/': typeof MemoryIndexRoute
+  '/metrics/': typeof MetricsIndexRoute
+  '/overview/': typeof OverviewIndexRoute
+  '/plans/': typeof PlansIndexRoute
+  '/skills/': typeof SkillsIndexRoute
   '/tasks/': typeof TasksIndexRoute
   '/traces/': typeof TracesIndexRoute
   '/workflows/': typeof WorkflowsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/agents/$agentId': typeof AgentsAgentIdRoute
+  '/plans/$planId': typeof PlansPlanIdRoute
   '/tasks/$taskId': typeof TasksTaskIdRoute
   '/traces/$traceId': typeof TracesTraceIdRoute
+  '/agents': typeof AgentsIndexRoute
+  '/chat': typeof ChatIndexRoute
+  '/costs': typeof CostsIndexRoute
   '/feed': typeof FeedIndexRoute
+  '/goals': typeof GoalsIndexRoute
+  '/health': typeof HealthIndexRoute
+  '/inbox': typeof InboxIndexRoute
   '/memory': typeof MemoryIndexRoute
+  '/metrics': typeof MetricsIndexRoute
+  '/overview': typeof OverviewIndexRoute
+  '/plans': typeof PlansIndexRoute
+  '/skills': typeof SkillsIndexRoute
   '/tasks': typeof TasksIndexRoute
   '/traces': typeof TracesIndexRoute
   '/workflows': typeof WorkflowsIndexRoute
@@ -82,10 +178,22 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/agents/$agentId': typeof AgentsAgentIdRoute
+  '/plans/$planId': typeof PlansPlanIdRoute
   '/tasks/$taskId': typeof TasksTaskIdRoute
   '/traces/$traceId': typeof TracesTraceIdRoute
+  '/agents/': typeof AgentsIndexRoute
+  '/chat/': typeof ChatIndexRoute
+  '/costs/': typeof CostsIndexRoute
   '/feed/': typeof FeedIndexRoute
+  '/goals/': typeof GoalsIndexRoute
+  '/health/': typeof HealthIndexRoute
+  '/inbox/': typeof InboxIndexRoute
   '/memory/': typeof MemoryIndexRoute
+  '/metrics/': typeof MetricsIndexRoute
+  '/overview/': typeof OverviewIndexRoute
+  '/plans/': typeof PlansIndexRoute
+  '/skills/': typeof SkillsIndexRoute
   '/tasks/': typeof TasksIndexRoute
   '/traces/': typeof TracesIndexRoute
   '/workflows/': typeof WorkflowsIndexRoute
@@ -94,30 +202,66 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/agents/$agentId'
+    | '/plans/$planId'
     | '/tasks/$taskId'
     | '/traces/$traceId'
+    | '/agents/'
+    | '/chat/'
+    | '/costs/'
     | '/feed/'
+    | '/goals/'
+    | '/health/'
+    | '/inbox/'
     | '/memory/'
+    | '/metrics/'
+    | '/overview/'
+    | '/plans/'
+    | '/skills/'
     | '/tasks/'
     | '/traces/'
     | '/workflows/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/agents/$agentId'
+    | '/plans/$planId'
     | '/tasks/$taskId'
     | '/traces/$traceId'
+    | '/agents'
+    | '/chat'
+    | '/costs'
     | '/feed'
+    | '/goals'
+    | '/health'
+    | '/inbox'
     | '/memory'
+    | '/metrics'
+    | '/overview'
+    | '/plans'
+    | '/skills'
     | '/tasks'
     | '/traces'
     | '/workflows'
   id:
     | '__root__'
     | '/'
+    | '/agents/$agentId'
+    | '/plans/$planId'
     | '/tasks/$taskId'
     | '/traces/$traceId'
+    | '/agents/'
+    | '/chat/'
+    | '/costs/'
     | '/feed/'
+    | '/goals/'
+    | '/health/'
+    | '/inbox/'
     | '/memory/'
+    | '/metrics/'
+    | '/overview/'
+    | '/plans/'
+    | '/skills/'
     | '/tasks/'
     | '/traces/'
     | '/workflows/'
@@ -125,10 +269,22 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AgentsAgentIdRoute: typeof AgentsAgentIdRoute
+  PlansPlanIdRoute: typeof PlansPlanIdRoute
   TasksTaskIdRoute: typeof TasksTaskIdRoute
   TracesTraceIdRoute: typeof TracesTraceIdRoute
+  AgentsIndexRoute: typeof AgentsIndexRoute
+  ChatIndexRoute: typeof ChatIndexRoute
+  CostsIndexRoute: typeof CostsIndexRoute
   FeedIndexRoute: typeof FeedIndexRoute
+  GoalsIndexRoute: typeof GoalsIndexRoute
+  HealthIndexRoute: typeof HealthIndexRoute
+  InboxIndexRoute: typeof InboxIndexRoute
   MemoryIndexRoute: typeof MemoryIndexRoute
+  MetricsIndexRoute: typeof MetricsIndexRoute
+  OverviewIndexRoute: typeof OverviewIndexRoute
+  PlansIndexRoute: typeof PlansIndexRoute
+  SkillsIndexRoute: typeof SkillsIndexRoute
   TasksIndexRoute: typeof TasksIndexRoute
   TracesIndexRoute: typeof TracesIndexRoute
   WorkflowsIndexRoute: typeof WorkflowsIndexRoute
@@ -164,6 +320,34 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof TasksIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/skills/': {
+      id: '/skills/'
+      path: '/skills'
+      fullPath: '/skills/'
+      preLoaderRoute: typeof SkillsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/plans/': {
+      id: '/plans/'
+      path: '/plans'
+      fullPath: '/plans/'
+      preLoaderRoute: typeof PlansIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/overview/': {
+      id: '/overview/'
+      path: '/overview'
+      fullPath: '/overview/'
+      preLoaderRoute: typeof OverviewIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/metrics/': {
+      id: '/metrics/'
+      path: '/metrics'
+      fullPath: '/metrics/'
+      preLoaderRoute: typeof MetricsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/memory/': {
       id: '/memory/'
       path: '/memory'
@@ -171,11 +355,53 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof MemoryIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/inbox/': {
+      id: '/inbox/'
+      path: '/inbox'
+      fullPath: '/inbox/'
+      preLoaderRoute: typeof InboxIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/health/': {
+      id: '/health/'
+      path: '/health'
+      fullPath: '/health/'
+      preLoaderRoute: typeof HealthIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/goals/': {
+      id: '/goals/'
+      path: '/goals'
+      fullPath: '/goals/'
+      preLoaderRoute: typeof GoalsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/feed/': {
       id: '/feed/'
       path: '/feed'
       fullPath: '/feed/'
       preLoaderRoute: typeof FeedIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/costs/': {
+      id: '/costs/'
+      path: '/costs'
+      fullPath: '/costs/'
+      preLoaderRoute: typeof CostsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/chat/': {
+      id: '/chat/'
+      path: '/chat'
+      fullPath: '/chat/'
+      preLoaderRoute: typeof ChatIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/agents/': {
+      id: '/agents/'
+      path: '/agents'
+      fullPath: '/agents/'
+      preLoaderRoute: typeof AgentsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/traces/$traceId': {
@@ -192,15 +418,41 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof TasksTaskIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/plans/$planId': {
+      id: '/plans/$planId'
+      path: '/plans/$planId'
+      fullPath: '/plans/$planId'
+      preLoaderRoute: typeof PlansPlanIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/agents/$agentId': {
+      id: '/agents/$agentId'
+      path: '/agents/$agentId'
+      fullPath: '/agents/$agentId'
+      preLoaderRoute: typeof AgentsAgentIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AgentsAgentIdRoute: AgentsAgentIdRoute,
+  PlansPlanIdRoute: PlansPlanIdRoute,
   TasksTaskIdRoute: TasksTaskIdRoute,
   TracesTraceIdRoute: TracesTraceIdRoute,
+  AgentsIndexRoute: AgentsIndexRoute,
+  ChatIndexRoute: ChatIndexRoute,
+  CostsIndexRoute: CostsIndexRoute,
   FeedIndexRoute: FeedIndexRoute,
+  GoalsIndexRoute: GoalsIndexRoute,
+  HealthIndexRoute: HealthIndexRoute,
+  InboxIndexRoute: InboxIndexRoute,
   MemoryIndexRoute: MemoryIndexRoute,
+  MetricsIndexRoute: MetricsIndexRoute,
+  OverviewIndexRoute: OverviewIndexRoute,
+  PlansIndexRoute: PlansIndexRoute,
+  SkillsIndexRoute: SkillsIndexRoute,
   TasksIndexRoute: TasksIndexRoute,
   TracesIndexRoute: TracesIndexRoute,
   WorkflowsIndexRoute: WorkflowsIndexRoute,

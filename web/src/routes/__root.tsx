@@ -1,43 +1,321 @@
-import { createRootRoute, Outlet, Link } from '@tanstack/react-router';
-import { useThemeStore } from '../stores/theme';
+import React, { useEffect, useState } from 'react';
+import { createRootRoute, Outlet, Link, useRouterState } from '@tanstack/react-router';
+import { useQuery } from '@tanstack/react-query';
+import { useScopeStore } from '../stores/scope';
+import { useEventBusStore } from '../stores/eventBus';
+import { connectSSE, disconnectSSE, isSSEAvailable } from '../hooks/useSSE';
+import { KbdHint, Sparkline } from '../components/ui';
 
-function ThemeToggle() {
-  const { dark, toggle } = useThemeStore();
+// ---------------------------------------------------------------------------
+// Sidebar navigation structure
+// ---------------------------------------------------------------------------
+
+type NavItem = {
+  label: string;
+  to: string;
+};
+
+type NavGroup = {
+  group: string;
+  items: NavItem[];
+};
+
+const NAV: NavGroup[] = [
+  {
+    group: 'Workspace',
+    items: [
+      { label: 'Overview', to: '/overview' },
+      { label: 'Inbox', to: '/inbox' },
+    ],
+  },
+  {
+    group: 'Run',
+    items: [
+      { label: 'Agents', to: '/agents' },
+      { label: 'Tasks', to: '/tasks' },
+      { label: 'Plans', to: '/plans' },
+      { label: 'Workflows', to: '/workflows' },
+      { label: 'Goals', to: '/goals' },
+    ],
+  },
+  {
+    group: 'Knowledge',
+    items: [
+      { label: 'Skills', to: '/skills' },
+      { label: 'Memory', to: '/memory' },
+    ],
+  },
+  {
+    group: 'Observe',
+    items: [
+      { label: 'Metrics', to: '/metrics' },
+      { label: 'Costs', to: '/costs' },
+      { label: 'Health', to: '/health' },
+      { label: 'Traces', to: '/traces' },
+    ],
+  },
+  {
+    group: 'Talk',
+    items: [{ label: 'Chat', to: '/chat' }],
+  },
+];
+
+// ---------------------------------------------------------------------------
+// Header sub-components
+// ---------------------------------------------------------------------------
+
+function ProjectPicker() {
+  const { selectedProject, setProject } = useScopeStore();
+  const { data } = useQuery<{ projects?: { id: string; name: string }[] }>({
+    queryKey: ['projects'],
+    queryFn: () => fetch('/api/v1/projects').then((r) => r.json()),
+    staleTime: 60_000,
+  });
+
+  const projects = data?.projects ?? [];
+
   return (
-    <button
-      onClick={toggle}
-      className="text-xs px-2 py-1 rounded border border-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-      title={dark ? 'Switch to light mode' : 'Switch to dark mode'}
+    <div className="flex items-center gap-1 text-xs">
+      <span className="text-zinc-500">project:</span>
+      <select
+        value={selectedProject ?? ''}
+        onChange={(e) => setProject(e.target.value || null)}
+        className="bg-transparent text-zinc-200 border-none outline-none cursor-pointer hover:text-zinc-100 py-1 pr-4"
+      >
+        <option value="">all projects</option>
+        {projects.map((p) => (
+          <option key={p.id} value={p.id}>
+            {p.name}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+function HealthDot() {
+  const { data } = useQuery<{ status?: string }>({
+    queryKey: ['health'],
+    queryFn: () => fetch('/api/v1/health').then((r) => r.json()),
+    refetchInterval: 30_000,
+    staleTime: 20_000,
+  });
+
+  const healthy = !data || data.status === 'ok' || data.status === 'healthy';
+
+  return (
+    <div className="flex items-center gap-1.5">
+      <span
+        className={`w-1.5 h-1.5 rounded-full pulse-dot ${healthy ? 'bg-emerald-400' : 'bg-red-400'}`}
+      />
+      <span className={healthy ? 'text-zinc-400' : 'text-red-400'}>
+        {healthy ? 'healthy' : 'degraded'}
+      </span>
+    </div>
+  );
+}
+
+function CostBadge() {
+  const { data } = useQuery<{ totalCost?: number; currency?: string }>({
+    queryKey: ['cost-monthly'],
+    queryFn: () => fetch('/api/v1/cost/monthly').then((r) => r.json()),
+    staleTime: 300_000,
+  });
+
+  const cost = data?.totalCost != null
+    ? `€${data.totalCost.toFixed(2)}`
+    : '—';
+
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className="text-zinc-500">cost this month</span>
+      <span className="text-zinc-200 font-mono">{cost}</span>
+    </div>
+  );
+}
+
+function InboxBadge() {
+  const { data } = useQuery<{ total?: number }>({
+    queryKey: ['inbox-count'],
+    queryFn: () => fetch('/api/v1/tasks?status=needs_review&limit=1').then((r) => r.json()),
+    refetchInterval: 30_000,
+    staleTime: 15_000,
+  });
+
+  const count = data?.total ?? 0;
+
+  return (
+    <Link
+      to="/inbox"
+      className="relative px-2 py-1 rounded hover:bg-zinc-800 text-zinc-300 flex items-center gap-1"
     >
-      {dark ? '☀️' : '🌙'}
-    </button>
+      inbox
+      {count > 0 && (
+        <span className="inline-flex items-center justify-center text-[11px] font-semibold bg-amber-500/20 text-amber-300 rounded-full w-4 h-4">
+          {count > 9 ? '9+' : count}
+        </span>
+      )}
+    </Link>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Sidebar
+// ---------------------------------------------------------------------------
+
+function Sidebar({ collapsed }: { collapsed: boolean }) {
+  const routerState = useRouterState();
+  const pathname = routerState.location.pathname;
+
+  function isActive(to: string): boolean {
+    if (to === '/overview') return pathname === '/overview' || pathname === '/';
+    return pathname.startsWith(to);
+  }
+
+  if (collapsed) {
+    return (
+      <aside className="w-10 bg-zinc-900/50 border-r border-zinc-800 flex-shrink-0 overflow-y-auto" />
+    );
+  }
+
+  return (
+    <aside className="w-48 bg-zinc-900/50 border-r border-zinc-800 flex-shrink-0 overflow-y-auto">
+      <nav className="py-3">
+        {NAV.map((group) => (
+          <div key={group.group} className="mb-3">
+            <div className="px-3 pb-1 text-[11px] uppercase tracking-wider text-zinc-500 font-semibold">
+              {group.group}
+            </div>
+            {group.items.map((item) => {
+              const active = isActive(item.to);
+              return (
+                <Link
+                  key={item.to}
+                  to={item.to}
+                  className={`flex items-center gap-2 px-3 py-1.5 text-xs border-l-2 cursor-pointer transition-colors ${
+                    active
+                      ? 'border-indigo-400 bg-indigo-500/20 text-indigo-200'
+                      : 'border-transparent text-zinc-400 hover:bg-zinc-800/40 hover:text-zinc-200'
+                  }`}
+                >
+                  <span className="w-1 h-1 rounded-full bg-current opacity-60" />
+                  {item.label}
+                </Link>
+              );
+            })}
+          </div>
+        ))}
+      </nav>
+    </aside>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Footer live strip
+// ---------------------------------------------------------------------------
+
+function LiveStrip() {
+  const connectionStatus = useEventBusStore((s) => s.connectionStatus);
+  const eventRate = useEventBusStore((s) => s.eventRate);
+  const events = useEventBusStore((s) => s.events);
+
+  // Build a small sparkline from the last 200 events bucketed into 10 × 1s slots
+  const sparkData = React.useMemo(() => {
+    const now = Date.now();
+    const bucketSize = 1000;
+    const buckets = new Array(10).fill(0) as number[];
+    for (const e of events.slice(-200)) {
+      const age = now - e.ts;
+      const bucket = Math.floor(age / bucketSize);
+      if (bucket >= 0 && bucket < buckets.length) {
+        buckets[9 - bucket] += 1;
+      }
+    }
+    return buckets;
+  }, [events]);
+
+  const statusColor =
+    connectionStatus === 'connected'
+      ? 'bg-emerald-400'
+      : connectionStatus === 'connecting'
+      ? 'bg-amber-400'
+      : 'bg-red-400';
+
+  return (
+    <footer className="h-6 bg-zinc-950 border-t border-zinc-800 px-4 flex items-center gap-3 text-[11px] text-zinc-500 flex-shrink-0">
+      <span className={`w-1.5 h-1.5 rounded-full ${statusColor}`} />
+      <span>{connectionStatus}</span>
+      <span className="text-zinc-600">·</span>
+      <Sparkline data={sparkData} color="#6366f1" />
+      <span>{eventRate.toFixed(1)} ev/s</span>
+    </footer>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Root layout
+// ---------------------------------------------------------------------------
+
+function RootLayout() {
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+
+  // Start SSE connection on mount
+  useEffect(() => {
+    if (!isSSEAvailable()) return;
+    connectSSE({});
+    return () => disconnectSSE();
+  }, []);
+
+  // Ensure dark mode is active (dark-first design)
+  useEffect(() => {
+    document.documentElement.classList.add('dark');
+  }, []);
+
+  return (
+    <div className="h-screen flex flex-col bg-zinc-950 text-zinc-200 font-sans overflow-hidden">
+      {/* Header */}
+      <header className="h-12 bg-zinc-900 border-b border-zinc-800 px-4 flex items-center justify-between flex-shrink-0">
+        <div className="flex items-center gap-4">
+          {/* Logo + sidebar toggle */}
+          <button
+            onClick={() => setSidebarCollapsed((v) => !v)}
+            className="flex items-center gap-2 hover:opacity-80 transition-opacity"
+            title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          >
+            <div className="w-5 h-5 rounded bg-gradient-to-br from-indigo-400 to-purple-500" />
+            <span className="font-semibold tracking-tight text-sm">pragents</span>
+          </button>
+
+          <ProjectPicker />
+
+          {/* ⌘K search hint */}
+          <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-zinc-800 text-xs text-zinc-500 cursor-pointer hover:bg-zinc-700 transition-colors">
+            <span>Search…</span>
+            <KbdHint keys={['⌘', 'K']} />
+          </div>
+        </div>
+
+        <div className="flex items-center gap-4 text-xs">
+          <HealthDot />
+          <CostBadge />
+          <InboxBadge />
+        </div>
+      </header>
+
+      {/* Body: sidebar + main outlet */}
+      <div className="flex-1 flex overflow-hidden min-h-0">
+        <Sidebar collapsed={sidebarCollapsed} />
+        <main className="flex-1 overflow-y-auto">
+          <Outlet />
+        </main>
+      </div>
+
+      {/* Live strip footer */}
+      <LiveStrip />
+    </div>
   );
 }
 
 export const Route = createRootRoute({
-  component: () => (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100">
-      <header className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-6">
-          <h1 className="text-lg font-bold">pragents</h1>
-          <nav className="flex gap-4 text-sm">
-            <Link to="/" className="hover:text-blue-600 transition-colors">Dashboard</Link>
-            <Link to="/feed" className="hover:text-blue-600 transition-colors">Feed</Link>
-            <Link to="/workflows" className="hover:text-blue-600 transition-colors">Workflows</Link>
-            <Link to="/memory" className="hover:text-blue-600 transition-colors">Memory</Link>
-            <Link to="/traces" className="hover:text-blue-600 transition-colors">Traces</Link>
-            <Link to="/tasks" className="hover:text-blue-600 transition-colors">Tasks</Link>
-          </nav>
-        </div>
-        <div className="flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400">
-          <ThemeToggle />
-          <span className="w-2 h-2 rounded-full bg-green-500 inline-block" />
-          connected
-        </div>
-      </header>
-      <main className="p-6">
-        <Outlet />
-      </main>
-    </div>
-  ),
+  component: RootLayout,
 });
