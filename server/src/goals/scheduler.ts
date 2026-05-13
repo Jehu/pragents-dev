@@ -1,6 +1,7 @@
 import cron from 'croner';
 import { randomUUID } from 'node:crypto';
 import { getDb } from '../db/sqlite.js';
+import { logger } from '../logging/index.js';
 import type { GoalDef } from './schema.js';
 import type { WorkflowRegistry } from '../workflows/loader.js';
 import type { WorkflowEngine } from '../workflows/engine.js';
@@ -49,8 +50,15 @@ export class GoalScheduler {
   }
 
   private async trigger(goal: GoalDef): Promise<void> {
+    // Skip if a run for this goal is already active (overlap protection)
+    const existingRun = [...this.activeGoalRuns.values()].find(r => r.goalId === goal.id);
+    if (existingRun) {
+      logger.warn({ goalId: goal.id, goalRunId: existingRun.goalRunId }, 'Skipping goal trigger — run already active');
+      return;
+    }
+
     const wfDef = this.wfRegistry.get(goal.workflow);
-    if (!wfDef) { console.warn(`Goal "${goal.id}": workflow "${goal.workflow}" not found`); return; }
+    if (!wfDef) { logger.warn({ goalId: goal.id, workflow: goal.workflow }, `Goal "${goal.id}": workflow "${goal.workflow}" not found`); return; }
 
     const goalRunId = randomUUID();
     const db = getDb();
