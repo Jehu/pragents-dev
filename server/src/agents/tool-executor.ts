@@ -67,20 +67,26 @@ export class ToolExecutor {
         case 'approve_gate': {
           const { gateId } = args as { gateId: string };
           const db = getDb();
-          const gate = db.prepare('SELECT status FROM human_gates WHERE id = ?').get(gateId) as any;
-          if (!gate) return `Error: Gate "${gateId}" not found`;
-          if (gate.status !== 'pending') return `Error: Gate "${gateId}" is already ${gate.status}`;
-          db.prepare("UPDATE human_gates SET status = 'approved' WHERE id = ?").run(gateId);
-          return JSON.stringify({ gateId, status: 'approved' });
+          const result = db.transaction(() => {
+            const gate = db.prepare('SELECT status FROM human_gates WHERE id = ?').get(gateId) as any;
+            if (!gate) return `Error: Gate "${gateId}" not found`;
+            if (gate.status !== 'pending') return `Error: Gate "${gateId}" is already ${gate.status}`;
+            db.prepare("UPDATE human_gates SET status = 'approved' WHERE id = ?").run(gateId);
+            return JSON.stringify({ gateId, status: 'approved' });
+          })();
+          return result;
         }
         case 'reject_gate': {
           const { gateId, reason } = args as { gateId: string; reason?: string };
           const db = getDb();
-          const gate = db.prepare('SELECT status FROM human_gates WHERE id = ?').get(gateId) as any;
-          if (!gate) return `Error: Gate "${gateId}" not found`;
-          if (gate.status !== 'pending') return `Error: Gate "${gateId}" is already ${gate.status}`;
-          db.prepare("UPDATE human_gates SET status = 'rejected' WHERE id = ?").run(gateId);
-          return JSON.stringify({ gateId, status: 'rejected', reason: reason || 'No reason provided' });
+          const result = db.transaction(() => {
+            const gate = db.prepare('SELECT status FROM human_gates WHERE id = ?').get(gateId) as any;
+            if (!gate) return `Error: Gate "${gateId}" not found`;
+            if (gate.status !== 'pending') return `Error: Gate "${gateId}" is already ${gate.status}`;
+            db.prepare("UPDATE human_gates SET status = 'rejected' WHERE id = ?").run(gateId);
+            return JSON.stringify({ gateId, status: 'rejected', reason: reason || 'No reason provided' });
+          })();
+          return result;
         }
         case 'search_memory': {
           const { query, scope, limit } = args as { query: string; scope?: string; limit?: number };
