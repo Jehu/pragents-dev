@@ -3,6 +3,7 @@ import type { TaskTracker } from '../../tasks/tracker.js';
 import type { AgentSessionManager } from '../../agents/manager.js';
 import type { ResolvedAgent } from '../../config/schema.js';
 import type { EventBuffer } from '../../events/buffer.js';
+import { logger } from '../../logging/index.js';
 export function createTasksRoute(tracker: TaskTracker, agents: ResolvedAgent[], sessionMgr: AgentSessionManager, eventBuffer: EventBuffer) {
   const r = new Hono();
 
@@ -21,11 +22,20 @@ export function createTasksRoute(tracker: TaskTracker, agents: ResolvedAgent[], 
 
     const task = tracker.create({ projectId, agentId, description: description.trim() });
 
-    // Dispatch with lifecycle events + capture agent result
-    tracker.setRunning(task.id);
-    eventBuffer.push(projectId, agentId, 'task.running', { taskId: task.id }, task.id);
+    // Dispatch with lifecycle events + capture agent result.
+    // Dispatch first: if it throws, task state is untouched (stays pending).
+    // Only mark running after a successful dispatch handoff.
+    const dispatchPromise = sessionMgr.dispatch(agent, description.trim());
 
-    sessionMgr.dispatch(agent, description.trim()).then((result) => {
+    try {
+      tracker.setRunning(task.id);
+      eventBuffer.push(projectId, agentId, 'task.running', { taskId: task.id }, task.id);
+    } catch (err) {
+      logger.error({ taskId: task.id, err }, 'tasks: setRunning failed after successful dispatch — marking task as error');
+      try { tracker.setFailed(task.id, 'State update failed after dispatch'); } catch { /* best-effort */ }
+    }
+
+    dispatchPromise.then((result) => {
       tracker.setComplete(task.id, result);
       eventBuffer.push(projectId, agentId, 'task.complete', { taskId: task.id, result }, task.id);
     }).catch((err: Error) => {
@@ -91,10 +101,18 @@ export function createTasksRoute(tracker: TaskTracker, agents: ResolvedAgent[], 
       return c.json({ error: `Agent "${task.agentId}" not found in configuration` }, 400);
     }
 
-    tracker.setRunning(task.id);
-    eventBuffer.push(task.projectId, task.agentId, 'task.retried', { taskId: task.id }, task.id);
+    // Dispatch first; only mark running after successful handoff.
+    const retryDispatchPromise = sessionMgr.dispatch(agent, task.description);
 
-    sessionMgr.dispatch(agent, task.description).then((result) => {
+    try {
+      tracker.setRunning(task.id);
+      eventBuffer.push(task.projectId, task.agentId, 'task.retried', { taskId: task.id }, task.id);
+    } catch (err) {
+      logger.error({ taskId: task.id, err }, 'tasks: setRunning failed after successful retry dispatch — marking task as error');
+      try { tracker.setFailed(task.id, 'State update failed after retry dispatch'); } catch { /* best-effort */ }
+    }
+
+    retryDispatchPromise.then((result) => {
       tracker.setComplete(task.id, result);
       eventBuffer.push(task.projectId, task.agentId, 'task.complete', { taskId: task.id, result }, task.id);
     }).catch((err: Error) => {
