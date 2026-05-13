@@ -3,6 +3,7 @@ import { getDb } from '../db/sqlite.js';
 import type { VectorStore } from './vector-store/interface.js';
 import { SimpleVectorStore } from './vector-store/simple.js';
 import { LanceDbVectorStore, type EmbeddingConfig } from './vector-store/lancedb.js';
+import { logger } from '../logging/index.js';
 
 export interface Fact {
   id: string;
@@ -29,6 +30,8 @@ export interface MemoryEngineConfig {
 export class MemoryEngine {
   private shortTerm: ShortTermMemory;
   private vectorStore: VectorStore;
+  private _degraded: boolean = false;
+  private _storeName: 'lancedb' | 'simple' = 'simple';
 
   constructor(config: number | MemoryEngineConfig = {}) {
     const opts = typeof config === 'number' ? { maxEntries: config } : config;
@@ -36,10 +39,29 @@ export class MemoryEngine {
 
     // Select vector store based on config
     if (opts.vectorStore === 'lancedb') {
-      this.vectorStore = new LanceDbVectorStore(opts.embeddings);
+      try {
+        this.vectorStore = new LanceDbVectorStore(opts.embeddings);
+        this._storeName = 'lancedb';
+        this._degraded = false;
+      } catch (err) {
+        logger.warn({ reason: 'LanceDB unavailable', err }, 'Memory running in degraded mode — using SimpleVectorStore. Recall quality reduced.');
+        this.vectorStore = new SimpleVectorStore();
+        this._storeName = 'simple';
+        this._degraded = true;
+      }
     } else {
       this.vectorStore = new SimpleVectorStore();
+      this._storeName = 'simple';
+      this._degraded = false;
     }
+  }
+
+  isDegraded(): boolean {
+    return this._degraded;
+  }
+
+  storeName(): 'lancedb' | 'simple' {
+    return this._storeName;
   }
 
   // Long-term: facts

@@ -68,6 +68,19 @@ describe('MemoryEngine', () => {
     expect(mem.context('sess-1')).toHaveLength(0);
   });
 
+  describe('degraded mode detection', () => {
+    it('reports storeName as simple when constructed with default config', () => {
+      const mem = new MemoryEngine(10);
+      expect(mem.storeName()).toBe('simple');
+    });
+
+    it('isDegraded returns false when using simple store (not configured for lancedb)', () => {
+      const mem = new MemoryEngine({ vectorStore: 'simple' });
+      expect(mem.isDegraded()).toBe(false);
+      expect(mem.storeName()).toBe('simple');
+    });
+  });
+
   describe('cross-project memory (company scope)', () => {
     it('recalls company-scope facts from any project scope', async () => {
       engine.remember('company', 'convention', 'Use semantic versioning everywhere', 'office@global');
