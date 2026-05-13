@@ -54,7 +54,9 @@ function makeDeps(overrides: Record<string, any> = {}) {
     decomposer: {
       decompose: vi.fn().mockResolvedValue({ steps: [{ id: 'step1', description: 'Research', agent: 'dev' }] }),
     },
-    dispatchTask: vi.fn().mockResolvedValue('dispatched'),
+    sessionMgr: {
+      dispatch: vi.fn().mockResolvedValue('dispatched'),
+    },
     ...overrides,
   } as any;
 }
@@ -86,7 +88,10 @@ describe('ToolExecutor', () => {
       projectId: 'proj-a', agentId: 'dev@proj-a', description: 'Fix bug',
     });
     expect(deps.tracker.create).toHaveBeenCalledWith({ projectId: 'proj-a', agentId: 'dev@proj-a', description: 'Fix bug', status: 'pending' });
-    expect(deps.dispatchTask).toHaveBeenCalledWith('proj-a', 'dev@proj-a', 'Fix bug');
+    expect(deps.sessionMgr.dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'dev@proj-a' }),
+      'Fix bug',
+    );
     const parsed = JSON.parse(result);
     expect(parsed.taskId).toBe('task-1');
   });
@@ -283,7 +288,7 @@ describe('ToolExecutor', () => {
       projectId: 'proj-a', agentId: 'dev@proj-a', description: 'PR needs review', status: 'needs_review',
     });
     expect(deps.tracker.setNeedsReview).toHaveBeenCalledWith('task-1', 'PR needs review');
-    expect(deps.dispatchTask).not.toHaveBeenCalled();
+    expect(deps.sessionMgr.dispatch).not.toHaveBeenCalled();
     const parsed = JSON.parse(result);
     expect(parsed.status).toBe('needs_review');
   });

@@ -9,6 +9,7 @@ import type { GoalRegistry } from '../goals/loader.js';
 import type { EventBuffer } from '../events/buffer.js';
 import type { ResolvedAgent } from '../config/schema.js';
 import type { NLDecomposer } from '../nl/decomposer.js';
+import type { AgentSessionManager } from './manager.js';
 import { getDb } from '../db/sqlite.js';
 
 export interface ToolExecutorDeps {
@@ -23,8 +24,8 @@ export interface ToolExecutorDeps {
   goalRegistry: GoalRegistry;
   eventBuffer: EventBuffer;
   decomposer: NLDecomposer;
-  /** Callback to dispatch a task to an agent */
-  dispatchTask: (projectId: string, agentId: string, description: string) => Promise<string>;
+  /** SessionManager used to dispatch tasks to agents — ensures consistent task tracking */
+  sessionMgr: AgentSessionManager;
 }
 
 export class ToolExecutor {
@@ -47,7 +48,12 @@ export class ToolExecutor {
             this.deps.tracker.setNeedsReview(task.id, description);
             return JSON.stringify({ taskId: task.id, status: 'needs_review', note: 'Not dispatched — human review requested' });
           }
-          this.deps.dispatchTask(projectId, agentId, description).then(
+          const agent = this.deps.agents.find(a => a.id === agentId) || this.deps.agents[0];
+          if (!agent) {
+            this.deps.tracker.setFailed(task.id, `No agent found for "${agentId}"`);
+            return JSON.stringify({ taskId: task.id, status: 'failed', error: `No agent found for "${agentId}"` });
+          }
+          this.deps.sessionMgr.dispatch(agent, description).then(
             (result) => this.deps.tracker.setComplete(task.id, result),
             (err) => this.deps.tracker.setFailed(task.id, err?.message || String(err)),
           );

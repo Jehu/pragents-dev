@@ -13,7 +13,7 @@ import { WorkflowEngine } from './workflows/engine.js';
 import { SkillRouter } from './routing/router.js';
 import { setupWebSocket, broadcast } from './api/ws.js';
 import { createEventsRoute, broadcastSSE } from './api/routes/events.js';
-import { healthRoute } from './api/routes/health.js';
+import { createHealthRoute } from './api/routes/health.js';
 import { createTasksRoute } from './api/routes/tasks.js';
 import { createProjectsRoute, createAgentsRoute } from './api/routes/projects.js';
 import { createWorkflowsRoute } from './api/routes/workflows.js';
@@ -156,11 +156,7 @@ export async function startServer() {
     goalRegistry,
     eventBuffer,
     decomposer,
-    dispatchTask: (projectId, agentId, description) => {
-      const agent = agents.find(a => a.id === agentId) || agents[0];
-      if (!agent) return Promise.reject(new Error(`No agent found for "${agentId}"`));
-      return sessionMgr.dispatch(agent, description);
-    },
+    sessionMgr,
   });
   sessionMgr.setToolExecutor(toolExecutor);
 
@@ -208,7 +204,7 @@ export async function startServer() {
   const wsInject = await setupWebSocket(app, eventBuffer);
   if (wsInject) console.log('WebSocket endpoint ready');
 
-  app.route('/', healthRoute);
+  app.route('/', createHealthRoute(memory));
   app.route('/api/v1/projects', createProjectsRoute(config));
   app.route('/api/v1/agents', createAgentsRoute(agents, sessionMgr));
   app.route('/api/v1/tasks', createTasksRoute(tracker, agents, sessionMgr, eventBuffer));
