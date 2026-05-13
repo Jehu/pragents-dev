@@ -9,6 +9,7 @@ import type { EventBuffer } from '../events/buffer.js';
 import type { AgentSessionManager } from '../agents/manager.js';
 import type { ResolvedAgent } from '../config/schema.js';
 import type { SkillAutoExtractor } from '../skills/auto-extractor.js';
+import { TaskTracker } from '../tasks/tracker.js';
 
 export class GoalScheduler {
   private jobs: cron[] = [];
@@ -78,6 +79,7 @@ export class GoalScheduler {
   }
 
   private async pmCheck(): Promise<void> {
+    const tracker = new TaskTracker();
     const now = Date.now();
     for (const [wfRunId, info] of this.activeGoalRuns) {
       const goal = this.goals?.find(g => g.id === info.goalId);
@@ -87,9 +89,32 @@ export class GoalScheduler {
         if (this.pmAgent) {
           const db = getDb();
           db.prepare("UPDATE goal_runs SET status = 'escalated' WHERE id = ?").run(info.goalRunId);
-          this.sessionMgr.dispatch(this.pmAgent, 
-            `Goal "${goal.id}" has passed its deadline. Workflow run ${wfRunId} may need attention. Check and take appropriate action.`
-          ).catch((err) => logger.warn({ goalId: goal.id, err: err?.message }, 'Goal escalation dispatch failed'));
+
+          const escalationMsg = `Goal "${goal.id}" has passed its deadline. Workflow run ${wfRunId} may need attention. Check and take appropriate action.`;
+          const task = tracker.create({
+            projectId: this.pmAgent.projectId,
+            agentId: this.pmAgent.id,
+            description: escalationMsg,
+            type: 'escalation',
+          });
+          tracker.setRunning(task.id);
+
+          this.sessionMgr.dispatch(this.pmAgent, escalationMsg)
+            .then(() => {
+              tracker.setComplete(task.id, 'Escalation dispatched to PM agent');
+              logger.info({ goalId: goal.id, goalRunId: info.goalRunId, taskId: task.id }, 'Goal escalation dispatched successfully');
+            })
+            .catch((err: any) => {
+              tracker.setFailed(task.id, err?.message ?? 'Unknown error');
+              logger.error({ goalId: goal.id, goalRunId: info.goalRunId, taskId: task.id, err: err?.message }, 'Goal escalation dispatch failed');
+              this.eventBuffer.push(
+                this.pmAgent!.projectId,
+                this.pmAgent!.id,
+                'escalation.failed',
+                { goalId: goal.id, goalRunId: info.goalRunId, taskId: task.id, error: err?.message ?? 'Unknown error' },
+                task.id,
+              );
+            });
         }
         this.activeGoalRuns.delete(wfRunId);
       } else if (now > info.deadline.getTime() - (goal.warn_before_ms || 7200000)) {

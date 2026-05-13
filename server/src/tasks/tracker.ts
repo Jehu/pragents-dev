@@ -3,11 +3,14 @@ import { getDb } from '../db/sqlite.js';
 
 export type TaskStatus = 'pending' | 'running' | 'complete' | 'failed' | 'needs_review' | 'blocked';
 
+export type TaskType = 'agent' | 'escalation';
+
 export interface Task {
   id: string;
   projectId: string;
   agentId: string;
   status: TaskStatus;
+  type: TaskType;
   description: string;
   result: string | null;
   reason: string | null;
@@ -21,6 +24,7 @@ export interface TaskCreate {
   agentId: string;
   description: string;
   status?: TaskStatus;
+  type?: TaskType;
 }
 
 export class TaskTracker {
@@ -29,16 +33,18 @@ export class TaskTracker {
     const id = randomUUID();
     const now = new Date().toISOString();
     const status = input.status ?? 'pending';
+    const type = input.type ?? 'agent';
 
     db.prepare(
-      'INSERT INTO tasks (id, project_id, agent_id, status, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-    ).run(id, input.projectId, input.agentId, status, input.description, now, now);
+      'INSERT INTO tasks (id, project_id, agent_id, status, type, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    ).run(id, input.projectId, input.agentId, status, type, input.description, now, now);
 
     return {
       id,
       projectId: input.projectId,
       agentId: input.agentId,
       status,
+      type,
       description: input.description,
       result: null,
       reason: null,
@@ -87,7 +93,7 @@ export class TaskTracker {
   get(taskId: string): Task | null {
     const row = getDb()
       .prepare(
-        `SELECT id, project_id as projectId, agent_id as agentId, status, description, result, reason, external_ref as externalRef,
+        `SELECT id, project_id as projectId, agent_id as agentId, status, type, description, result, reason, external_ref as externalRef,
                 created_at as createdAt, updated_at as updatedAt FROM tasks WHERE id = ?`,
       )
       .get(taskId) as Task | undefined;
@@ -98,7 +104,7 @@ export class TaskTracker {
     if (projectId) {
       return getDb()
         .prepare(
-          `SELECT id, project_id as projectId, agent_id as agentId, status, description, result, reason, external_ref as externalRef,
+          `SELECT id, project_id as projectId, agent_id as agentId, status, type, description, result, reason, external_ref as externalRef,
                   created_at as createdAt, updated_at as updatedAt FROM tasks WHERE project_id = ?
            ORDER BY created_at DESC`,
         )
@@ -106,7 +112,7 @@ export class TaskTracker {
     }
     return getDb()
       .prepare(
-        `SELECT id, project_id as projectId, agent_id as agentId, status, description, result, reason, external_ref as externalRef,
+        `SELECT id, project_id as projectId, agent_id as agentId, status, type, description, result, reason, external_ref as externalRef,
                 created_at as createdAt, updated_at as updatedAt FROM tasks ORDER BY created_at DESC`,
       )
       .all() as Task[];

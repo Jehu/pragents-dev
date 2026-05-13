@@ -176,6 +176,7 @@ describe('GoalScheduler pmCheck deadline escalation', () => {
 
   beforeEach(() => {
     getDb().exec('DELETE FROM goal_runs');
+    getDb().exec('DELETE FROM tasks');
   });
 
   function buildScheduler(sessionMgrOverrides?: Partial<{ dispatch: any }>) {
@@ -232,6 +233,57 @@ describe('GoalScheduler pmCheck deadline escalation', () => {
     // DB row should be marked escalated
     const row = db.prepare('SELECT status FROM goal_runs WHERE id = ?').get(goalRunId) as any;
     expect(row.status).toBe('escalated');
+
+    // Wait for async dispatch promise to settle, then verify task was persisted
+    await new Promise(resolve => setTimeout(resolve, 10));
+    const tasks = db.prepare("SELECT * FROM tasks WHERE type = 'escalation'").all() as any[];
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0].status).toBe('complete');
+    expect(tasks[0].agent_id).toBe(mockPM.id);
+    expect(tasks[0].description).toMatch(/daily-report/);
+  });
+
+  it('marks escalation task failed and emits event when PM dispatch fails', async () => {
+    const db = getDb();
+    const goalRunId = 'gr-fail';
+    const wfRunId = 'wf-fail';
+    db.prepare(
+      "INSERT INTO goal_runs (id, goal_id, workflow_run_id, status) VALUES (?, ?, ?, 'running')",
+    ).run(goalRunId, 'daily-report', wfRunId);
+
+    const dispatchError = new Error('PM agent unreachable');
+    const { scheduler, deps } = buildScheduler({
+      dispatch: vi.fn().mockRejectedValue(dispatchError),
+    });
+
+    (scheduler as any).goals = [
+      { id: 'daily-report', cadence: '0 8 * * *', workflow: 'daily', description: 'Daily report', warn_before_ms: 7200000 },
+    ];
+    (scheduler as any).activeGoalRuns.set(wfRunId, {
+      goalRunId,
+      deadline: new Date(Date.now() - 1),
+      goalId: 'daily-report',
+    });
+
+    await (scheduler as any).pmCheck();
+
+    // Wait for async dispatch rejection to propagate
+    await new Promise(resolve => setTimeout(resolve, 10));
+
+    // Task should be marked failed
+    const tasks = db.prepare("SELECT * FROM tasks WHERE type = 'escalation'").all() as any[];
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0].status).toBe('failed');
+    expect(tasks[0].result).toMatch(/unreachable/);
+
+    // escalation.failed event should be emitted
+    expect(deps.eventBuffer.push).toHaveBeenCalledWith(
+      mockPM.projectId,
+      mockPM.id,
+      'escalation.failed',
+      expect.objectContaining({ goalId: 'daily-report', error: 'PM agent unreachable' }),
+      expect.any(String),
+    );
   });
 
   it('does not escalate when goal run is not yet due', async () => {
