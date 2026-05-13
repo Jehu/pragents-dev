@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { useShallow } from 'zustand/react/shallow';
 
 export interface SseEvent {
   id?: string;
@@ -61,15 +62,18 @@ export const useEventBusStore = create<EventBusState>((set, get) => ({
   },
 }));
 
-/** Selector: returns events filtered by partial match on type/agentId/projectId/taskId */
+/** Selector: returns events filtered by partial match on type/agentId/projectId/taskId.
+ *  useShallow prevents infinite re-renders caused by .filter() always returning a new array ref. */
 export function useEventBus(filter: Partial<Pick<SseEvent, 'type' | 'agentId' | 'projectId' | 'taskId'>> = {}): SseEvent[] {
-  return useEventBusStore((state) =>
-    state.events.filter((e) => {
-      if (filter.type !== undefined && e.type !== filter.type) return false;
-      if (filter.agentId !== undefined && e.agentId !== filter.agentId) return false;
-      if (filter.projectId !== undefined && e.projectId !== filter.projectId) return false;
-      if (filter.taskId !== undefined && e.taskId !== filter.taskId) return false;
-      return true;
-    }),
+  return useEventBusStore(
+    useShallow((state) =>
+      state.events.filter((e) => {
+        if (filter.type !== undefined && e.type !== filter.type) return false;
+        if (filter.agentId !== undefined && e.agentId !== filter.agentId) return false;
+        if (filter.projectId !== undefined && e.projectId !== filter.projectId) return false;
+        if (filter.taskId !== undefined && e.taskId !== filter.taskId) return false;
+        return true;
+      }),
+    ),
   );
 }

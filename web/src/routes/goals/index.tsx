@@ -14,12 +14,14 @@ export const Route = createFileRoute('/goals/')({
 interface Goal {
   id: string;
   description: string;
-  cron: string;
+  cadence: string;
+  cron?: string; // alias fallback
   targetAgentId?: string;
   targetWorkflowId?: string;
+  workflow?: string;
   deadline?: string;
-  status: string;
-  createdAt: string;
+  status?: string;
+  createdAt?: string;
 }
 
 export interface GoalRun {
@@ -148,17 +150,22 @@ function GoalTable({ goals }: { goals: Goal[] }) {
                 <span className="text-zinc-200">{g.description}</span>
               </td>
               <td className="py-2.5 pr-4">
-                <span className="font-mono text-xs text-zinc-300 block">{g.cron}</span>
-                <span className="text-[11px] text-zinc-500">{parseCron(g.cron)}</span>
+                <span className="font-mono text-xs text-zinc-300 block">{g.cadence ?? g.cron}</span>
+                <span className="text-[11px] text-zinc-500">{parseCron(g.cadence ?? g.cron ?? '')}</span>
               </td>
               <td className="py-2.5 pr-4">
                 <span className="text-xs text-zinc-400">
-                  {g.targetAgentId ?? g.targetWorkflowId ?? '—'}
+                  {g.targetAgentId ?? g.targetWorkflowId ?? g.workflow ?? '—'}
                 </span>
               </td>
               <td className="py-2.5 pr-4">
                 <span className="text-xs text-zinc-400">
-                  {g.deadline ? relativeTimeMs(new Date(g.deadline).getTime()) : '—'}
+                  {g.deadline
+                    ? (() => {
+                        const ms = new Date(g.deadline).getTime();
+                        return isNaN(ms) ? parseCron(g.deadline) : relativeTimeMs(ms);
+                      })()
+                    : '—'}
                 </span>
               </td>
             </tr>

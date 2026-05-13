@@ -3,6 +3,7 @@ import { createFileRoute, Link } from '@tanstack/react-router';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { StatusPill, ApprovalCard, EmptyState } from '../../components/ui/index.js';
 import { useEventBusStore } from '../../stores/eventBus.js';
+import { useShallow } from 'zustand/react/shallow';
 import type { StatusType } from '../../components/ui/StatusPill.js';
 
 export const Route = createFileRoute('/overview/')({
@@ -278,7 +279,7 @@ function OverviewPage() {
   }, [events, queryClient]);
 
   // Recent events (last 6 from store, no API call, live)
-  const recentEvents = useEventBusStore((s) => s.events.slice(-6).reverse());
+  const recentEvents = useEventBusStore(useShallow((s) => s.events.slice(-6).reverse()));
 
   const approveMutation = useMutation({
     mutationFn: approveItem,

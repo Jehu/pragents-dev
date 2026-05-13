@@ -8,9 +8,11 @@ import { StatusPill, ProgressBar, EmptyState } from '../../components/ui/index.j
 // ---------------------------------------------------------------------------
 
 export interface MemoryStats {
-  totalFacts: number;
-  byScope: Record<string, number>;
-  topCategories: { name: string; count: number }[];
+  total?: number;
+  totalFacts?: number;
+  byScope: Record<string, number> | { scope: string; count: number }[];
+  topCategories?: { name: string; count: number }[];
+  byCategory?: { category: string; count: number }[];
 }
 
 export interface MemoryFact {
@@ -50,7 +52,10 @@ export function scopeToStatusType(
 }
 
 export function relativeTime(isoString: string): string {
-  const diff = Math.floor((Date.now() - new Date(isoString).getTime()) / 1000);
+  if (!isoString) return '—';
+  const ms = new Date(isoString).getTime();
+  if (isNaN(ms)) return '—';
+  const diff = Math.floor((Date.now() - ms) / 1000);
   if (diff < 60) return `${diff}s ago`;
   const m = Math.floor(diff / 60);
   if (m < 60) return `${m}m ago`;
@@ -112,8 +117,13 @@ function MemoryView() {
     enabled: debouncedQuery.length === 0,
   });
 
-  const byScopeEntries = Object.entries(stats?.byScope ?? {});
-  const topCategories = (stats?.topCategories ?? []).slice(0, 5);
+  const totalFacts = stats?.totalFacts ?? stats?.total ?? 0;
+  const rawByScope = stats?.byScope ?? {};
+  const byScopeEntries: [string, number][] = Array.isArray(rawByScope)
+    ? (rawByScope as { scope: string; count: number }[]).map((e) => [e.scope, e.count])
+    : Object.entries(rawByScope as Record<string, number>);
+  const rawCats = stats?.topCategories ?? (stats?.byCategory ?? []).map((c) => ({ name: c.category, count: c.count }));
+  const topCategories = rawCats.slice(0, 5);
   const maxScopeCount = byScopeEntries.reduce((m, [, v]) => Math.max(m, v), 0);
   const maxCatCount = topCategories.reduce((m, c) => Math.max(m, c.count), 0);
 
@@ -136,9 +146,9 @@ function MemoryView() {
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-xl font-bold text-zinc-100">
           Memory
-          {stats?.totalFacts != null && (
+          {totalFacts > 0 && (
             <span className="ml-2 text-sm font-normal text-zinc-500">
-              {stats.totalFacts.toLocaleString()} facts
+              {totalFacts.toLocaleString()} facts
             </span>
           )}
         </h2>

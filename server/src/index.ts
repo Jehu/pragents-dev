@@ -248,10 +248,11 @@ export async function startServer() {
   const wsInject = await setupWebSocket(app, eventBuffer, () => process.env.PRAGENTS_API_TOKEN || apiToken);
   if (wsInject) logger.info('WebSocket endpoint ready');
 
-  app.route('/', createHealthRoute(memory));
+  app.route('/api/v1', createHealthRoute(memory));
   app.route('/api/v1/projects', createProjectsRoute(config));
-  app.route('/api/v1/agents', createAgentsRoute(agents, sessionMgr));
-  app.route('/api/v1/agents', createAgentDetailRoute(agents, sessionMgr, eventBuffer, tracker));
+  const agentsRouter = createAgentsRoute(agents, sessionMgr);
+  agentsRouter.route('/', createAgentDetailRoute(agents, sessionMgr, eventBuffer, tracker));
+  app.route('/api/v1/agents', agentsRouter);
   app.route('/api/v1/tasks', createTasksRoute(tracker, agents, sessionMgr, eventBuffer));
   app.route('/api/v1/workflows', createWorkflowsRoute(wfRegistry, wfEngine, wfTracker));
   app.route('/api/v1/nl', createNLRoutes(decomposer, agents, planStore, planExecutor));

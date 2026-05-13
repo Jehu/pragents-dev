@@ -33,7 +33,8 @@ export function formatBytes(bytes: number): string {
 }
 
 export function formatUptime(seconds: number): string {
-  if (seconds < 60) return `${seconds}s`;
+  const s = Math.floor(seconds);
+  if (s < 60) return `${s}s`;
   const m = Math.floor(seconds / 60) % 60;
   const h = Math.floor(seconds / 3600) % 24;
   const d = Math.floor(seconds / 86400);

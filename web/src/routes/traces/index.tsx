@@ -9,7 +9,7 @@ import { MasterDetail, EmptyState } from '../../components/ui/index.js';
 // ---------------------------------------------------------------------------
 
 export interface TraceEvent {
-  id: string;
+  id: string | number;
   type: string;
   agentId?: string;
   projectId?: string;
@@ -45,8 +45,8 @@ export function relativeTime(isoString: string): string {
   return `${Math.floor(h / 24)}d ago`;
 }
 
-export function truncateId(id: string, len = 8): string {
-  return id.slice(0, len);
+export function truncateId(id: string | number, len = 8): string {
+  return String(id).slice(0, len);
 }
 
 export const PAGE_SIZE = 50;
@@ -169,10 +169,10 @@ function TracesList() {
           <div>
             {displayEvents.map((e) => (
               <button
-                key={e.id}
-                onClick={() => setSelectedId(e.id)}
+                key={String(e.id)}
+                onClick={() => setSelectedId(String(e.id))}
                 className={`w-full text-left px-3 py-2.5 border-b border-zinc-800 hover:bg-zinc-800/40 transition-colors ${
-                  selectedId === e.id ? 'bg-indigo-500/10 border-l-2 border-l-indigo-400' : ''
+                  selectedId === String(e.id) ? 'bg-indigo-500/10 border-l-2 border-l-indigo-400' : ''
                 }`}
               >
                 <div className="flex items-center gap-1.5 mb-0.5">
