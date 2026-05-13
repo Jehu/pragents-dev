@@ -5,6 +5,7 @@ import type { ConversationManager } from '../../chat/manager.js';
 import type { IntentClassifier } from '../../chat/intent-classifier.js';
 import type { NLDecomposer } from '../../nl/decomposer.js';
 import type { ToolExecutor } from '../../agents/tool-executor.js';
+import type { TaskTracker } from '../../tasks/tracker.js';
 import type { ResolvedAgent } from '../../config/schema.js';
 import type { EventBuffer } from '../../events/buffer.js';
 import { ChatRequestSchema, SSEEventSchema } from '../../chat/schema.js';
@@ -14,7 +15,11 @@ import { logger } from '../../logging/index.js';
 const HEARTBEAT_INTERVAL_MS = 15_000;
 const TOOL_TIMEOUT_MS = 30_000;
 const DECOMPOSER_TIMEOUT_MS = 120_000;
+const TASK_COMPLETION_TIMEOUT_MS = 10 * 60_000; // 10 min per dispatched step
+const TASK_POLL_INTERVAL_MS = 500;
 const MAX_BODY_SIZE = 50 * 1024 * 1024; // 50 MB
+
+const TERMINAL_TASK_STATUSES = new Set(['complete', 'failed', 'needs_review', 'blocked']);
 
 /**
  * Race a promise against a timeout. Rejects with the provided message if the
@@ -30,6 +35,35 @@ function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promi
 }
 
 /**
+ * Poll the tracker until the given task reaches a terminal status. Sequential
+ * step execution lets the confirm path honour declared dependsOn ordering even
+ * though the create_task tool itself has no dependency awareness.
+ */
+async function waitForTaskCompletion(
+  tracker: TaskTracker,
+  taskId: string,
+  timeoutMs: number,
+  pollIntervalMs: number,
+  isAborted: () => boolean,
+): Promise<{ status: string; result: string | null; reason: string | null }> {
+  const deadline = Date.now() + timeoutMs;
+  while (!isAborted()) {
+    const task = tracker.get(taskId);
+    if (!task) {
+      throw new Error(`Task ${taskId} not found while waiting for completion`);
+    }
+    if (TERMINAL_TASK_STATUSES.has(task.status)) {
+      return { status: task.status, result: task.result, reason: task.reason };
+    }
+    if (Date.now() >= deadline) {
+      throw new Error(`Task ${taskId} did not reach terminal state within ${timeoutMs}ms`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+  }
+  throw new Error(`Wait for task ${taskId} aborted`);
+}
+
+/**
  * Create the Chat SSE route.
  *
  * Factory pattern matching the rest of the API routes — injects all
@@ -42,6 +76,7 @@ export function createChatRoute(
   toolExecutor: ToolExecutor,
   agents: ResolvedAgent[],
   eventBuffer: EventBuffer,
+  tracker: TaskTracker,
 ): Hono {
   const app = new Hono();
 
@@ -225,15 +260,27 @@ export function createChatRoute(
 
               if (confirm) {
                 // ── Confirm path: dispatch each plan step as a task ──
+                //
+                // Steps run sequentially (await each task to terminal state
+                // before dispatching the next). This linearisation honours any
+                // dependsOn the LLM produced — create_task itself has no
+                // dependency awareness, so the chat route enforces it here.
 
                 // Resolve projectId from conversation if not in request
                 const conv = conversationManager.getConversation(convId);
-                const effectiveProjectId = projectId || conv?.projectId || undefined;
+                const effectiveProjectId = projectId || conv?.projectId;
+
+                if (!effectiveProjectId) {
+                  throw new ConfirmError(
+                    'projectId is required to execute a plan — provide it in the request or via the conversation',
+                  );
+                }
 
                 const stepResults: Array<{
                   agentId: string;
                   description: string;
                   taskId?: string;
+                  status?: string;
                   error?: string;
                 }> = [];
 
@@ -253,6 +300,7 @@ export function createChatRoute(
                   });
 
                   let result: string;
+                  let dispatchedTaskId: string | undefined;
                   try {
                     result = await toolExecutor.execute('create_task', {
                       projectId: effectiveProjectId,
@@ -260,34 +308,74 @@ export function createChatRoute(
                       description: step.description,
                     });
                     const parsed = JSON.parse(result);
-                    stepResults.push({
-                      agentId: step.agentId,
-                      description: step.description,
-                      taskId: parsed.taskId,
-                    });
+                    dispatchedTaskId = parsed.taskId;
                   } catch (err) {
                     const errorMsg = err instanceof Error ? err.message : String(err);
-                    result = `Error: ${errorMsg}`;
+                    result = JSON.stringify({ error: errorMsg });
                     stepResults.push({
                       agentId: step.agentId,
                       description: step.description,
                       error: errorMsg,
                     });
+                    emit({
+                      type: 'tool_result',
+                      data: { tool: 'create_task', result },
+                    });
+                    continue;
                   }
 
                   emit({
                     type: 'tool_result',
                     data: { tool: 'create_task', result },
                   });
+
+                  if (!dispatchedTaskId) {
+                    stepResults.push({
+                      agentId: step.agentId,
+                      description: step.description,
+                      error: 'create_task returned no taskId',
+                    });
+                    continue;
+                  }
+
+                  try {
+                    const final = await waitForTaskCompletion(
+                      tracker,
+                      dispatchedTaskId,
+                      TASK_COMPLETION_TIMEOUT_MS,
+                      TASK_POLL_INTERVAL_MS,
+                      () => streamClosed,
+                    );
+                    stepResults.push({
+                      agentId: step.agentId,
+                      description: step.description,
+                      taskId: dispatchedTaskId,
+                      status: final.status,
+                      ...(final.status !== 'complete'
+                        ? { error: final.reason || `task ended in status ${final.status}` }
+                        : {}),
+                    });
+                  } catch (err) {
+                    const errorMsg = err instanceof Error ? err.message : String(err);
+                    stepResults.push({
+                      agentId: step.agentId,
+                      description: step.description,
+                      taskId: dispatchedTaskId,
+                      error: errorMsg,
+                    });
+                  }
                 }
 
                 // Emit summary message
-                const summaryLines = stepResults.map((r, i) =>
-                  r.error
-                    ? `${i + 1}. ${r.agentId}: ${r.description} — FAILED: ${r.error}`
-                    : `${i + 1}. ${r.agentId}: ${r.description} — dispatched (${r.taskId})`,
-                );
-                const summary = `Plan executed: ${stepResults.length} task(s) dispatched.\n${summaryLines.join('\n')}`;
+                const summaryLines = stepResults.map((r, i) => {
+                  const idRef = r.taskId ? ` (${r.taskId})` : '';
+                  if (r.error) {
+                    return `${i + 1}. ${r.agentId}: ${r.description} — FAILED${idRef}: ${r.error}`;
+                  }
+                  return `${i + 1}. ${r.agentId}: ${r.description} — ${r.status || 'dispatched'}${idRef}`;
+                });
+                const successCount = stepResults.filter((r) => !r.error).length;
+                const summary = `Plan executed: ${successCount}/${stepResults.length} step(s) completed.\n${summaryLines.join('\n')}`;
 
                 emit({
                   type: 'message',
@@ -335,6 +423,7 @@ export function createChatRoute(
             const code =
               err instanceof ToolError ? 'TOOL_ERROR'
               : err instanceof DecomposerError ? 'DECOMPOSER_ERROR'
+              : err instanceof ConfirmError ? 'CONFIRM_ERROR'
               : 'INTERNAL_ERROR';
 
             // For INTERNAL_ERROR, don't leak raw error details
@@ -398,6 +487,13 @@ class DecomposerError extends Error {
   constructor(message: string) {
     super(`Decomposer error: ${message}`);
     this.name = 'DecomposerError';
+  }
+}
+
+class ConfirmError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ConfirmError';
   }
 }
 

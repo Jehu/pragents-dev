@@ -19,6 +19,28 @@ export const PlanSchema = z.object({
 export type Plan = z.infer<typeof PlanSchema>;
 export type PlanStep = z.infer<typeof PlanStepSchema>;
 
+/**
+ * Normalise `dependsOn` before Zod validation. The LLM occasionally emits
+ * numeric strings (`"0"`) or string arrays (`["1"]`) where the schema wants
+ * integers. Mutates `parsed` in place and returns it.
+ */
+export function normalizePlan(parsed: any): any {
+  if (parsed?.steps && Array.isArray(parsed.steps)) {
+    for (const step of parsed.steps) {
+      if (step.dependsOn != null) {
+        if (typeof step.dependsOn === 'string' && /^\d+$/.test(step.dependsOn)) {
+          step.dependsOn = parseInt(step.dependsOn, 10);
+        } else if (Array.isArray(step.dependsOn)) {
+          step.dependsOn = step.dependsOn.map((v: any) =>
+            typeof v === 'string' && /^\d+$/.test(v) ? parseInt(v, 10) : v,
+          );
+        }
+      }
+    }
+  }
+  return parsed;
+}
+
 export class NLDecomposer {
   async decompose(prompt: string, agents: ResolvedAgent[]): Promise<Plan> {
     if (agents.length === 0) throw new Error('No agents configured');
@@ -122,24 +144,6 @@ Rules: Use agentId from the provided list. Order steps logically. Keep descripti
         if (!retryMatch) throw new Error('LLM failed to produce valid JSON after retry');
         parsed = JSON.parse(retryMatch[0]);
       }
-
-      // Normalize dependsOn BEFORE Zod validation: LLM may return strings ("0") or string arrays (["1"])
-      const normalizePlan = (p: any) => {
-        if (p.steps && Array.isArray(p.steps)) {
-          for (const step of p.steps) {
-            if (step.dependsOn != null) {
-              if (typeof step.dependsOn === 'string' && /^\d+$/.test(step.dependsOn)) {
-                step.dependsOn = parseInt(step.dependsOn, 10);
-              } else if (Array.isArray(step.dependsOn)) {
-                step.dependsOn = step.dependsOn.map((v: any) =>
-                  typeof v === 'string' && /^\d+$/.test(v) ? parseInt(v, 10) : v,
-                );
-              }
-            }
-          }
-        }
-        return p;
-      };
 
       const plan = PlanSchema.parse(normalizePlan(parsed));
       const validIds = new Set(agents.map((a) => a.id));

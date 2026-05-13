@@ -124,6 +124,8 @@ describe('Chat SSE Route — POST /api/v1/chat', () => {
   let mockToolExecutor: ToolExecutor;
   let agents: ResolvedAgent[];
   let eventBuffer: MockEventBuffer;
+  let mockTracker: { get: ReturnType<typeof vi.fn> };
+  let createdTaskCounter: number;
 
   beforeAll(() => {
     initDb(join(tmpDir, 'test.db'));
@@ -145,14 +147,32 @@ describe('Chat SSE Route — POST /api/v1/chat', () => {
     } as any;
 
     // Mock Tool Executor — return proper responses based on tool name
+    createdTaskCounter = 0;
     mockToolExecutor = {
       execute: vi.fn().mockImplementation((tool: string) => {
         if (tool === 'create_task') {
-          return JSON.stringify({ taskId: 'task-mock-1', status: 'dispatched' });
+          createdTaskCounter += 1;
+          return JSON.stringify({ taskId: `task-mock-${createdTaskCounter}`, status: 'dispatched' });
         }
         return JSON.stringify([]);
       }),
     } as any;
+
+    // Mock Tracker — by default every task is already complete on first poll
+    mockTracker = {
+      get: vi.fn().mockImplementation((taskId: string) => ({
+        id: taskId,
+        projectId: 'p1',
+        agentId: 'dev',
+        status: 'complete',
+        description: 'mock',
+        result: 'ok',
+        reason: null,
+        externalRef: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      })),
+    };
   });
   afterAll(() => {
     closeDb();
@@ -167,6 +187,7 @@ describe('Chat SSE Route — POST /api/v1/chat', () => {
       mockToolExecutor,
       agents,
       eventBuffer as any,
+      mockTracker as any,
     );
   }
 
@@ -438,14 +459,30 @@ describe('Chat SSE Route — POST /api/v1/chat', () => {
   });
 
   // ---- R7 / F2 Steps 6-8: confirm / modifications flow ----
+
+  // Re-install the create_task mock — earlier tests replace `execute` globally
+  // via `mockResolvedValue(...)`, which strips the per-tool branching.
+  function installCreateTaskMock() {
+    let n = 0;
+    (mockToolExecutor.execute as any).mockImplementation((tool: string) => {
+      if (tool === 'create_task') {
+        n += 1;
+        return JSON.stringify({ taskId: `task-mock-${n}`, status: 'dispatched' });
+      }
+      return JSON.stringify([]);
+    });
+  }
+
   it('passes modifications context to decomposer when confirm:true', async () => {
     (mockClassifier.classify as any).mockResolvedValue({ tool: 'complex', args: {} });
+    installCreateTaskMock();
     const app = createApp();
     const res = await app.request('/', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         message: 'Bau eine Landing Page',
+        projectId: 'p1',
         confirm: true,
         modifications: 'Füg SEO-Optimierung hinzu',
       }),
@@ -463,24 +500,167 @@ describe('Chat SSE Route — POST /api/v1/chat', () => {
 
     // Confirm path dispatches tasks, not plan_proposal
     const toolCalls = events.filter((e) => e.type === 'tool_call');
-    expect(toolCalls.length).toBeGreaterThan(0);
-    expect(toolCalls[0].data.tool).toBe('create_task');
+    expect(toolCalls.length).toBe(2); // decomposer mock returns 2 steps
+    expect(toolCalls.every((tc) => tc.data.tool === 'create_task')).toBe(true);
+    // Each tool_call carries the resolved projectId
+    expect(toolCalls.every((tc) => tc.data.args.projectId === 'p1')).toBe(true);
 
     // Should emit a text summary message
     const textMsg = events.find(
       (e) => e.type === 'message' && e.data?.subtype === 'text',
     );
     expect(textMsg).toBeTruthy();
-    expect(textMsg!.data.content).toContain('dispatched');
+    expect(textMsg!.data.content).toContain('2/2');
+    expect(textMsg!.data.content).toContain('complete');
+  });
+
+  it('dispatches each plan step sequentially in declaration order', async () => {
+    (mockClassifier.classify as any).mockResolvedValue({ tool: 'complex', args: {} });
+    installCreateTaskMock();
+    mockTracker.get.mockClear();
+    (mockDecomposer.decompose as any).mockResolvedValueOnce({
+      steps: [
+        { description: 'A', agentId: 'dev' },
+        { description: 'B', agentId: 'dev', dependsOn: 0 },
+        { description: 'C', agentId: 'dev', dependsOn: 1 },
+      ],
+    });
+
+    const app = createApp();
+    const res = await app.request('/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: 'Multi-step',
+        projectId: 'p1',
+        confirm: true,
+      }),
+    });
+
+    const text = await readStreamText(res);
+    const events = parseSSEStream(text);
+
+    // 3 tool_calls, in the same order as the plan steps
+    const toolCalls = events.filter((e) => e.type === 'tool_call');
+    expect(toolCalls.map((tc) => tc.data.args.description)).toEqual(['A', 'B', 'C']);
+
+    // Each step's tracker.get was polled at least once before moving on
+    expect(mockTracker.get).toHaveBeenCalledTimes(3);
+
+    // Summary lists all three as complete
+    const textMsg = events.find(
+      (e) => e.type === 'message' && e.data?.subtype === 'text',
+    );
+    expect(textMsg!.data.content).toContain('3/3');
+  });
+
+  it('records step failure when tracker reports failed status', async () => {
+    (mockClassifier.classify as any).mockResolvedValue({ tool: 'complex', args: {} });
+    installCreateTaskMock();
+    (mockDecomposer.decompose as any).mockResolvedValueOnce({
+      steps: [{ description: 'doomed', agentId: 'dev' }],
+    });
+    mockTracker.get.mockReturnValueOnce({
+      id: 'task-mock-1', projectId: 'p1', agentId: 'dev', status: 'failed',
+      description: 'doomed', result: null, reason: 'agent exploded',
+      externalRef: null, createdAt: '', updatedAt: '',
+    });
+
+    const app = createApp();
+    const res = await app.request('/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: 'Run doomed',
+        projectId: 'p1',
+        confirm: true,
+      }),
+    });
+
+    const text = await readStreamText(res);
+    const events = parseSSEStream(text);
+
+    const textMsg = events.find(
+      (e) => e.type === 'message' && e.data?.subtype === 'text',
+    );
+    expect(textMsg!.data.content).toContain('FAILED');
+    expect(textMsg!.data.content).toContain('agent exploded');
+    expect(textMsg!.data.content).toContain('0/1');
+  });
+
+  it('emits CONFIRM_ERROR when projectId cannot be resolved', async () => {
+    (mockClassifier.classify as any).mockResolvedValue({ tool: 'complex', args: {} });
+    const app = createApp();
+    const res = await app.request('/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: 'No project context',
+        confirm: true,
+      }),
+    });
+
+    const text = await readStreamText(res);
+    const events = parseSSEStream(text);
+
+    const errorEvent = events.find((e) => e.type === 'error');
+    expect(errorEvent).toBeTruthy();
+    expect(errorEvent!.data.code).toBe('CONFIRM_ERROR');
+    expect(errorEvent!.data.message).toContain('projectId');
+
+    // Should never have called the tool executor
+    const toolCalls = events.filter((e) => e.type === 'tool_call');
+    expect(toolCalls.length).toBe(0);
+  });
+
+  it('emits tool_result with JSON error and continues when create_task throws', async () => {
+    (mockClassifier.classify as any).mockResolvedValue({ tool: 'complex', args: {} });
+    (mockDecomposer.decompose as any).mockResolvedValueOnce({
+      steps: [
+        { description: 'fails', agentId: 'dev' },
+        { description: 'ok', agentId: 'dev' },
+      ],
+    });
+    (mockToolExecutor.execute as any)
+      .mockImplementationOnce(() => { throw new Error('boom'); })
+      .mockImplementationOnce(() => JSON.stringify({ taskId: 'task-mock-ok', status: 'dispatched' }));
+
+    const app = createApp();
+    const res = await app.request('/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: 'mixed',
+        projectId: 'p1',
+        confirm: true,
+      }),
+    });
+
+    const text = await readStreamText(res);
+    const events = parseSSEStream(text);
+
+    // Two tool_results — first carries a JSON-encoded error, never undefined
+    const toolResults = events.filter((e) => e.type === 'tool_result');
+    expect(toolResults.length).toBe(2);
+    expect(typeof toolResults[0].data.result).toBe('string');
+    expect(JSON.parse(toolResults[0].data.result)).toMatchObject({ error: 'boom' });
+
+    // All SSE events still validate against schema
+    for (const event of events) {
+      const validation = SSEEventSchema.safeParse(event);
+      expect(validation.success).toBe(true);
+    }
   });
 
   it('sends confirm:true without modifications', async () => {
+    installCreateTaskMock();
     const app = createApp();
     const res = await app.request('/', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         message: 'Bau eine Landing Page',
+        projectId: 'p1',
         confirm: true,
       }),
     });

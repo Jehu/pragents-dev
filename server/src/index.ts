@@ -199,6 +199,7 @@ export async function startServer() {
     toolExecutor,
     agents,
     eventBuffer,
+    tracker,
   );
 
   // Build API
