@@ -1,9 +1,6 @@
-import { createAgentSession, DefaultResourceLoader, SessionManager } from '@mariozechner/pi-coding-agent';
-import type { AgentSession, ResourceLoader } from '@mariozechner/pi-coding-agent';
 import type { ResolvedAgent } from '../config/schema.js';
 import { MemoryEngine } from '../memory/engine.js';
 import type { CostTracker } from '../tracking/cost-tracker.js';
-import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { ToolExecutor } from './tool-executor.js';
@@ -11,11 +8,17 @@ import { TOOL_DEFINITIONS } from './tool-definitions.js';
 import { getDb } from '../db/sqlite.js';
 import type { SkillAutoExtractor } from '../skills/auto-extractor.js';
 import { logger } from '../logging/index.js';
+import type { AgentRuntime, SessionHandle as RuntimeSessionHandle } from './runtime/types.js';
+import { PiRuntime } from './runtime/pi-runtime.js';
 
+/**
+ * pragents-side handle around a runtime `SessionHandle`. Carries scheduling
+ * state (idle/keepWarm/stale) that the manager owns, separate from the
+ * runtime's own session object.
+ */
 export interface SessionHandle {
   agentId: string;
-  session: AgentSession;
-  loader: ResourceLoader;
+  runtimeHandle: RuntimeSessionHandle;
   createdAt: number;
   lastActivityAt: number;
   stale?: boolean;
@@ -39,6 +42,7 @@ export class AgentSessionManager {
    * `pool.maxWarmSessions` in pragents.yaml (default 10).
    */
   private maxWarmSessions: number;
+  private runtime: AgentRuntime;
 
   private costTracker: CostTracker | null = null;
   private toolExecutor: ToolExecutor | null = null;
@@ -48,10 +52,12 @@ export class AgentSessionManager {
     memory: MemoryEngine,
     idleTimeoutMs: number = 10 * 60 * 1000,
     maxWarmSessions: number = 10,
+    runtime: AgentRuntime = new PiRuntime(),
   ) {
     this.memory = memory;
     this.idleTimeoutMs = idleTimeoutMs;
     this.maxWarmSessions = maxWarmSessions;
+    this.runtime = runtime;
   }
 
   setToolExecutor(te: ToolExecutor): void {
@@ -74,10 +80,10 @@ export class AgentSessionManager {
     const existing = this.sessions.get(agent.id);
     if (existing) {
       // If session is stale and not currently streaming, dispose and respawn with fresh config
-      if (existing.stale && !existing.session.isStreaming) {
+      if (existing.stale && !existing.runtimeHandle.isStreaming) {
         logger.info({ agentId: agent.id }, 'Restarting stale session with updated config');
         this.persistSessionMessages(agent.id, existing);
-        existing.session.dispose();
+        this.runtime.dispose(existing.runtimeHandle);
         this.sessions.delete(agent.id);
         return this.create(agent);
       }
@@ -102,19 +108,17 @@ export class AgentSessionManager {
   }
 
   private async create(agent: ResolvedAgent): Promise<SessionHandle> {
-    // Create temp dir for SDK session (avoids pi SDK init issues)
-    const tmpDir = join(process.env.HOME || '/tmp', '.pragents', 'sessions', agent.id);
-    const agentDir = join(tmpDir, '.pi', 'agent');
-    mkdirSync(agentDir, { recursive: true });
+    const sessionDir = join(process.env.HOME || '/tmp', '.pragents', 'sessions', agent.id);
 
-    const loader = new DefaultResourceLoader({
-      cwd: tmpDir,
-      agentDir,
-      noExtensions: true,
-      noSkills: true,
-      noPromptTemplates: true,
-      noThemes: true,
-      noContextFiles: true,
+    logger.info({ agentId: agent.id, model: agent.model, projectDir: agent.projectDir }, 'Agent session initializing');
+    if (!agent.projectDir) {
+      logger.error({ agentId: agent.id, config: JSON.stringify(agent) }, 'FATAL: agent.projectDir is undefined');
+    }
+
+    const runtimeHandle = await this.runtime.createSession({
+      id: agent.id,
+      cwd: agent.projectDir,
+      sessionDir,
       systemPromptOverride: (base: string | undefined) => {
         const personality = agent.personality || 'You are a helpful coding agent.';
         const rememberTool = [
@@ -142,26 +146,12 @@ export class AgentSessionManager {
         }
         return prompt;
       },
-    });
-
-    logger.info({ agentId: agent.id, model: agent.model, projectDir: agent.projectDir }, 'Agent session initializing');
-    if (!agent.projectDir) {
-      logger.error({ agentId: agent.id, config: JSON.stringify(agent) }, 'FATAL: agent.projectDir is undefined');
-    }
-    await loader.reload();
-
-    // Need to pass projectDir so agent tools can access actual project files
-    const { session } = await createAgentSession({
-      cwd: agent.projectDir,
-      resourceLoader: loader,
-      sessionManager: SessionManager.inMemory() as any,
-      customTools: this.toolExecutor ? TOOL_DEFINITIONS as any : undefined,
-      // model auto-discovered by pi SDK from configured API keys
+      customTools: this.toolExecutor ? (TOOL_DEFINITIONS as unknown[]) : undefined,
     });
     logger.info({ agentId: agent.id, model: agent.model }, 'Session created');
 
-    // Subscribe to SDK events
-    session.subscribe((event: any) => {
+    // Subscribe to runtime events and fan out to the manager's event callback.
+    this.runtime.subscribe(runtimeHandle, (event) => {
       if (this.onEvent) {
         this.onEvent({
           agentId: agent.id,
@@ -191,8 +181,7 @@ export class AgentSessionManager {
 
     const handle: SessionHandle = {
       agentId: agent.id,
-      session,
-      loader,
+      runtimeHandle,
       createdAt: Date.now(),
       lastActivityAt: Date.now(),
       warm,
@@ -290,11 +279,11 @@ export class AgentSessionManager {
 
     // Capture agent response — skip events, read session state after prompt completes
     const responsePromise = new Promise<string>((resolve, reject) => {
-      const unsubscribe = handle.session.subscribe((event: any) => {
+      const unsubscribe = this.runtime.subscribe(handle.runtimeHandle, (event) => {
         if (event.type === 'agent_end') {
           unsubscribe();
           // Read last assistant message, filtering out thinking blocks
-          const msgs = (handle.session.agent as any)?.state?.messages || [];
+          const msgs = this.runtime.getMessages(handle.runtimeHandle) ?? [];
           let responseText = '';
           for (let i = msgs.length - 1; i >= 0; i--) {
             if (msgs[i].role === 'assistant' && msgs[i].content) {
@@ -314,10 +303,17 @@ export class AgentSessionManager {
         }
         // Handle custom tool calls from the agent
         if (event.type === 'custom_tool_call' && this.toolExecutor) {
-          this.toolExecutor.execute(event.name, event.args || {}, agent).then((result) => {
-            try { (handle.session as any).sendToolResult?.(event.callId, result); } catch {}
+          const name = event.name as string;
+          const args = (event.args as Record<string, unknown>) || {};
+          const callId = event.callId as string;
+          this.toolExecutor.execute(name, args, agent).then((result) => {
+            this.runtime.sendToolResult(handle.runtimeHandle, callId, result);
           }).catch((err) => {
-            try { (handle.session as any).sendToolResult?.(event.callId, `Error: ${err?.message || String(err)}`); } catch {}
+            this.runtime.sendToolResult(
+              handle.runtimeHandle,
+              callId,
+              `Error: ${err?.message || String(err)}`,
+            );
           });
         }
       });
@@ -328,7 +324,7 @@ export class AgentSessionManager {
       }, 10 * 60 * 1000);
     });
 
-    await handle.session.prompt(task + contextStr);
+    await this.runtime.prompt(handle.runtimeHandle, task + contextStr);
     handle.lastActivityAt = Date.now();
     const response = await responsePromise;
 
@@ -400,12 +396,15 @@ export class AgentSessionManager {
 
   /**
    * Persist the full message history for a session before it is disposed.
-   * Called from disposeIdle() and disposeAll() before session.dispose().
+   * Called from disposeIdle() and disposeAll() before runtime.dispose().
+   *
+   * If the runtime cannot expose messages (returns `undefined`), we log a
+   * structured warning and skip — see issue #31.
    */
   private persistSessionMessages(sessionId: string, handle: SessionHandle): void {
     try {
-      const messages = (handle.session.agent as any)?.state?.messages;
-      if (messages === undefined || messages === null) {
+      const messages = this.runtime.getMessages(handle.runtimeHandle);
+      if (messages === undefined) {
         logger.warn(
           { accessor: 'session.agent.state.messages', agentId: handle.agentId },
           'pi-SDK session messages accessor returned undefined — skipping persist',
@@ -454,18 +453,18 @@ export class AgentSessionManager {
       // restart (see #35) still applies via getOrCreate(), so a warm agent
       // gets a fresh session on the next dispatch after config reload.
       if (handle.warm) continue;
-      if (!handle.session.isStreaming && now - handle.lastActivityAt > this.idleTimeoutMs) {
+      if (!handle.runtimeHandle.isStreaming && now - handle.lastActivityAt > this.idleTimeoutMs) {
         this.persistSessionMessages(id, handle);
 
         // Try auto-extraction after persistence (fire-and-forget, R9)
         if (this.autoExtractor) {
-          const messages = (handle.session.agent as any)?.state?.messages;
+          const messages = this.runtime.getMessages(handle.runtimeHandle);
           this.autoExtractor.tryExtract(id, messages).catch((err: any) =>
             logger.error({ sessionId: id, err: err?.message || err }, 'Auto-extraction error for session'),
           );
         }
 
-        handle.session.dispose();
+        this.runtime.dispose(handle.runtimeHandle);
         this.sessions.delete(id);
         this.memory.compress(id, id);
         disposed.push(id);
@@ -477,7 +476,7 @@ export class AgentSessionManager {
 
   async disposeAll(): Promise<void> {
     for (const [id, handle] of this.sessions) {
-      if (handle.session.isStreaming) {
+      if (handle.runtimeHandle.isStreaming) {
         // Wait briefly for current turn to finish
         await new Promise((resolve) => setTimeout(resolve, 5000));
       }
@@ -485,13 +484,13 @@ export class AgentSessionManager {
 
       // Try auto-extraction after persistence (fire-and-forget, R9)
       if (this.autoExtractor) {
-        const messages = (handle.session.agent as any)?.state?.messages;
+        const messages = this.runtime.getMessages(handle.runtimeHandle);
         this.autoExtractor.tryExtract(id, messages).catch((err: any) =>
           logger.error({ sessionId: id, err: err?.message || err }, 'Auto-extraction error for session'),
         );
       }
 
-      handle.session.dispose();
+      this.runtime.dispose(handle.runtimeHandle);
       this.memory.compress(id, id);
     }
     this.sessions.clear();
@@ -504,6 +503,6 @@ export class AgentSessionManager {
   getAgentStatus(agentId: string): 'busy' | 'idle' | 'offline' {
     const handle = this.sessions.get(agentId);
     if (!handle) return 'offline';
-    return handle.session.isStreaming ? 'busy' : 'idle';
+    return handle.runtimeHandle.isStreaming ? 'busy' : 'idle';
   }
 }

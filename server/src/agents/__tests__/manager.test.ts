@@ -397,7 +397,7 @@ describe('AgentSessionManager.markStale', () => {
 
     const handle = await mgr.getOrCreate(mockAgent);
     expect(mockSession.dispose).toHaveBeenCalledTimes(1);
-    expect(handle.session).toBe(newSession);
+    expect((handle.runtimeHandle.raw as any).session).toBe(newSession);
     expect(handle.stale).toBeFalsy();
   });
 
@@ -423,7 +423,7 @@ describe('AgentSessionManager.markStale', () => {
 
     const handle = await mgr.getOrCreate(mockAgent);
     expect(mockSession.dispose).not.toHaveBeenCalled();
-    expect(handle.session).toBe(mockSession);
+    expect((handle.runtimeHandle.raw as any).session).toBe(mockSession);
     expect(handle.stale).toBe(true);
   });
 
@@ -829,7 +829,7 @@ describe('AgentSessionManager keepWarm + session pool', () => {
 
     const warmAgent: ResolvedAgent = { ...mockAgent, id: 'pm@stale-warm', keepWarm: true };
     const first = await mgr.getOrCreate(warmAgent);
-    expect(first.session).toBe(session1);
+    expect((first.runtimeHandle.raw as any).session).toBe(session1);
     expect(first.warm).toBe(true);
 
     // Simulate config reload: agent's session marked stale.
@@ -838,7 +838,7 @@ describe('AgentSessionManager keepWarm + session pool', () => {
     // Next dispatch/getOrCreate must dispose the stale warm session and spawn a fresh one.
     const second = await mgr.getOrCreate(warmAgent);
     expect(session1.dispose).toHaveBeenCalledTimes(1);
-    expect(second.session).toBe(session2);
+    expect((second.runtimeHandle.raw as any).session).toBe(session2);
     expect(second.warm).toBe(true);
   });
 });
