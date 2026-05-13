@@ -155,7 +155,7 @@ describe('ToolExecutor', () => {
     const deps = makeDeps();
     const executor = new ToolExecutor(deps);
     const result = await executor.execute('search_memory', { query: 'test', scope: 'project' });
-    expect(deps.memory.recall).toHaveBeenCalledWith('test', 'project', 10);
+    expect(deps.memory.recall).toHaveBeenCalledWith('test', 'project', 10, undefined);
     const parsed = JSON.parse(result);
     expect(parsed).toHaveLength(1);
   });
