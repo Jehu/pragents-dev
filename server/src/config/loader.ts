@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, watch } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse as parseYaml } from 'yaml';
@@ -73,4 +73,49 @@ export function loadConfig(configPath?: string): LoadedConfig {
   const agents = resolveAllAgents(config);
 
   return { config, agents };
+}
+
+/**
+ * Watch `pragents.yaml` for changes and call `onReload` with the new config
+ * whenever the file changes. Returns a cleanup function to stop watching.
+ *
+ * @param onReload - called with the new agents list and the set of changed agent IDs
+ * @param configPath - optional override path (same default as loadConfig)
+ */
+export function watchConfig(
+  onReload: (agents: ResolvedAgent[], changedAgentIds: Set<string>) => void,
+  configPath?: string,
+): () => void {
+  const paths = configPath
+    ? [resolve(configPath)]
+    : DEFAULT_CONFIG_PATHS;
+
+  // Pick the first path that was used by loadConfig
+  const watchPath = paths[0];
+
+  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  let previousAgentIds: Set<string> = new Set();
+
+  const watcher = watch(watchPath, () => {
+    if (debounceTimer) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      try {
+        const { agents } = loadConfig(configPath);
+        const newAgentIds = new Set(agents.map((a) => a.id));
+        // Changed = any agent that existed before (stale config is only relevant for
+        // sessions that were already spawned, so we mark all previously-known agents)
+        const changedIds = new Set([...previousAgentIds].filter((id) => newAgentIds.has(id)));
+        // Also mark new agents that weren't in the old set (spawned fresh anyway)
+        previousAgentIds = newAgentIds;
+        onReload(agents, changedIds);
+      } catch {
+        // Malformed YAML mid-save — ignore and retry on next change
+      }
+    }, 500);
+  });
+
+  return () => {
+    if (debounceTimer) clearTimeout(debounceTimer);
+    watcher.close();
+  };
 }

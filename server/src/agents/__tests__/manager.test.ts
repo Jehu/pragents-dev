@@ -225,6 +225,86 @@ describe('Auto-fact collection in dispatch', () => {
   });
 });
 
+describe('AgentSessionManager.markStale', () => {
+  const tmpDir = mkdtempSync(join(tmpdir(), 'pragents-stale-test-'));
+
+  beforeAll(() => {
+    initDb(join(tmpDir, 'test.db'));
+  });
+
+  afterAll(() => {
+    closeDb();
+    rmSync(tmpDir, { recursive: true });
+  });
+
+  it('markStale sets stale flag and triggers respawn on next getOrCreate', async () => {
+    const { createAgentSession, DefaultResourceLoader } = await import('@mariozechner/pi-coding-agent');
+    const mockSession = {
+      subscribe: vi.fn(() => () => {}),
+      prompt: vi.fn().mockResolvedValue(undefined),
+      dispose: vi.fn(),
+      isStreaming: false,
+      agent: { state: { messages: [] } },
+    };
+    (createAgentSession as any).mockResolvedValue({ session: mockSession });
+    (DefaultResourceLoader as any).mockImplementation(function () {
+      return { reload: vi.fn().mockResolvedValue(undefined) };
+    });
+
+    const memory = new MemoryEngine(10);
+    const mgr = new AgentSessionManager(memory);
+
+    await mgr.getOrCreate(mockAgent);
+    mgr.markStale(mockAgent.id);
+
+    const newSession = {
+      subscribe: vi.fn(() => () => {}),
+      prompt: vi.fn().mockResolvedValue(undefined),
+      dispose: vi.fn(),
+      isStreaming: false,
+      agent: { state: { messages: [] } },
+    };
+    (createAgentSession as any).mockResolvedValue({ session: newSession });
+
+    const handle = await mgr.getOrCreate(mockAgent);
+    expect(mockSession.dispose).toHaveBeenCalledTimes(1);
+    expect(handle.session).toBe(newSession);
+    expect(handle.stale).toBeFalsy();
+  });
+
+  it('markStale does not kill a streaming session immediately', async () => {
+    const { createAgentSession, DefaultResourceLoader } = await import('@mariozechner/pi-coding-agent');
+    const mockSession = {
+      subscribe: vi.fn(() => () => {}),
+      prompt: vi.fn().mockResolvedValue(undefined),
+      dispose: vi.fn(),
+      isStreaming: true,
+      agent: { state: { messages: [] } },
+    };
+    (createAgentSession as any).mockResolvedValue({ session: mockSession });
+    (DefaultResourceLoader as any).mockImplementation(function () {
+      return { reload: vi.fn().mockResolvedValue(undefined) };
+    });
+
+    const memory = new MemoryEngine(10);
+    const mgr = new AgentSessionManager(memory);
+
+    await mgr.getOrCreate(mockAgent);
+    mgr.markStale(mockAgent.id);
+
+    const handle = await mgr.getOrCreate(mockAgent);
+    expect(mockSession.dispose).not.toHaveBeenCalled();
+    expect(handle.session).toBe(mockSession);
+    expect(handle.stale).toBe(true);
+  });
+
+  it('markStale on unknown agentId is a no-op', () => {
+    const memory = new MemoryEngine(10);
+    const mgr = new AgentSessionManager(memory);
+    expect(() => mgr.markStale('nonexistent@agent')).not.toThrow();
+  });
+});
+
 describe('AgentSessionManager auto-extraction hooks', () => {
   const tmpDir = mkdtempSync(join(tmpdir(), 'pragents-autoext-test-'));
 

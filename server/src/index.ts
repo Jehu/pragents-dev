@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { serve } from '@hono/node-server';
-import { loadConfig } from './config/loader.js';
+import { loadConfig, watchConfig } from './config/loader.js';
 import { initDb, closeDb, getDb } from './db/sqlite.js';
 import { MemoryEngine } from './memory/engine.js';
 import { AgentSessionManager } from './agents/manager.js';
@@ -137,6 +137,20 @@ export async function startServer() {
     try { watch(dir, debouncedReload); } catch {}
   }
   logger.info('Hot-reload watchers active');
+
+  // Config hot-reload: mark affected agent sessions as stale on pragents.yaml change
+  try {
+    watchConfig((_agents, changedAgentIds) => {
+      for (const agentId of changedAgentIds) {
+        sessionMgr.markStale(agentId);
+      }
+      if (changedAgentIds.size > 0) {
+        logger.info({ agentIds: [...changedAgentIds] }, 'Config reloaded — sessions marked stale');
+      }
+    });
+  } catch {
+    // Config file may not exist yet (e.g. in tests) — skip watcher
+  }
 
   const wfEngine = new WorkflowEngine(wfTracker, router, sessionMgr, agents, eventBuffer);
   const decomposer = new NLDecomposer();
