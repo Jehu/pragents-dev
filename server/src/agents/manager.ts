@@ -236,7 +236,7 @@ export class AgentSessionManager {
         }
         // Handle custom tool calls from the agent
         if (event.type === 'custom_tool_call' && this.toolExecutor) {
-          this.toolExecutor.execute(event.name, event.args || {}).then((result) => {
+          this.toolExecutor.execute(event.name, event.args || {}, agent).then((result) => {
             try { (handle.session as any).sendToolResult?.(event.callId, result); } catch {}
           }).catch((err) => {
             try { (handle.session as any).sendToolResult?.(event.callId, `Error: ${err?.message || String(err)}`); } catch {}

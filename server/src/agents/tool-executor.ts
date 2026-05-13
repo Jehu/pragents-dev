@@ -31,7 +31,7 @@ export interface ToolExecutorDeps {
 export class ToolExecutor {
   constructor(private deps: ToolExecutorDeps) {}
 
-  async execute(toolName: string, args: Record<string, unknown>): Promise<string> {
+  async execute(toolName: string, args: Record<string, unknown>, agentContext?: ResolvedAgent): Promise<string> {
     try {
       switch (toolName) {
         case 'query_tasks': {
@@ -96,13 +96,14 @@ export class ToolExecutor {
         }
         case 'search_memory': {
           const { query, scope, limit } = args as { query: string; scope?: string; limit?: number };
-          const facts = await this.deps.memory.recall(query, scope || 'project', limit || 10);
+          const facts = await this.deps.memory.recall(query, scope || 'project', limit || 10, agentContext);
           return JSON.stringify(facts);
         }
         case 'remember_fact': {
           const { content, category, scope } = args as { content: string; category: string; scope: string };
-          const id = await (this.deps.memory.remember as any)(scope || 'project', category, content, 'tool');
-          return JSON.stringify({ id, status: 'remembered' });
+          const agentId = agentContext?.id || 'tool';
+          const fact = this.deps.memory.remember(scope || 'project', category, content, agentId, agentContext);
+          return JSON.stringify({ id: fact.id, status: 'remembered' });
         }
         case 'list_skills': {
           const skills = this.deps.skills.list();

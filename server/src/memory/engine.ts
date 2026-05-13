@@ -4,6 +4,7 @@ import type { VectorStore } from './vector-store/interface.js';
 import { SimpleVectorStore } from './vector-store/simple.js';
 import { LanceDbVectorStore, type EmbeddingConfig } from './vector-store/lancedb.js';
 import { logger } from '../logging/index.js';
+import type { ResolvedAgent } from '../config/schema.js';
 
 export interface Fact {
   id: string;
@@ -65,7 +66,14 @@ export class MemoryEngine {
   }
 
   // Long-term: facts
-  remember(scope: string, category: string, content: string, agentId: string): Fact {
+  remember(scope: string, category: string, content: string, agentId: string, agentContext?: ResolvedAgent): Fact {
+    if (agentContext) {
+      const allowed = canWrite(agentContext, scope);
+      if (!allowed) {
+        logger.warn({ agentId: agentContext.id, scope }, 'Memory write blocked by scope policy');
+        throw new Error('Memory scope violation');
+      }
+    }
     const db = getDb();
     const id = randomUUID();
     db.prepare(
@@ -76,7 +84,14 @@ export class MemoryEngine {
     return { id, scope, category, content, agentId, createdAt: new Date().toISOString() };
   }
 
-  async recall(query: string, scope: string, limit: number = 10): Promise<Fact[]> {
+  async recall(query: string, scope: string, limit: number = 10, agentContext?: ResolvedAgent): Promise<Fact[]> {
+    if (agentContext) {
+      const allowed = canRead(agentContext, scope);
+      if (!allowed) {
+        logger.warn({ agentId: agentContext.id, scope }, 'Memory read blocked by scope policy');
+        return [];
+      }
+    }
     const db = getDb();
 
     // For project scopes, also include company-scope facts (cross-project visibility)
@@ -187,6 +202,44 @@ export class MemoryEngine {
   clear(): void {
     this.shortTerm.clearAll();
   }
+}
+
+/**
+ * Determine if an agent's memory policy allows writing to the given scope.
+ *
+ * - 'company' scope requires `memory.company === 'read/write'`
+ * - 'agent' scope is always allowed (own private scope)
+ * - any other scope is treated as a project scope and requires `memory.project === 'read/write'`
+ */
+function canWrite(agent: ResolvedAgent, scope: string): boolean {
+  const mem = agent.memory;
+  if (scope === 'company') {
+    return mem.company === 'read/write';
+  }
+  if (scope === 'agent') {
+    return true;
+  }
+  // project scope
+  return mem.project === 'read/write';
+}
+
+/**
+ * Determine if an agent's memory policy allows reading from the given scope.
+ *
+ * - 'company' scope requires `memory.company` to be set (read or read/write)
+ * - 'agent' scope is always allowed (own private scope)
+ * - any other scope is treated as a project scope and requires `memory.project` to be set
+ */
+function canRead(agent: ResolvedAgent, scope: string): boolean {
+  const mem = agent.memory;
+  if (scope === 'company') {
+    return mem.company !== undefined;
+  }
+  if (scope === 'agent') {
+    return true;
+  }
+  // project scope
+  return mem.project !== undefined || mem.projects?.all !== undefined;
 }
 
 export interface ShortTermEntry {

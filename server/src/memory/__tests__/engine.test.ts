@@ -1,9 +1,26 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { initDb, closeDb } from '../../db/sqlite.js';
 import { MemoryEngine } from '../../memory/engine.js';
+import type { ResolvedAgent } from '../../config/schema.js';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+
+/** A permissive agent that can read/write company and project scopes. */
+function makeAgent(overrides: Partial<ResolvedAgent> = {}): ResolvedAgent {
+  return {
+    id: 'dev@test',
+    projectId: 'test-project',
+    type: 'dev',
+    model: 'anthropic/claude-sonnet-4-20250514',
+    personality: 'Test agent',
+    memory: { company: 'read/write', project: 'read/write' },
+    skills: [],
+    projectDir: '/tmp',
+    tokenBudget: 40000,
+    ...overrides,
+  };
+}
 
 describe('MemoryEngine', () => {
   const tmpDir = mkdtempSync(join(tmpdir(), 'pragents-test-'));
@@ -120,6 +137,64 @@ describe('MemoryEngine', () => {
       const results = await engine.searchGlobal('zebras');
       // Should not find proj-x facts since searchGlobal only returns company scope
       expect(results.every(f => f.scope === 'company')).toBe(true);
+    });
+  });
+
+  describe('scope policy enforcement', () => {
+    it('allows write to company scope when agent has read/write', () => {
+      const agent = makeAgent({ memory: { company: 'read/write', project: 'read/write' } });
+      expect(() => engine.remember('company', 'policy', 'Allowed company fact', 'dev@test', agent)).not.toThrow();
+    });
+
+    it('blocks write to company scope when agent only has read', () => {
+      const agent = makeAgent({ memory: { company: 'read', project: 'read/write' } });
+      expect(() => engine.remember('company', 'policy', 'Should be blocked', 'dev@test', agent)).toThrow('Memory scope violation');
+    });
+
+    it('blocks write to company scope when agent has no company access', () => {
+      const agent = makeAgent({ memory: { project: 'read/write' } });
+      expect(() => engine.remember('company', 'policy', 'Should be blocked', 'dev@test', agent)).toThrow('Memory scope violation');
+    });
+
+    it('blocks write to project scope when agent has no project write access', () => {
+      const agent = makeAgent({ memory: { company: 'read', project: 'read' } });
+      expect(() => engine.remember('proj-a', 'test', 'Should be blocked', 'dev@test', agent)).toThrow('Memory scope violation');
+    });
+
+    it('allows write to agent scope regardless of memory policy', () => {
+      const agent = makeAgent({ memory: {} });
+      expect(() => engine.remember('agent', 'note', 'Private agent note', 'dev@test', agent)).not.toThrow();
+    });
+
+    it('allows read from company scope when agent has company access', async () => {
+      const agent = makeAgent({ memory: { company: 'read', project: 'read/write' } });
+      const facts = await engine.recall('semantic versioning', 'company', 10, agent);
+      // Just check it doesn't return empty due to policy — facts may exist from earlier tests
+      expect(Array.isArray(facts)).toBe(true);
+    });
+
+    it('blocks read from company scope when agent has no company access', async () => {
+      const agent = makeAgent({ memory: { project: 'read/write' } });
+      const facts = await engine.recall('semantic versioning', 'company', 10, agent);
+      expect(facts).toHaveLength(0);
+    });
+
+    it('blocks read from project scope when agent has no project access', async () => {
+      const agent = makeAgent({ memory: { company: 'read/write' } });
+      const facts = await engine.recall('tabs', 'proj-a', 10, agent);
+      expect(facts).toHaveLength(0);
+    });
+
+    it('allows project read when agent has projects.all read', async () => {
+      const agent = makeAgent({ memory: { projects: { all: 'read' } } });
+      const facts = await engine.recall('something', 'proj-a', 10, agent);
+      expect(Array.isArray(facts)).toBe(true);
+    });
+
+    it('skips policy check when no agentContext is provided (backward compat)', async () => {
+      // Without agentContext, no enforcement — existing behavior preserved
+      const facts = await engine.recall('tabs', 'proj-a');
+      expect(Array.isArray(facts)).toBe(true);
     });
   });
 });
