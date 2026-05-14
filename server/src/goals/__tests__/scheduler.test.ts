@@ -377,4 +377,30 @@ describe('GoalScheduler runGoalById', () => {
     });
     await expect(scheduler.runGoalById('g1')).rejects.toThrow(/already running/i);
   });
+
+  it('marks goal_run as failed when executeAsync throws synchronously (I2)', async () => {
+    const { scheduler, deps } = mkScheduler();
+    deps.wfEngine.executeAsync = vi.fn(() => { throw new Error('boom'); });
+    await expect(scheduler.runGoalById('g1')).rejects.toThrow(/boom/);
+
+    // The goal_runs row must reflect the failure, not stay in 'triggered'.
+    const row = getDb().prepare('SELECT status FROM goal_runs WHERE goal_id = ?').get('g1') as { status: string } | undefined;
+    expect(row?.status).toBe('failed');
+  });
+
+  it('prunes cooldown map for goals removed from config (I1)', async () => {
+    const { scheduler, deps } = mkScheduler();
+    await scheduler.runGoalById('g1');
+    expect((scheduler as any).lastManualTrigger.has('g1')).toBe(true);
+
+    // Reload with a config that no longer contains g1.
+    (scheduler as any).jobs = [];
+    scheduler.start([
+      { id: 'g2', cadence: '0 0 * * *', deadline: null, workflow: 'wf', description: 'New goal' } as any,
+    ]);
+    expect((scheduler as any).lastManualTrigger.has('g1')).toBe(false);
+    // Avoid leaking cron jobs into other tests.
+    scheduler.stop();
+    void deps;
+  });
 });

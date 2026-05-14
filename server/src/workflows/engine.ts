@@ -54,14 +54,31 @@ export class WorkflowEngine {
     this.emit('workflow.step_started', { runId: run.id, workflow: def.name });
 
     void (async () => {
+      let stepsSucceeded = false;
       try {
         await this.executeSteps(def, run.id, {});
+        stepsSucceeded = true;
+      } catch (err: any) {
+        // Real workflow failure — steps did not complete successfully.
+        try { this.tracker.failRun(run.id); } catch { /* swallow — already-logged */ }
+        this.emit('workflow.failed', { runId: run.id, workflow: def.name, error: err?.message });
+        logger.error({ runId: run.id, workflow: def.name, err: err?.message }, 'workflow async execution failed');
+        return;
+      }
+
+      // Post-run bookkeeping — runs ONLY on success. Failures here must not
+      // re-label the run as failed: the steps completed correctly. A DB lock
+      // or transient I/O error in completeRun() is observability noise, not
+      // a workflow-level failure.
+      try {
         this.tracker.completeRun(run.id);
         this.emit('workflow.completed', { runId: run.id, workflow: def.name });
-      } catch (err: any) {
-        this.tracker.failRun(run.id);
-        this.emit('workflow.failed', { runId: run.id, workflow: def.name, error: err.message });
-        logger.error({ runId: run.id, workflow: def.name, err: err?.message }, 'workflow async execution failed');
+      } catch (bookErr: any) {
+        logger.error(
+          { runId: run.id, workflow: def.name, err: bookErr?.message, stepsSucceeded },
+          'workflow bookkeeping failed after successful steps — run stays in current status',
+        );
+        this.emit('workflow.bookkeeping_failed', { runId: run.id, workflow: def.name, error: bookErr?.message });
       }
     })();
 

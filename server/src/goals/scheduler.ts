@@ -33,6 +33,7 @@ export class GoalScheduler {
 
   start(goals: GoalDef[]): void {
     this.goals = goals;
+    this.pruneCooldownMap();
     for (const goal of goals) {
       const job = cron(goal.cadence, () => this.trigger(goal));
       this.jobs.push(job);
@@ -41,6 +42,29 @@ export class GoalScheduler {
 
     // PM monitor: check every 5 minutes
     cron('*/5 * * * *', () => this.pmCheck());
+  }
+
+  /**
+   * Drop cooldown entries for goals that are no longer in the active config.
+   * Called from start() on every (re)load so a long-running scheduler that
+   * sees frequent goal renames/deletions does not accumulate dead entries.
+   * Also enforces a hard cap (1000) to bound pathological growth.
+   */
+  private pruneCooldownMap(): void {
+    const liveIds = new Set(this.goals.map((g) => g.id));
+    for (const id of this.lastManualTrigger.keys()) {
+      if (!liveIds.has(id)) this.lastManualTrigger.delete(id);
+    }
+    if (this.lastManualTrigger.size > 1000) {
+      // Last-resort cap: drop oldest entries (Map preserves insertion order).
+      const excess = this.lastManualTrigger.size - 1000;
+      const it = this.lastManualTrigger.keys();
+      for (let i = 0; i < excess; i++) {
+        const next = it.next();
+        if (next.done) break;
+        this.lastManualTrigger.delete(next.value);
+      }
+    }
   }
 
   /** Called by the orchestrator on every event — used to clean up completed goal runs. */
@@ -81,14 +105,27 @@ export class GoalScheduler {
     const db = getDb();
     db.prepare('INSERT INTO goal_runs (id, goal_id, status) VALUES (?, ?, ?)').run(goalRunId, id, 'triggered');
 
-    const workflowRunId = this.wfEngine.executeAsync(wfDef, { goalId: id, goalRunId, manual: true }, goalRunId);
-    db.prepare('UPDATE goal_runs SET workflow_run_id = ?, status = ? WHERE id = ?').run(workflowRunId, 'running', goalRunId);
-    this.activeGoalRuns.set(workflowRunId, {
-      goalRunId,
-      deadline: goal.deadline ? this.nextDeadline(goal.deadline) : new Date(Date.now() + 86400000),
-      goalId: id,
-    });
-    return { goalRunId, workflowRunId };
+    // Insert → executeAsync → update is one logical transaction at the row
+    // level: if any step throws, the row must not stay in 'triggered'
+    // forever. Capture the error, mark the run as failed, and re-throw so
+    // the API surface returns the right status code.
+    try {
+      const workflowRunId = this.wfEngine.executeAsync(wfDef, { goalId: id, goalRunId, manual: true }, goalRunId);
+      db.prepare('UPDATE goal_runs SET workflow_run_id = ?, status = ? WHERE id = ?').run(workflowRunId, 'running', goalRunId);
+      this.activeGoalRuns.set(workflowRunId, {
+        goalRunId,
+        deadline: goal.deadline ? this.nextDeadline(goal.deadline) : new Date(Date.now() + 86400000),
+        goalId: id,
+      });
+      return { goalRunId, workflowRunId };
+    } catch (err: any) {
+      try {
+        db.prepare('UPDATE goal_runs SET status = ? WHERE id = ?').run('failed', goalRunId);
+      } catch (markErr: any) {
+        logger.error({ goalRunId, err: markErr?.message }, 'failed to mark goal_run as failed after dispatch error');
+      }
+      throw err;
+    }
   }
 
   private async trigger(goal: GoalDef): Promise<void> {

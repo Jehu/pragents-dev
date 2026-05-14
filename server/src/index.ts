@@ -226,6 +226,20 @@ export async function startServer() {
     logger.info({ threshold: classifierThreshold }, 'IntentClassifier confidence threshold configured');
   }
   const classifier = new IntentClassifier(agents, classifierModel, classifierThreshold);
+
+  // Boot-time safety: a config with zero projects collapses the chat route
+  // into legacy-mode (no project-scope enforcement), which silently re-opens
+  // the C1/C3 cross-project leak. Refuse to boot unless the operator has
+  // explicitly acknowledged the no-projects setup via PRAGENTS_ALLOW_NO_PROJECTS=1.
+  const configuredProjectIds = Object.keys(config.projects);
+  if (configuredProjectIds.length === 0 && process.env.PRAGENTS_ALLOW_NO_PROJECTS !== '1') {
+    logger.fatal(
+      'config.projects is empty — chat/memory scope enforcement would be disabled. ' +
+        'Add at least one project to pragents.yaml or set PRAGENTS_ALLOW_NO_PROJECTS=1 to opt into the legacy single-tenant fallback.',
+    );
+    process.exit(1);
+  }
+
   const chatRoute = createChatRoute(
     conversationManager,
     classifier,
@@ -235,7 +249,7 @@ export async function startServer() {
     eventBuffer,
     tracker,
     planStore,
-    Object.keys(config.projects),
+    configuredProjectIds,
   );
 
   // Build API
