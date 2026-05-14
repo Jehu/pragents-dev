@@ -357,11 +357,6 @@ export function WorkflowsPage() {
           </div>
         )}
       </section>
-
-      {/* Notice about parallel groups */}
-      <p className="text-[11px] text-zinc-600 border border-zinc-800 rounded-lg px-3 py-2 bg-zinc-900">
-        Parallel-group nesting simplified — parallel-group rendering requires YAML source, not exposed by REST API.
-      </p>
     </div>
   );
 }

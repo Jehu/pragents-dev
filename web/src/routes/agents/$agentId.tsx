@@ -301,6 +301,7 @@ function SkillsTab({ agent }: { agent: AgentDetail }) {
           <Link
             key={skill}
             to="/skills"
+            search={{ name: skill }}
             className="flex items-center justify-between px-3 py-2 rounded hover:bg-zinc-800/60 transition-colors"
           >
             <span className="text-sm text-zinc-200">{skill}</span>

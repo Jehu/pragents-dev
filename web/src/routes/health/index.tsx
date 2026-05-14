@@ -117,7 +117,7 @@ function HealthView() {
       {/* Status rows */}
       <div className="bg-zinc-900 border border-zinc-800 rounded-lg divide-y divide-zinc-800">
         <HealthRow label="DB connected" ok={data.db.connected}>
-          <StatusPill status={data.db.connected ? 'complete' : 'failed'} />
+          <StatusPill status={data.db.connected ? 'ok' : 'failed'} />
         </HealthRow>
 
         <HealthRow label="DB size" ok={true}>

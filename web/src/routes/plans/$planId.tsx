@@ -165,6 +165,7 @@ function PlanDetailPage() {
               <span className="text-xs text-zinc-500">From conversation: </span>
               <Link
                 to="/chat"
+                search={{ conversationId: plan.conversationId }}
                 className="text-xs text-sky-400 hover:text-sky-300 font-mono"
               >
                 {plan.conversationId}

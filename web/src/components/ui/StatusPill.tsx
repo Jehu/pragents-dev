@@ -8,7 +8,8 @@ export type StatusType =
   | 'failed'
   | 'needs_review'
   | 'proposed'
-  | 'cold';
+  | 'cold'
+  | 'ok';
 
 const STATUS_STYLES: Record<StatusType, string> = {
   idle:         'bg-zinc-500/20 text-zinc-300',
@@ -19,6 +20,7 @@ const STATUS_STYLES: Record<StatusType, string> = {
   failed:       'bg-red-500/20 text-red-400',
   needs_review: 'bg-amber-500/20 text-amber-300',
   proposed:     'bg-purple-500/20 text-purple-300',
+  ok:           'bg-emerald-500/20 text-emerald-400',
 };
 
 const STATUS_LABELS: Record<StatusType, string> = {
@@ -30,6 +32,7 @@ const STATUS_LABELS: Record<StatusType, string> = {
   failed:       'failed',
   needs_review: 'needs review',
   proposed:     'proposed',
+  ok:           'ok',
 };
 
 interface StatusPillProps {

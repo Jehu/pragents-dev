@@ -3,6 +3,7 @@ import { createFileRoute, Link } from '@tanstack/react-router';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { StatusPill, ApprovalCard, EmptyState } from '../../components/ui/index.js';
 import { useEventBusStore } from '../../stores/eventBus.js';
+import { useCommandPaletteStore } from '../../stores/commandPalette.js';
 import { useShallow } from 'zustand/react/shallow';
 import type { StatusType } from '../../components/ui/StatusPill.js';
 
@@ -298,7 +299,7 @@ function OverviewPage() {
         <h1 className="text-xl font-semibold tracking-tight text-zinc-100">Overview</h1>
         <button
           className="btn-approve text-xs px-3 py-1.5 rounded font-medium"
-          onClick={() => alert('⌘K palette coming in M5')}
+          onClick={() => useCommandPaletteStore.getState().setOpen(true)}
         >
           + New task
         </button>

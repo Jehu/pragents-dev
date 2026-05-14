@@ -5,6 +5,9 @@ import { EmptyState } from '../../components/ui/index.js';
 import { useEventBusStore } from '../../stores/eventBus.js';
 
 export const Route = createFileRoute('/skills/')({
+  validateSearch: (search: Record<string, unknown>) => ({
+    name: typeof search.name === 'string' ? search.name : undefined,
+  }),
   component: SkillsPage,
 });
 
@@ -270,6 +273,8 @@ function RejectedSkillCard({ skill }: { skill: Skill }) {
 
 function SkillsPage() {
   const queryClient = useQueryClient();
+  const search = Route.useSearch();
+  const nameFilter = search.name?.toLowerCase() ?? '';
   const [activeTab, setActiveTab] = useState<SkillTab>('active');
   const [rejectTarget, setRejectTarget] = useState<string | null>(null);
   const [bodyTarget, setBodyTarget] = useState<string | null>(null);
@@ -290,11 +295,14 @@ function SkillsPage() {
     staleTime: 15_000,
   });
 
-  const allSkills: Skill[] = Array.isArray(data?.skills)
+  const rawSkills: Skill[] = Array.isArray(data?.skills)
     ? data.skills
     : Array.isArray(data)
     ? data
     : [];
+  const allSkills: Skill[] = nameFilter
+    ? rawSkills.filter((s) => s.name.toLowerCase().includes(nameFilter))
+    : rawSkills;
 
   const approveMutation = useMutation({
     mutationFn: (name: string) =>

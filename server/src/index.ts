@@ -278,7 +278,19 @@ export async function startServer() {
     let sql = 'SELECT id, project_id as projectId, agent_id as agentId, task_id as taskId, type, data, timestamp FROM events WHERE 1=1';
     const params: any[] = [];
 
-    if (taskId) { sql += ' AND task_id = ?'; params.push(taskId); }
+    if (taskId) {
+      // Full UUID: exact match. 8+ char prefix: LIKE-prefix match (uses index).
+      // Shorter prefixes are rejected to prevent bulk enumeration (SL-6).
+      if (taskId.length >= 36) {
+        sql += ' AND task_id = ?';
+        params.push(taskId);
+      } else if (taskId.length >= 8) {
+        sql += ' AND task_id LIKE ?';
+        params.push(taskId + '%');
+      } else {
+        return c.json({ error: 'taskId must be a full UUID or at least 8 characters' }, 400);
+      }
+    }
     if (project) { sql += ' AND project_id = ?'; params.push(project); }
     if (since) { sql += ' AND timestamp > ?'; params.push(since); }
 

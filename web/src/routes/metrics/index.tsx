@@ -50,6 +50,24 @@ export function hasNotes(notes: Record<string, string>): boolean {
   return Object.values(notes).some((v) => v !== '' && v != null);
 }
 
+// camelCase → "Camel Case" for any metric key the backend emits.
+export function humanizeMetricKey(key: string): string {
+  return key
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/^./, (c) => c.toUpperCase());
+}
+
+// Replace internal event-name jargon with user-readable phrases.
+export function humanizeMetricNote(note: string): string {
+  return note
+    .replace(/no skill\.used events in window/i, 'No skill activity recorded in the window')
+    .replace(/no memory\.recall events in window/i, 'No memory lookups recorded in the window')
+    .replace(/no goal_runs in window/i, 'No goal runs recorded in the window')
+    .replace(/no completed tasks in window/i, 'No completed tasks in the window')
+    .replace(/query failed — see logs/i, 'Backend query failed — see logs')
+    .replace(/needs task_id propagation/i, 'task IDs not yet wired into the skill event stream');
+}
+
 // ---------------------------------------------------------------------------
 // Route
 // ---------------------------------------------------------------------------
@@ -131,7 +149,7 @@ function MetricsView() {
             >
               <span className="flex-shrink-0 mt-0.5">⚠</span>
               <span>
-                <span className="font-semibold">{key}:</span> {note}
+                <span className="font-semibold">{humanizeMetricKey(key)}:</span> {humanizeMetricNote(note)}
               </span>
             </div>
           ))}

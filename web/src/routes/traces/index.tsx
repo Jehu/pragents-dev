@@ -215,9 +215,6 @@ function TracesList() {
       {/* Header */}
       <div className="px-6 py-4 border-b border-zinc-800 flex-shrink-0">
         <h2 className="text-xl font-bold text-zinc-100">Traces</h2>
-        <p className="text-xs text-zinc-600 mt-1 italic">
-          Flat event log, not a tree — nested step-tree would need parent-event linking, not in schema.
-        </p>
       </div>
 
       <div className="flex-1 overflow-hidden">

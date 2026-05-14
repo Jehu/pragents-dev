@@ -14,6 +14,27 @@ export interface CostSummary {
   agents?: AgentCostRow[];
 }
 
+// Raw row returned by GET /api/v1/cost/summary (one row per project per month).
+export interface CostSummaryRow {
+  project_id: string;
+  month: string;
+  tokensIn: number;
+  tokensOut: number;
+  cost: number;
+  calls: number;
+}
+
+export function aggregateSummary(rows: CostSummaryRow[]): CostSummary {
+  return rows.reduce(
+    (acc, r) => ({
+      totalCost: acc.totalCost + (r.cost ?? 0),
+      totalCalls: acc.totalCalls + (r.calls ?? 0),
+      totalTokens: (acc.totalTokens ?? 0) + (r.tokensIn ?? 0) + (r.tokensOut ?? 0),
+    }),
+    { totalCost: 0, totalCalls: 0, totalTokens: 0 } as CostSummary,
+  );
+}
+
 export interface AgentCostRow {
   agentId: string;
   agentName?: string;
@@ -45,9 +66,19 @@ export function formatCostEur(value: number | null | undefined): string {
   return `€${value.toFixed(4)}`;
 }
 
+// Same as formatCostEur but renders 0 as €0.0000 instead of —.
+// Use when the value comes from a fully-loaded source and 0 is a real result.
+export function formatCostEurZeroAsValue(value: number | null | undefined): string {
+  return `€${(value ?? 0).toFixed(4)}`;
+}
+
 export function formatTokens(value: number | null | undefined): string {
   if (value == null) return '—';
   return value.toLocaleString();
+}
+
+export function formatCountZeroAsValue(value: number | null | undefined): string {
+  return (value ?? 0).toLocaleString();
 }
 
 export function sortAgentsByCost(agents: AgentCostRow[]): AgentCostRow[] {
@@ -71,7 +102,7 @@ export const Route = createFileRoute('/costs/')({
 });
 
 function CostsView() {
-  const { data: summary } = useQuery<CostSummary>({
+  const { data: summaryRaw, isLoading: summaryLoading } = useQuery<CostSummaryRow[] | CostSummary>({
     queryKey: ['cost-summary'],
     queryFn: () => fetch('/api/v1/cost/summary').then((r) => r.json()),
     staleTime: 60_000,
@@ -83,14 +114,26 @@ function CostsView() {
     staleTime: 30_000,
   });
 
-  const { data: modelData } = useQuery<ModelCostRow[]>({
+  const { data: modelData } = useQuery<ModelCostRow[] | { items: ModelCostRow[] }>({
     queryKey: ['cost-by-model'],
     queryFn: () => fetch('/api/v1/cost/by-model').then((r) => r.json()),
     staleTime: 60_000,
   });
 
+  // API returns an array of per-project rows; older callers expected a single summary object.
+  // Accept both shapes.
+  const summary: CostSummary | undefined = Array.isArray(summaryRaw)
+    ? aggregateSummary(summaryRaw as CostSummaryRow[])
+    : (summaryRaw as CostSummary | undefined);
+
+  const modelRows: ModelCostRow[] = Array.isArray(modelData)
+    ? modelData
+    : Array.isArray((modelData as any)?.items)
+    ? (modelData as any).items
+    : [];
+
   const agents = sortAgentsByCost(summary?.agents ?? []);
-  const models = sortModelsByCost(Array.isArray(modelData) ? modelData : []);
+  const models = sortModelsByCost(modelRows);
   const maxAgentCost = maxCost(agents);
   const mostExpensiveModel = models[0]?.model;
 
@@ -107,17 +150,17 @@ function CostsView() {
       <div className="grid grid-cols-3 gap-4 mb-6">
         <StatCard
           label="This month"
-          value={formatCostEur(summary?.totalCost)}
+          value={summaryLoading ? '—' : formatCostEurZeroAsValue(summary?.totalCost)}
           mono
         />
         <StatCard
           label="Today"
-          value={formatCostEur(todayData?.costEur)}
+          value={formatCostEurZeroAsValue(todayData?.costEur)}
           mono
         />
         <StatCard
           label="Total calls"
-          value={summary?.totalCalls != null ? summary.totalCalls.toLocaleString() : '—'}
+          value={summaryLoading ? '—' : formatCountZeroAsValue(summary?.totalCalls)}
           mono
         />
       </div>

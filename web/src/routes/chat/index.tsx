@@ -8,6 +8,10 @@ import { MasterDetail, ApprovalCard } from '../../components/ui/index.js';
 // ---------------------------------------------------------------------------
 
 export const Route = createFileRoute('/chat/')({
+  validateSearch: (search: Record<string, unknown>) => ({
+    conversationId: typeof search.conversationId === 'string' ? search.conversationId : undefined,
+    agentId: typeof search.agentId === 'string' ? search.agentId : undefined,
+  }),
   component: ChatPage,
 });
 
@@ -462,12 +466,9 @@ function ThreadPanel({
 
 function ChatPage() {
   const qc = useQueryClient();
-
-  // Parse agentId from URL search params if present (e.g. ?agentId=xxx)
-  const agentId = new URLSearchParams(window.location.search).get('agentId') ?? undefined;
-  const [activeConvId, setActiveConvId] = useState<string | undefined>(
-    new URLSearchParams(window.location.search).get('conversationId') ?? undefined,
-  );
+  const search = Route.useSearch();
+  const agentId = search.agentId;
+  const [activeConvId, setActiveConvId] = useState<string | undefined>(search.conversationId);
 
   const { data } = useQuery<{ conversations?: Conversation[] }>({
     queryKey: ['chat-conversations'],
