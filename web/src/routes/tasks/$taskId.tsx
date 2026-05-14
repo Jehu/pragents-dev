@@ -114,14 +114,14 @@ function TaskDetail() {
           </ol>
 
           {/* Trace link */}
-          {firstTrace && (
+          {firstTrace && firstTrace.id != null && (
             <div className="mt-4 pt-4 border-t border-zinc-800">
               <Link
                 to="/traces/$traceId"
-                params={{ traceId: firstTrace.id }}
+                params={{ traceId: String(firstTrace.id) }}
                 className="text-xs text-indigo-400 hover:text-indigo-300"
               >
-                View trace {firstTrace.id?.slice(0, 8)} →
+                View trace {String(firstTrace.id).slice(0, 8)} →
               </Link>
             </div>
           )}
