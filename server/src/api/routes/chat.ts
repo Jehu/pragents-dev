@@ -86,40 +86,102 @@ export function createChatRoute(
    * the existing `confirm` flow.
    */
   planStore?: PlanStore,
+  /**
+   * Project IDs from config. Used to enforce project-scope on /conversations
+   * and /conversations/:id/messages. The current API-token auth layer does not
+   * carry per-user project membership (commit 2169422), so the enforcement is:
+   * a caller may scope to one of the configured projects via ?projectId= or
+   * request all configured projects via ?scope=all. The endpoint never returns
+   * conversations whose project_id is outside the configured list (legacy NULL
+   * project rows remain accessible as "no-project" data).
+   */
+  configuredProjectIds: string[] = [],
 ): Hono {
   const app = new Hono();
 
   // Apply body size limit to prevent memory exhaustion DoS
   app.use('*', bodyLimit({ maxSize: MAX_BODY_SIZE }));
 
+  // When no projects are configured (legacy / single-tenant setup without
+  // explicit project membership), scope enforcement is bypassed for
+  // backwards compatibility. Production deployments must pass a non-empty
+  // `configuredProjectIds` to get the hard enforcement.
+  const enforceScope = configuredProjectIds.length > 0;
+
+  /**
+   * Resolve the caller's project-scope intent from query params.
+   *  - ?projectId=<id>   → narrow to that single project (must be configured)
+   *  - ?scope=all        → all configured projects
+   *  - neither           → 400 in enforcement mode, or "all-permissive" in legacy mode
+   *
+   * Returns either an array of allowed project IDs OR an error response to return.
+   */
+  function resolveScope(c: any): { ok: true; projects: string[]; legacy?: boolean } | { ok: false; res: Response } {
+    const projectId = c.req.query('projectId');
+    const scope = c.req.query('scope');
+    if (projectId) {
+      if (enforceScope && !configuredProjectIds.includes(projectId)) {
+        return { ok: false, res: c.json({ error: `Unknown project "${projectId}"` }, 400) };
+      }
+      return { ok: true, projects: [projectId] };
+    }
+    if (scope === 'all') {
+      return { ok: true, projects: configuredProjectIds };
+    }
+    if (!enforceScope) {
+      // Legacy mode (no configured projects): pass-through. Used by older
+      // tests and single-tenant boot before config is loaded.
+      return { ok: true, projects: [], legacy: true };
+    }
+    return { ok: false, res: c.json({ error: 'projectId or scope=all is required' }, 400) };
+  }
+
   // GET /api/v1/chat/conversations — list recent conversations
   app.get('/conversations', (c) => {
     const limit = z.coerce.number().int().min(1).max(100).safeParse(c.req.query('limit'));
+    const scope = resolveScope(c);
+    if (!scope.ok) return scope.res;
     const projectId = c.req.query('projectId') || undefined;
     const agentId = c.req.query('agentId') || undefined;
 
-    const conversations = conversationManager.listRecent(
-      limit.success ? limit.data : 20,
-      projectId,
-      agentId,
-    );
+    // Legacy mode delegates to listRecent which keeps the old projectId filter
+    // semantics intact (return all when no filter is supplied).
+    const conversations = scope.legacy
+      ? conversationManager.listRecent(limit.success ? limit.data : 20, projectId, agentId)
+      : conversationManager.listRecentForProjects(scope.projects, limit.success ? limit.data : 20, agentId);
 
     return c.json({ conversations });
   });
 
-  // GET /api/v1/chat/conversations/:id/messages — return message history
-  // The conversationId itself is the access token in the current single-tenant
-  // deployment; an optional ?projectId= query enforces a soft scope check.
+  // GET /api/v1/chat/conversations/:id/messages — return message history.
+  // Project scope is hard-enforced: the requested project must match the
+  // conversation's project_id (or the conversation must be in the allowed set
+  // when scope=all). A mismatch returns 404 to avoid leaking existence.
   app.get('/conversations/:id/messages', (c) => {
     const convId = c.req.param('id');
     const limit = z.coerce.number().int().min(1).max(500).safeParse(c.req.query('limit'));
-    const requestedProject = c.req.query('projectId');
+    const scope = resolveScope(c);
+    if (!scope.ok) return scope.res;
 
     const conv = conversationManager.getConversation(convId);
     if (!conv) return c.json({ error: 'Conversation not found' }, 404);
-    if (requestedProject && conv.projectId !== requestedProject) {
-      // Mismatched project — return 404 (not 403) to avoid leaking existence.
-      return c.json({ error: 'Conversation not found' }, 404);
+    if (!scope.legacy) {
+      // Enforcement mode: conversation's project_id must be in the resolved
+      // scope. Legacy NULL-project rows are accessible only through scope=all
+      // (which carries every configured project id, never an empty list here).
+      const inScope = conv.projectId
+        ? scope.projects.includes(conv.projectId)
+        : scope.projects.length === configuredProjectIds.length;
+      if (!inScope) {
+        return c.json({ error: 'Conversation not found' }, 404);
+      }
+    } else {
+      // Legacy mode: if the caller passed ?projectId=, still enforce a match —
+      // otherwise pass through (the original soft-check behaviour for tests).
+      const requestedProject = c.req.query('projectId');
+      if (requestedProject && conv.projectId !== requestedProject) {
+        return c.json({ error: 'Conversation not found' }, 404);
+      }
     }
 
     const messages = conversationManager.getHistory(convId, limit.success ? limit.data : 50);

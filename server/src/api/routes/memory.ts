@@ -11,7 +11,19 @@ function resolveScopeBucket(
   scope: string | undefined,
   projectIds: string[],
 ): { where: string; params: string[] } {
-  if (!scope || scope === 'all') return { where: '1=1', params: [] };
+  if (!scope || scope === 'all') {
+    // "All" means the union of configured projects + company + agent. Facts
+    // scoped to a project that is *not* in the config (legacy, foreign,
+    // mistyped) must not leak.
+    if (projectIds.length === 0) {
+      return { where: "scope IN ('company', 'agent')", params: [] };
+    }
+    const placeholders = projectIds.map(() => '?').join(', ');
+    return {
+      where: `(scope IN (${placeholders}) OR scope = 'company' OR scope = 'agent' OR scope LIKE '%@%')`,
+      params: projectIds,
+    };
+  }
   if (scope === 'company') return { where: 'scope = ?', params: ['company'] };
   if (scope === 'agent') {
     // Agent-scoped facts use either the literal 'agent' marker or an
@@ -23,8 +35,12 @@ function resolveScopeBucket(
     const placeholders = projectIds.map(() => '?').join(', ');
     return { where: `scope IN (${placeholders})`, params: projectIds };
   }
-  // Concrete scope value (e.g. project ID or agent ID)
-  return { where: 'scope = ?', params: [scope] };
+  // Concrete scope value (e.g. project ID or agent ID) — only honor if it's
+  // a configured project; otherwise reject by returning a contradictory WHERE.
+  if (projectIds.includes(scope) || scope === 'company') {
+    return { where: 'scope = ?', params: [scope] };
+  }
+  return { where: '1=0', params: [] };
 }
 
 export function createMemoryRoute(engine: MemoryEngine, config?: { projects: Record<string, unknown> }) {
@@ -32,22 +48,33 @@ export function createMemoryRoute(engine: MemoryEngine, config?: { projects: Rec
 
   const projectIds = () => (config ? Object.keys(config.projects) : []);
 
+  /**
+   * Expand a UI scope bucket into the explicit list of scope values that
+   * engine.recall() may search. The expansion never silently widens to "every
+   * scope in the DB" — that was the C2 leak. Returns null when no expansion
+   * applies (caller passed a concrete scope value to use verbatim).
+   */
+  function expandRecallScope(scope: string | undefined): string[] | null {
+    if (!scope || scope === 'all') {
+      // All configured projects + company-wide. Agent-scope is excluded from
+      // "all" to avoid cross-agent private-memory leakage.
+      return [...projectIds(), 'company'];
+    }
+    if (scope === 'project') return projectIds();
+    if (scope === 'company' || scope === 'agent') return [scope];
+    // Concrete scope value (e.g., specific project ID or agent ID) — accept
+    // only when it's a configured project, else treat as company-style literal.
+    return null;
+  }
+
   r.get('/facts', async (c) => {
     const scope = c.req.query('scope');
     const search = c.req.query('search');
     const limit = parseInt(c.req.query('limit') || '50');
 
     if (search) {
-      // Map UI buckets to engine.recall semantics:
-      //   - 'all' / undefined → search across every scope
-      //   - 'project'         → defer to the first configured project (cross-project visibility kicks in)
-      //   - 'agent'/'company' / concrete value → passed through verbatim
-      let recallScope: string;
-      if (!scope || scope === 'all' || scope === 'project') {
-        recallScope = 'all';
-      } else {
-        recallScope = scope;
-      }
+      const expanded = expandRecallScope(scope);
+      const recallScope: string | string[] = expanded ?? scope!;
       const facts = await engine.recall(search, recallScope, limit);
       return c.json(facts);
     }
@@ -85,12 +112,8 @@ export function createMemoryRoute(engine: MemoryEngine, config?: { projects: Rec
       return c.json({ scope, query, count: facts.length, facts });
     }
 
-    let recallScope: string;
-    if (!scope || scope === 'all' || scope === 'project') {
-      recallScope = 'all';
-    } else {
-      recallScope = scope;
-    }
+    const expanded = expandRecallScope(scope);
+    const recallScope: string | string[] = expanded ?? scope!;
     const facts = await engine.recall(query, recallScope, limit);
     return c.json({ scope: scope ?? 'all', query, count: facts.length, facts });
   });

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useCommandPaletteStore } from '../stores/commandPalette.js';
+import { useScopeStore } from '../stores/scope.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -157,10 +158,12 @@ export function CommandPalette() {
     enabled: open,
   });
 
-  // Fetch conversations — API returns { conversations: [...] }
+  // Fetch conversations — scope by active project to avoid cross-project leak.
+  const selectedProject = useScopeStore((s) => s.selectedProject);
+  const scopeParam = selectedProject ? `projectId=${encodeURIComponent(selectedProject)}` : 'scope=all';
   const { data: conversationsData } = useQuery<{ conversations?: Array<{ id: string; agentId?: string; agentName?: string }> }>({
-    queryKey: ['chat-conversations', 'palette'],
-    queryFn: () => fetch('/api/v1/chat/conversations').then((r) => r.json()),
+    queryKey: ['chat-conversations', 'palette', selectedProject],
+    queryFn: () => fetch(`/api/v1/chat/conversations?${scopeParam}`).then((r) => r.json()),
     staleTime: 30_000,
     enabled: open,
   });

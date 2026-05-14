@@ -235,6 +235,7 @@ export async function startServer() {
     eventBuffer,
     tracker,
     planStore,
+    Object.keys(config.projects),
   );
 
   // Build API

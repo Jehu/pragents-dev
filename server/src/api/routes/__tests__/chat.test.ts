@@ -910,4 +910,74 @@ describe('Chat SSE Route — POST /api/v1/chat', () => {
     expect(planMsg).toBeTruthy();
     expect(planMsg!.data.planId).toBeUndefined();
   });
+
+  // ---- C1/C3 regression: hard project-scope enforcement ----
+  describe('project-scope enforcement', () => {
+    function createScopedApp(): Hono {
+      return createChatRoute(
+        conversationManager,
+        mockClassifier as IntentClassifier,
+        mockDecomposer,
+        mockToolExecutor,
+        agents,
+        eventBuffer as any,
+        mockTracker as any,
+        undefined,
+        ['proj-alpha', 'proj-beta'],
+      );
+    }
+
+    it('GET /conversations rejects when scope is missing in enforcement mode', async () => {
+      const app = createScopedApp();
+      const res = await app.request('/conversations');
+      expect(res.status).toBe(400);
+    });
+
+    it('GET /conversations rejects unknown projectId in enforcement mode', async () => {
+      const app = createScopedApp();
+      const res = await app.request('/conversations?projectId=not-configured');
+      expect(res.status).toBe(400);
+    });
+
+    it('GET /conversations?scope=all returns only configured-project rows', async () => {
+      // Use unique agent IDs so getOrCreate does not recover an earlier
+      // conversation that lacks the projectId we want to test against.
+      conversationManager.getOrCreate(undefined, 'proj-alpha', 'scope-test-1');
+      conversationManager.getOrCreate(undefined, 'proj-alpha', 'scope-test-2');
+      conversationManager.getOrCreate(undefined, 'proj-beta', 'scope-test-3');
+      conversationManager.getOrCreate(undefined, 'rogue-project', 'scope-test-4');
+
+      const app = createScopedApp();
+      const res = await app.request('/conversations?scope=all&limit=100');
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      const projects = new Set(body.conversations.map((c: any) => c.projectId));
+      // Configured projects show up, rogue does not.
+      expect(projects.has('proj-alpha')).toBe(true);
+      expect(projects.has('rogue-project')).toBe(false);
+    });
+
+    it('GET /conversations/:id/messages returns 404 on cross-project access', async () => {
+      const id = conversationManager.getOrCreate(undefined, 'proj-alpha', 'scope-cross-1');
+      conversationManager.addMessage(id, 'user', 'hi', 'text');
+
+      const app = createScopedApp();
+      // Caller claims proj-beta — must NOT see the proj-alpha conversation.
+      const wrong = await app.request(`/conversations/${id}/messages?projectId=proj-beta`);
+      expect(wrong.status).toBe(404);
+
+      // Same conversation, correct project → 200.
+      const right = await app.request(`/conversations/${id}/messages?projectId=proj-alpha`);
+      expect(right.status).toBe(200);
+      const body = await right.json();
+      expect(body.messages.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it('GET /conversations/:id/messages rejects when no scope is supplied (enforcement)', async () => {
+      const id = conversationManager.getOrCreate(undefined, 'proj-alpha', 'scope-nokey-1');
+      const app = createScopedApp();
+      const res = await app.request(`/conversations/${id}/messages`);
+      expect(res.status).toBe(400);
+    });
+  });
 });

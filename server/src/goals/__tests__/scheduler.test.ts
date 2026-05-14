@@ -221,10 +221,11 @@ describe('GoalScheduler pmCheck deadline escalation', () => {
 
     await (scheduler as any).pmCheck();
 
-    // PM should be dispatched with escalation message
+    // PM should be dispatched with escalation message (3rd arg = task id)
     expect(dispatch).toHaveBeenCalledWith(
       mockPM,
       expect.stringContaining('daily-report'),
+      expect.any(String),
     );
     expect(dispatch.mock.calls[0][1]).toMatch(/passed its deadline/);
 
@@ -314,5 +315,66 @@ describe('GoalScheduler pmCheck deadline escalation', () => {
 
     // Run should still be in activeGoalRuns
     expect((scheduler as any).activeGoalRuns.has(wfRunId)).toBe(true);
+  });
+});
+
+// ---- I4/SL-4 regression: runGoalById manual trigger ----
+describe('GoalScheduler runGoalById', () => {
+  const tmpDir = mkdtempSync(join(tmpdir(), 'pragents-runnow-test-'));
+
+  beforeAll(() => { initDb(join(tmpDir, 'runnow.db')); });
+  afterAll(() => { closeDb(); rmSync(tmpDir, { recursive: true }); });
+  beforeEach(() => {
+    getDb().exec('DELETE FROM goal_runs');
+  });
+
+  function mkScheduler() {
+    const deps = {
+      wfRegistry: { get: vi.fn().mockReturnValue({ name: 'wf', steps: [] }) } as any,
+      wfEngine: {
+        execute: vi.fn(),
+        executeAsync: vi.fn().mockReturnValue('wf-run-id'),
+      } as any,
+      eventBuffer: { push: vi.fn() } as any,
+      sessionMgr: { dispatch: vi.fn() } as any,
+      agents: [mockPM],
+    };
+    const scheduler = new GoalScheduler(
+      deps.wfRegistry, deps.wfEngine, deps.eventBuffer, deps.sessionMgr, deps.agents,
+    );
+    (scheduler as any).goals = [
+      { id: 'g1', cadence: '0 0 * * *', deadline: null, workflow: 'wf', description: 'Test goal' },
+    ];
+    return { scheduler, deps };
+  }
+
+  it('rejects unknown goal id with "not found"', async () => {
+    const { scheduler } = mkScheduler();
+    await expect(scheduler.runGoalById('does-not-exist')).rejects.toThrow(/not found/i);
+  });
+
+  it('first trigger succeeds and returns workflowRunId', async () => {
+    const { scheduler, deps } = mkScheduler();
+    const { goalRunId, workflowRunId } = await scheduler.runGoalById('g1');
+    expect(goalRunId).toBeTruthy();
+    expect(workflowRunId).toBe('wf-run-id');
+    expect(deps.wfEngine.executeAsync).toHaveBeenCalledTimes(1);
+  });
+
+  it('second trigger within 30s cooldown is rejected', async () => {
+    const { scheduler } = mkScheduler();
+    await scheduler.runGoalById('g1');
+    // Second call immediately after — cooldown should fire.
+    await expect(scheduler.runGoalById('g1')).rejects.toThrow(/cooldown/i);
+  });
+
+  it('rejects when a run is already active for the same goal', async () => {
+    const { scheduler } = mkScheduler();
+    // Manually populate the active-run map (simulating a concurrent run not
+    // started via runGoalById, e.g., a cron tick).
+    (scheduler as any).activeGoalRuns.set('wf-existing', {
+      goalRunId: 'gr-existing', deadline: new Date(Date.now() + 86400000), goalId: 'g1',
+    });
+    await expect(scheduler.runGoalById('g1')).rejects.toThrow(/already running/i);
   });
 });

@@ -3,6 +3,14 @@ import { createFileRoute } from '@tanstack/react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { MasterDetail, ApprovalCard } from '../../components/ui/index.js';
 import { useEventBusStore } from '../../stores/eventBus.js';
+import { useScopeStore } from '../../stores/scope.js';
+
+/** Build the URL-query suffix carrying the active project scope.
+ *  - selectedProject set → ?projectId=X
+ *  - selectedProject null → ?scope=all (explicit cross-project intent) */
+function scopeQuery(selectedProject: string | null): string {
+  return selectedProject ? `projectId=${encodeURIComponent(selectedProject)}` : 'scope=all';
+}
 
 // ---------------------------------------------------------------------------
 // Route definition
@@ -250,6 +258,7 @@ function ThreadPanel({
   const [activeConvId, setActiveConvId] = useState(conversationId);
   const bottomRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const selectedProject = useScopeStore((s) => s.selectedProject);
 
   const [historyState, setHistoryState] = useState<'idle' | 'loading' | 'error'>('idle');
 
@@ -270,21 +279,43 @@ function ThreadPanel({
     );
   }, [busEvents]);
 
-  const handleApprovePlan = useCallback((planId: string) => {
-    // Optimistic: hide buttons immediately, then fire the POST.
+  const setPlanStatus = useCallback((planId: string, planStatus: ChatMessage['planStatus']) => {
     setMessages((prev) =>
       prev.map((m) =>
-        m.subtype === 'plan_proposal' && m.planId === planId
-          ? { ...m, planStatus: 'approving' }
-          : m,
+        m.subtype === 'plan_proposal' && m.planId === planId ? { ...m, planStatus } : m,
       ),
     );
-    fetch(`/api/v1/plans/${planId}/approve`, { method: 'POST' }).catch(() => {
-      // Keep the optimistic state — the SSE plan.approved/plan.cancelled event
-      // is the authoritative final state. A 409 ("already done") means another
-      // path already approved, which counts as approved for the UI.
-    });
   }, []);
+
+  const handleApprovePlan = useCallback(
+    (planId: string) => {
+      // Optimistic: hide buttons immediately, then fire the POST.
+      setPlanStatus(planId, 'approving');
+      fetch(`/api/v1/plans/${planId}/approve`, { method: 'POST' })
+        .then((res) => {
+          // 200/201/202: server accepted — wait for SSE plan.approved.
+          // 409: already approved on a previous attempt (or another tab) —
+          //      promote optimistic state to 'approved'; SSE may also fire.
+          // 4xx other: validation problem — revert so the user can try again.
+          // 5xx / network: log and revert; SSE may still rescue, but the UX
+          //      shouldn't strand the user on 'approving' forever.
+          if (res.ok) return;
+          if (res.status === 409) {
+            setPlanStatus(planId, 'approved');
+            return;
+          }
+          // eslint-disable-next-line no-console
+          console.warn(`Plan ${planId} approve returned ${res.status} — reverting`);
+          setPlanStatus(planId, 'pending');
+        })
+        .catch((err) => {
+          // eslint-disable-next-line no-console
+          console.warn(`Plan ${planId} approve failed`, err);
+          setPlanStatus(planId, 'pending');
+        });
+    },
+    [setPlanStatus],
+  );
 
   // Sync when outer conversationId changes (user picks a different convo) +
   // load the conversation's prior messages.
@@ -298,7 +329,7 @@ function ThreadPanel({
 
     const ctrl = new AbortController();
     setHistoryState('loading');
-    fetch(`/api/v1/chat/conversations/${encodeURIComponent(conversationId)}/messages`, {
+    fetch(`/api/v1/chat/conversations/${encodeURIComponent(conversationId)}/messages?${scopeQuery(selectedProject)}`, {
       signal: ctrl.signal,
     })
       .then((r) => {
@@ -322,7 +353,7 @@ function ThreadPanel({
       });
 
     return () => ctrl.abort();
-  }, [conversationId]);
+  }, [conversationId, selectedProject]);
 
   // Auto-scroll
   useEffect(() => {
@@ -605,10 +636,11 @@ function ChatPage() {
   const [activeConvId, setActiveConvId] = useState<string | undefined>(search.conversationId);
   const [draftAgentId, setDraftAgentId] = useState<string | undefined>(search.agentId);
   const agentId = activeConvId ? undefined : draftAgentId;
+  const selectedProject = useScopeStore((s) => s.selectedProject);
 
   const { data } = useQuery<{ conversations?: Conversation[] }>({
-    queryKey: ['chat-conversations'],
-    queryFn: () => fetch('/api/v1/chat/conversations').then((r) => r.json()),
+    queryKey: ['chat-conversations', selectedProject],
+    queryFn: () => fetch(`/api/v1/chat/conversations?${scopeQuery(selectedProject)}`).then((r) => r.json()),
     staleTime: 30_000,
   });
 

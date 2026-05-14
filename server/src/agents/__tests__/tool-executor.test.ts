@@ -91,6 +91,7 @@ describe('ToolExecutor', () => {
     expect(deps.sessionMgr.dispatch).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'dev@proj-a' }),
       'Fix bug',
+      'task-1',
     );
     const parsed = JSON.parse(result);
     expect(parsed.taskId).toBe('task-1');

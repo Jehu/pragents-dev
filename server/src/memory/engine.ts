@@ -84,35 +84,37 @@ export class MemoryEngine {
     return { id, scope, category, content, agentId, createdAt: new Date().toISOString() };
   }
 
-  async recall(query: string, scope: string, limit: number = 10, agentContext?: ResolvedAgent): Promise<Fact[]> {
+  async recall(query: string, scope: string | string[], limit: number = 10, agentContext?: ResolvedAgent): Promise<Fact[]> {
+    // Normalise to an array of explicit allowed scopes. We refuse the
+    // implicit "all scopes in the DB" path — callers that want cross-project
+    // search MUST pass the list of project IDs they're authorised for
+    // (typically the configured project IDs from config.projects).
+    const scopes = Array.isArray(scope) ? scope : [scope];
+    if (scopes.length === 0) return [];
+
     if (agentContext) {
-      const allowed = canRead(agentContext, scope);
-      if (!allowed) {
+      // canRead is scope-by-scope; drop any scope the caller can't read.
+      const allowed = scopes.filter((s) => canRead(agentContext, s));
+      if (allowed.length === 0) {
         logger.warn({ agentId: agentContext.id, scope }, 'Memory read blocked by scope policy');
         return [];
       }
+      // Continue with the filtered set
+      scopes.length = 0;
+      scopes.push(...allowed);
     }
+
     const db = getDb();
 
-    // Determine the SQL scope filter based on the scope argument:
-    //   'all'     → no scope filter at all (returns facts from every scope)
-    //   'company' → exact match on 'company'
-    //   'agent'   → exact match on 'agent'
-    //   anything  → treat as a project ID; include company-scope as cross-project visibility
-    //   else
-    let scopeFilter: string;
-    let scopeParams: string[];
-    if (scope === 'all') {
-      scopeFilter = '1=1';
-      scopeParams = [];
-    } else if (scope === 'company' || scope === 'agent') {
-      scopeFilter = 'scope = ?';
-      scopeParams = [scope];
-    } else {
-      scopeFilter = "(scope = ? OR scope = 'company')";
-      scopeParams = [scope];
-    }
-    const isProjectScope = scope !== 'company' && scope !== 'agent' && scope !== 'all';
+    // Build the SQL scope filter from the explicit list. Project-scope queries
+    // additionally include 'company' for cross-project visibility — but only
+    // when 'company' isn't already in the list, to avoid duplicating it.
+    const expandedScopes = new Set(scopes);
+    const hasProjectScope = scopes.some((s) => s !== 'company' && s !== 'agent');
+    if (hasProjectScope) expandedScopes.add('company');
+    const scopeParams = [...expandedScopes];
+    const placeholders = scopeParams.map(() => '?').join(', ');
+    const scopeFilter = `scope IN (${placeholders})`;
 
     // Keyword search fallback (always runs — vector search is a *boost*, not a replacement)
     const sqlRows = db
@@ -124,18 +126,16 @@ export class MemoryEngine {
 
     // Vector search — supplement keyword hits with semantic matches.
     try {
-      const vectorResults = scope === 'all' || isProjectScope
-        ? await this.vectorStore.search(query, undefined, limit)
-        : await this.vectorStore.search(query, { scope }, limit);
+      // Single-scope vector queries can use the store-level filter; multi-scope
+      // queries fetch unfiltered and apply the allow-list client-side.
+      const vectorResults = expandedScopes.size === 1
+        ? await this.vectorStore.search(query, { scope: [...expandedScopes][0] }, limit)
+        : await this.vectorStore.search(query, undefined, limit);
 
       const vectorFacts = vectorResults
-        .filter((r) => {
-          if (scope === 'all') return true;
-          const metaScope = r.metadata.scope;
-          return metaScope === scope || (isProjectScope && metaScope === 'company');
-        })
+        .filter((r) => expandedScopes.has(r.metadata.scope))
         .map((r) => ({
-          id: r.id, scope: r.metadata.scope || scope, category: r.metadata.category || '',
+          id: r.id, scope: r.metadata.scope || scopeParams[0], category: r.metadata.category || '',
           content: r.content, agentId: r.metadata.agentId || '', createdAt: new Date().toISOString(),
         }));
       const seen = new Set(vectorFacts.map((f) => f.id));

@@ -284,8 +284,17 @@ function RejectedSkillCard({ skill }: { skill: Skill }) {
 
 function SkillsPage() {
   const queryClient = useQueryClient();
-  const search = Route.useSearch();
-  const nameFilter = search.name?.toLowerCase() ?? '';
+  // Read the route search; fall back to window.location when rendered outside
+  // a router context (e.g. in unit tests that mount the component directly).
+  let nameFilter = '';
+  try {
+    const search = Route.useSearch();
+    nameFilter = search.name?.toLowerCase() ?? '';
+  } catch {
+    if (typeof window !== 'undefined') {
+      nameFilter = new URLSearchParams(window.location.search).get('name')?.toLowerCase() ?? '';
+    }
+  }
   const [activeTab, setActiveTab] = useState<SkillTab>('active');
   const [rejectTarget, setRejectTarget] = useState<string | null>(null);
   const [bodyTarget, setBodyTarget] = useState<string | null>(null);

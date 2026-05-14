@@ -6,7 +6,8 @@ import React from 'react';
 
 vi.mock('@tanstack/react-query', () => ({
   useQuery: vi.fn(),
-  useQueryClient: vi.fn(),
+  useQueryClient: vi.fn(() => ({ invalidateQueries: vi.fn() })),
+  useMutation: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
   QueryClient: class {},
   QueryClientProvider: ({ children }: { children: React.ReactNode }) => children,
 }));
@@ -220,8 +221,8 @@ describe('WorkflowsPage failed step error', () => {
 // ─── Notice banner ────────────────────────────────────────────────────────────
 
 describe('WorkflowsPage notice banner', () => {
-  it('renders parallel-group notice', () => {
-    const { getByText } = renderWorkflows([], []);
-    expect(getByText(/Parallel-group nesting simplified/)).toBeTruthy();
+  it('removed the parallel-group dev notice from the rendered UI (U14)', () => {
+    const { queryByText } = renderWorkflows([], []);
+    expect(queryByText(/Parallel-group nesting simplified/)).toBeNull();
   });
 });

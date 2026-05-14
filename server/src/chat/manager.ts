@@ -190,6 +190,45 @@ export class ConversationManager {
     return rows;
   }
 
+  /**
+   * Project-scoped list. Returns conversations whose project_id is in the
+   * supplied list (and legacy rows with NULL project_id when projectIds is
+   * empty — only callable from the "scope=all with zero configured projects"
+   * fallback). This is the security-relevant entry point used by the chat
+   * API; do not collapse with listRecent().
+   */
+  listRecentForProjects(projectIds: string[], limit: number = 20, agentId?: string): Conversation[] {
+    const db = this.getDb();
+    if (projectIds.length === 0) {
+      // No configured projects — return only legacy NULL-project rows.
+      const rows = db
+        .prepare(
+          `SELECT id, agent_id as agentId, project_id as projectId,
+                  last_activity_at as lastActivityAt, created_at as createdAt
+           FROM chat_conversations
+           WHERE project_id IS NULL
+             AND (? IS NULL OR agent_id = ?)
+           ORDER BY last_activity_at DESC
+           LIMIT ?`,
+        )
+        .all(agentId ?? null, agentId ?? null, limit) as Conversation[];
+      return rows;
+    }
+    const placeholders = projectIds.map(() => '?').join(', ');
+    const rows = db
+      .prepare(
+        `SELECT id, agent_id as agentId, project_id as projectId,
+                last_activity_at as lastActivityAt, created_at as createdAt
+         FROM chat_conversations
+         WHERE project_id IN (${placeholders})
+           AND (? IS NULL OR agent_id = ?)
+         ORDER BY last_activity_at DESC
+         LIMIT ?`,
+      )
+      .all(...projectIds, agentId ?? null, agentId ?? null, limit) as Conversation[];
+    return rows;
+  }
+
   expireStale(): number {
     const db = this.getDb();
     const cutoff = new Date(Date.now() - this.ttlMs).toISOString();
