@@ -12,17 +12,34 @@ export class SkillRouter {
    * @param skillTags - Optional x-pragents-tags from loaded skills for additional matching
    */
   async resolveAgent(task: string, projectId: string, prefer?: string[], skillTags?: string[]): Promise<string> {
-    const projectAgents = this.agents.filter((a) => a.projectId === projectId || a.projectId === 'company');
+    // projectId='*' (or empty) means "consider every configured agent".
+    // Used by the manual-dispatch entry point where the caller hasn't
+    // committed to a project yet — the agent that wins the keyword match
+    // implicitly carries its own project with it.
+    const projectAgents = !projectId || projectId === '*'
+      ? this.agents
+      : this.agents.filter((a) => a.projectId === projectId || a.projectId === 'company');
     if (projectAgents.length === 0) {
       throw new Error(`No agents available for project "${projectId}"`);
     }
 
-    // Keyword matching
-    const tokens = task.toLowerCase().split(/[^a-z0-9+#-]+/).filter(Boolean);
+    // Keyword matching — only tokens ≥ 3 chars participate, otherwise short
+    // stopwords like 'a', 'to', 'of', 'with' produce false-positive
+    // substring matches against any skill containing those letters.
+    const STOPWORDS = new Set([
+      'and','the','for','with','from','that','this','have','will','your','their',
+      'into','onto','about','some','more','than','then','also','just','only','must',
+      'should','would','could','make','make','run','new','use','using','via','per',
+    ]);
+    const tokens = task
+      .toLowerCase()
+      .split(/[^a-z0-9+#-]+/)
+      .filter((t) => t.length >= 3 && !STOPWORDS.has(t));
     const scored = projectAgents.map((agent) => {
-      const matches = agent.skills.filter((skill) =>
-        tokens.some((t) => skill.toLowerCase().includes(t) || t.includes(skill.toLowerCase())),
-      );
+      const matches = agent.skills.filter((skill) => {
+        const sk = skill.toLowerCase();
+        return tokens.some((t) => sk.includes(t) || t.includes(sk));
+      });
       return { agent, matches, score: matches.length };
     });
 

@@ -3,6 +3,7 @@ import type { TaskTracker } from '../../tasks/tracker.js';
 import type { AgentSessionManager } from '../../agents/manager.js';
 import type { ResolvedAgent } from '../../config/schema.js';
 import type { EventBuffer } from '../../events/buffer.js';
+import { SkillRouter } from '../../routing/router.js';
 import { logger } from '../../logging/index.js';
 
 // TODO(#28): conceptually a single-task creation is a 1-step Plan with
@@ -14,19 +15,43 @@ import { logger } from '../../logging/index.js';
 
 export function createTasksRoute(tracker: TaskTracker, agents: ResolvedAgent[], sessionMgr: AgentSessionManager, eventBuffer: EventBuffer) {
   const r = new Hono();
+  const router = new SkillRouter(agents);
 
   r.post('/', async (c) => {
     const body = await c.req.json();
-    const { projectId, agentId, description } = body;
+    const { projectId: bodyProjectId, agentId: bodyAgentId, description } = body;
 
     if (!description?.trim()) {
       return c.json({ error: 'Description is required' }, 400);
     }
 
-    const agent = agents.find((a) => a.id === agentId);
-    if (!agent) {
-      return c.json({ error: `Agent "${agentId}" not found in configuration` }, 400);
+    // Auto-routing: when agentId is omitted or set to 'auto', resolve the
+    // best-matching agent via the SkillRouter (keyword match against agent
+    // skills). The caller may still pin a specific agent for cases where they
+    // know better than the router (e.g. retry or explicit assignment).
+    let agent: ResolvedAgent | undefined;
+    let projectId = bodyProjectId;
+    if (!bodyAgentId || bodyAgentId === 'auto') {
+      // Without an explicit projectId, ask the router to consider every
+      // configured agent ('*'). The winning agent's own projectId then
+      // becomes the scope for the dispatched task.
+      try {
+        const resolvedId = await router.resolveAgent(description.trim(), projectId || '*');
+        agent = agents.find((a) => a.id === resolvedId);
+      } catch (err: any) {
+        return c.json({ error: err?.message ?? 'auto-routing failed' }, 400);
+      }
+    } else {
+      agent = agents.find((a) => a.id === bodyAgentId);
     }
+
+    if (!agent) {
+      return c.json({ error: `Agent "${bodyAgentId ?? 'auto'}" not resolvable for project "${projectId}"` }, 400);
+    }
+
+    // Lock projectId to the agent's own — prevents cross-project dispatch.
+    projectId = agent.projectId;
+    const agentId = agent.id;
 
     const task = tracker.create({ projectId, agentId, description: description.trim() });
 

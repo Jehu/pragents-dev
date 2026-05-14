@@ -60,17 +60,21 @@ function DispatchModal({
   agents: Array<{ id: string; name?: string; projectId?: string }>;
   onClose: () => void;
 }) {
-  const [agentId, setAgentId] = useState(agents[0]?.id ?? '');
+  // 'auto' = let the SkillRouter pick the best-matching agent based on the
+  // task description. Users only override when they know better than the
+  // router (retry, deliberate assignment).
+  const [agentId, setAgentId] = useState<string>('auto');
   const [description, setDescription] = useState('');
   const [error, setError] = useState<string | null>(null);
 
-  // The backend's POST /tasks requires a projectId. Derive it from the
-  // selected agent's projectId — each agent is bound to exactly one project
-  // in pragents.yaml.
-  const selectedAgentProjectId = agents.find((a) => a.id === agentId)?.projectId;
+  // The backend's POST /tasks needs a projectId. In auto mode the server
+  // derives it from the resolved agent; in pinned mode we send the picked
+  // agent's projectId so the dispatch lands in the right scope.
+  const selectedAgentProjectId =
+    agentId === 'auto' ? undefined : agents.find((a) => a.id === agentId)?.projectId;
 
   const mutation = useMutation({
-    mutationFn: async (body: { agentId: string; projectId?: string; description: string }) => {
+    mutationFn: async (body: { agentId?: string; projectId?: string; description: string }) => {
       const res = await fetch('/api/v1/tasks', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -107,7 +111,9 @@ function DispatchModal({
           value={agentId}
           onChange={(e) => setAgentId(e.target.value)}
           className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 outline-none focus:border-indigo-500"
+          aria-label="Target agent"
         >
+          <option value="auto">✨ Auto — smart route to best-matching agent</option>
           {agents.map((a) => (
             <option key={a.id} value={a.id}>
               {a.name ?? a.id}
