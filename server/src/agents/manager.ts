@@ -234,7 +234,7 @@ export class AgentSessionManager {
     }
   }
 
-  async dispatch(agent: ResolvedAgent, task: string): Promise<string> {
+  async dispatch(agent: ResolvedAgent, task: string, taskId?: string): Promise<string> {
     // Enforce token budget before dispatching
     if (agent.tokenBudget && this.costTracker) {
       const usage = this.costTracker.getAgentCost(agent.id);
@@ -336,6 +336,7 @@ export class AgentSessionManager {
         model: agent.model,
         tokensIn: Math.ceil((task + contextStr).length / 4),
         tokensOut: Math.ceil(response.length / 4),
+        taskId,
       });
     }
 

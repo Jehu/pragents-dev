@@ -94,38 +94,52 @@ export class MemoryEngine {
     }
     const db = getDb();
 
-    // For project scopes, also include company-scope facts (cross-project visibility)
-    const isProjectScope = scope !== 'company' && scope !== 'agent';
-    const scopeFilter = isProjectScope ? `(scope = ? OR scope = 'company')` : `scope = ?`;
+    // Determine the SQL scope filter based on the scope argument:
+    //   'all'     → no scope filter at all (returns facts from every scope)
+    //   'company' → exact match on 'company'
+    //   'agent'   → exact match on 'agent'
+    //   anything  → treat as a project ID; include company-scope as cross-project visibility
+    //   else
+    let scopeFilter: string;
+    let scopeParams: string[];
+    if (scope === 'all') {
+      scopeFilter = '1=1';
+      scopeParams = [];
+    } else if (scope === 'company' || scope === 'agent') {
+      scopeFilter = 'scope = ?';
+      scopeParams = [scope];
+    } else {
+      scopeFilter = "(scope = ? OR scope = 'company')";
+      scopeParams = [scope];
+    }
+    const isProjectScope = scope !== 'company' && scope !== 'agent' && scope !== 'all';
 
-    // Keyword search fallback
+    // Keyword search fallback (always runs — vector search is a *boost*, not a replacement)
     const sqlRows = db
       .prepare(
         `SELECT id, scope, category, content, agent_id as agentId, created_at as createdAt
          FROM facts WHERE ${scopeFilter} AND content LIKE ? ORDER BY created_at DESC LIMIT ?`,
       )
-      .all(scope, `%${query}%`, limit) as Fact[];
+      .all(...scopeParams, `%${query}%`, limit) as Fact[];
 
-    // Vector search
+    // Vector search — supplement keyword hits with semantic matches.
     try {
-      // Search project-scoped and company-scoped vectors
-      const vectorResults = isProjectScope
+      const vectorResults = scope === 'all' || isProjectScope
         ? await this.vectorStore.search(query, undefined, limit)
         : await this.vectorStore.search(query, { scope }, limit);
 
       const vectorFacts = vectorResults
-        .filter(r => {
-          // Filter to matching scopes
+        .filter((r) => {
+          if (scope === 'all') return true;
           const metaScope = r.metadata.scope;
           return metaScope === scope || (isProjectScope && metaScope === 'company');
         })
-        .map(r => ({
+        .map((r) => ({
           id: r.id, scope: r.metadata.scope || scope, category: r.metadata.category || '',
           content: r.content, agentId: r.metadata.agentId || '', createdAt: new Date().toISOString(),
         }));
-      // Merge: vector results first, then keyword results (deduped)
-      const seen = new Set(vectorFacts.map(f => f.id));
-      return [...vectorFacts, ...sqlRows.filter(f => !seen.has(f.id))].slice(0, limit);
+      const seen = new Set(vectorFacts.map((f) => f.id));
+      return [...vectorFacts, ...sqlRows.filter((f) => !seen.has(f.id))].slice(0, limit);
     } catch {
       return sqlRows;
     }

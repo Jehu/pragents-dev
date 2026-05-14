@@ -53,7 +53,7 @@ export class ToolExecutor {
             this.deps.tracker.setFailed(task.id, `No agent found for "${agentId}"`);
             return JSON.stringify({ taskId: task.id, status: 'failed', error: `No agent found for "${agentId}"` });
           }
-          this.deps.sessionMgr.dispatch(agent, description).then(
+          this.deps.sessionMgr.dispatch(agent, description, task.id).then(
             (result) => this.deps.tracker.setComplete(task.id, result),
             (err) => this.deps.tracker.setFailed(task.id, err?.message || String(err)),
           );

@@ -60,8 +60,8 @@ export function createWorkflowsRoute(registry: WorkflowRegistry, engine: Workflo
 
     const body = await c.req.json().catch(() => ({}));
     try {
-      const runId = await engine.execute(def, body.params);
-      return c.json({ runId, status: 'complete' }, 201);
+      const runId = engine.executeAsync(def, body.params);
+      return c.json({ runId, status: 'started' }, 202);
     } catch (err: any) {
       return c.json({ error: err.message }, 500);
     }

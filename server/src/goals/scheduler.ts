@@ -50,6 +50,47 @@ export class GoalScheduler {
     }
   }
 
+  /**
+   * Manually trigger a goal by id. Returns the goal_run id on success.
+   * Rejects if the goal is unknown, has no workflow, a run is already active,
+   * or the per-goal cooldown has not elapsed since the last manual trigger.
+   */
+  private lastManualTrigger: Map<string, number> = new Map();
+  private readonly manualTriggerCooldownMs = 30_000;
+
+  async runGoalById(id: string): Promise<{ goalRunId: string; workflowRunId: string }> {
+    const goal = this.goals?.find((g) => g.id === id);
+    if (!goal) throw new Error(`Goal "${id}" not found`);
+
+    const last = this.lastManualTrigger.get(id);
+    if (last && Date.now() - last < this.manualTriggerCooldownMs) {
+      const wait = Math.ceil((this.manualTriggerCooldownMs - (Date.now() - last)) / 1000);
+      throw new Error(`Cooldown active — retry in ${wait}s`);
+    }
+    const existingRun = [...this.activeGoalRuns.values()].find((r) => r.goalId === id);
+    if (existingRun) {
+      throw new Error(`Goal "${id}" already running (goal_run ${existingRun.goalRunId})`);
+    }
+
+    const wfDef = this.wfRegistry.get(goal.workflow);
+    if (!wfDef) throw new Error(`Workflow "${goal.workflow}" not found`);
+
+    this.lastManualTrigger.set(id, Date.now());
+
+    const goalRunId = randomUUID();
+    const db = getDb();
+    db.prepare('INSERT INTO goal_runs (id, goal_id, status) VALUES (?, ?, ?)').run(goalRunId, id, 'triggered');
+
+    const workflowRunId = this.wfEngine.executeAsync(wfDef, { goalId: id, goalRunId, manual: true }, goalRunId);
+    db.prepare('UPDATE goal_runs SET workflow_run_id = ?, status = ? WHERE id = ?').run(workflowRunId, 'running', goalRunId);
+    this.activeGoalRuns.set(workflowRunId, {
+      goalRunId,
+      deadline: goal.deadline ? this.nextDeadline(goal.deadline) : new Date(Date.now() + 86400000),
+      goalId: id,
+    });
+    return { goalRunId, workflowRunId };
+  }
+
   private async trigger(goal: GoalDef): Promise<void> {
     // Skip if a run for this goal is already active (overlap protection)
     const existingRun = [...this.activeGoalRuns.values()].find(r => r.goalId === goal.id);
@@ -99,7 +140,7 @@ export class GoalScheduler {
           });
           tracker.setRunning(task.id);
 
-          this.sessionMgr.dispatch(this.pmAgent, escalationMsg)
+          this.sessionMgr.dispatch(this.pmAgent, escalationMsg, task.id)
             .then(() => {
               tracker.setComplete(task.id, 'Escalation dispatched to PM agent');
               logger.info({ goalId: goal.id, goalRunId: info.goalRunId, taskId: task.id }, 'Goal escalation dispatched successfully');

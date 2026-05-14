@@ -10,9 +10,10 @@ import { useCommandPaletteStore } from '../stores/commandPalette.js';
 export interface PaletteItem {
   id: string;
   label: string;
-  category: 'nav' | 'agent' | 'task' | 'skill' | 'action';
+  category: 'nav' | 'agent' | 'task' | 'skill' | 'action' | 'conversation';
   path?: string;
   params?: Record<string, string>;
+  search?: Record<string, string>;
   searchQuery?: string;
   onActivate?: () => void;
 }
@@ -132,15 +133,15 @@ export function CommandPalette() {
   const [activeIdx, setActiveIdx] = useState(0);
   const [showDispatch, setShowDispatch] = useState(false);
 
-  // Fetch agents
-  const { data: agentsData } = useQuery<{ agents?: Array<{ id: string; name?: string }> }>({
+  // Fetch agents — API returns a bare array (createAgentsRoute)
+  const { data: agentsData } = useQuery<Array<{ id: string; name?: string }> | { agents?: Array<{ id: string; name?: string }> }>({
     queryKey: ['agents'],
     queryFn: () => fetch('/api/v1/agents').then((r) => r.json()),
     staleTime: 30_000,
     enabled: open,
   });
 
-  // Fetch tasks
+  // Fetch tasks — API returns { tasks, total, page, limit }
   const { data: tasksData } = useQuery<{ tasks?: Array<{ id: string; description?: string }> }>({
     queryKey: ['tasks', 'palette'],
     queryFn: () => fetch('/api/v1/tasks?limit=20').then((r) => r.json()),
@@ -148,17 +149,26 @@ export function CommandPalette() {
     enabled: open,
   });
 
-  // Fetch skills
-  const { data: skillsData } = useQuery<{ skills?: Array<{ name: string }> }>({
+  // Fetch skills — API returns a bare array
+  const { data: skillsData } = useQuery<Array<{ name: string }> | { skills?: Array<{ name: string }> }>({
     queryKey: ['skills'],
     queryFn: () => fetch('/api/v1/skills').then((r) => r.json()),
     staleTime: 30_000,
     enabled: open,
   });
 
-  const agents = agentsData?.agents ?? [];
+  // Fetch conversations — API returns { conversations: [...] }
+  const { data: conversationsData } = useQuery<{ conversations?: Array<{ id: string; agentId?: string; agentName?: string }> }>({
+    queryKey: ['chat-conversations', 'palette'],
+    queryFn: () => fetch('/api/v1/chat/conversations').then((r) => r.json()),
+    staleTime: 30_000,
+    enabled: open,
+  });
+
+  const agents = Array.isArray(agentsData) ? agentsData : (agentsData?.agents ?? []);
   const tasks = tasksData?.tasks ?? [];
-  const skills = skillsData?.skills ?? [];
+  const skills = Array.isArray(skillsData) ? skillsData : (skillsData?.skills ?? []);
+  const conversations = conversationsData?.conversations ?? [];
 
   // Build items list
   const agentItems: PaletteItem[] = agents.map((a) => ({
@@ -169,19 +179,33 @@ export function CommandPalette() {
     params: { agentId: a.id },
   }));
 
-  const taskItems: PaletteItem[] = tasks.map((t) => ({
-    id: `task-${t.id}`,
-    label: `Task: ${t.description ? t.description.slice(0, 50) : t.id}`,
-    category: 'task',
-    path: '/tasks/$taskId',
-    params: { taskId: t.id },
-  }));
+  const taskItems: PaletteItem[] = tasks.map((t) => {
+    const shortHash = String(t.id).slice(0, 8);
+    const descPart = t.description ? t.description.slice(0, 40) : '';
+    // Include both description and short hash so hash-based search matches.
+    const label = descPart ? `Task: ${descPart} [${shortHash}]` : `Task: ${shortHash}`;
+    return {
+      id: `task-${t.id}`,
+      label,
+      category: 'task',
+      path: '/tasks/$taskId',
+      params: { taskId: t.id },
+    };
+  });
 
   const skillItems: PaletteItem[] = skills.map((s) => ({
     id: `skill-${s.name}`,
     label: `Skill: ${s.name}`,
     category: 'skill',
     searchQuery: s.name,
+  }));
+
+  const conversationItems: PaletteItem[] = conversations.map((c) => ({
+    id: `conversation-${c.id}`,
+    label: `Conversation: ${c.agentName ?? c.agentId ?? c.id.slice(0, 8)}`,
+    category: 'conversation',
+    path: '/chat',
+    search: { conversationId: c.id },
   }));
 
   const dispatchItem: PaletteItem = {
@@ -195,6 +219,7 @@ export function CommandPalette() {
     ...agentItems,
     ...taskItems,
     ...skillItems,
+    ...conversationItems,
     dispatchItem,
   ];
 
@@ -230,11 +255,10 @@ export function CommandPalette() {
         return;
       }
       if (item.path) {
-        if (item.params) {
-          void navigate({ to: item.path as never, params: item.params as never });
-        } else {
-          void navigate({ to: item.path as never });
-        }
+        const navArgs: Record<string, unknown> = { to: item.path };
+        if (item.params) navArgs.params = item.params;
+        if (item.search) navArgs.search = item.search;
+        void navigate(navArgs as never);
         close();
       }
     },

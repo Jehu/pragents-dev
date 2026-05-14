@@ -102,7 +102,7 @@ function MemoryView() {
 
   // Search results (when query present)
   const searchUrl = buildSearchUrl(debouncedQuery, scope, 20);
-  const { data: searchResults, isLoading: searchLoading } = useQuery<MemoryFact[]>({
+  const { data: searchResults, isLoading: searchLoading } = useQuery<MemoryFact[] | { facts: MemoryFact[] }>({
     queryKey: ['memory-search', debouncedQuery, scope],
     queryFn: () => fetch(searchUrl).then((r) => r.json()),
     staleTime: 15_000,
@@ -129,7 +129,12 @@ function MemoryView() {
 
   let displayFacts: MemoryFact[] = [];
   if (debouncedQuery) {
-    displayFacts = Array.isArray(searchResults) ? searchResults : [];
+    // /memory/search returns { scope, query, count, facts: [...] }; legacy callers received bare arrays.
+    displayFacts = Array.isArray(searchResults)
+      ? (searchResults as MemoryFact[])
+      : Array.isArray((searchResults as any)?.facts)
+      ? ((searchResults as any).facts as MemoryFact[])
+      : [];
   } else {
     const raw = allFactsData;
     const list = Array.isArray(raw)

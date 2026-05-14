@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from '@tanstack/react-router';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { useState, useEffect } from 'react';
 import { StatusPill, EmptyState } from '../../components/ui/index.js';
 import type { StatusType } from '../../components/ui/index.js';
@@ -92,6 +92,26 @@ function stepDot(status: string): string {
 
 function WorkflowDefCard({ wf, latestRun }: { wf: WorkflowDef; latestRun?: WorkflowRun }) {
   const stepCount = wf.stepCount ?? (Array.isArray(wf.steps) ? wf.steps.length : 0);
+  const queryClient = useQueryClient();
+  const [error, setError] = useState<string | null>(null);
+
+  const runMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/v1/workflows/${encodeURIComponent(wf.name)}/run`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      if (!res.ok) throw new Error((await res.text()) || `HTTP ${res.status}`);
+      return res.json();
+    },
+    onSuccess: () => {
+      setError(null);
+      void queryClient.invalidateQueries({ queryKey: ['workflow-runs'] });
+    },
+    onError: (e: unknown) => setError(e instanceof Error ? e.message : 'Failed to start'),
+  });
+
   return (
     <div className="bg-zinc-900 border border-zinc-800 hover:border-zinc-700 rounded-lg p-3.5">
       <div className="flex items-start justify-between gap-3">
@@ -117,7 +137,18 @@ function WorkflowDefCard({ wf, latestRun }: { wf: WorkflowDef; latestRun?: Workf
               </>
             )}
           </div>
+          {error && (
+            <p className="text-[11px] text-red-400 mt-1.5">Failed to start: {error}</p>
+          )}
         </div>
+        <button
+          type="button"
+          onClick={() => runMutation.mutate()}
+          disabled={runMutation.isPending}
+          className="text-xs px-2.5 py-1 rounded bg-indigo-500/20 text-indigo-300 hover:bg-indigo-500/30 disabled:opacity-50 disabled:cursor-not-allowed border border-indigo-500/30 flex-shrink-0"
+        >
+          {runMutation.isPending ? 'Starting…' : '▶ Run'}
+        </button>
       </div>
     </div>
   );

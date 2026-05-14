@@ -8,16 +8,33 @@ const VARIANT_STYLES: Record<ApprovalVariant, string> = {
   skill: 'bg-sky-500/20 text-sky-300',
 };
 
+export type ApprovalStatus = 'pending' | 'approving' | 'approved' | 'cancelled';
+
+const STATUS_LABEL: Record<Exclude<ApprovalStatus, 'pending'>, string> = {
+  approving: 'Approving…',
+  approved: 'Approved',
+  cancelled: 'Cancelled',
+};
+
+const STATUS_STYLE: Record<Exclude<ApprovalStatus, 'pending'>, string> = {
+  approving: 'bg-zinc-700 text-zinc-300',
+  approved: 'bg-emerald-500/20 text-emerald-300',
+  cancelled: 'bg-zinc-700 text-zinc-400',
+};
+
 interface ApprovalCardProps {
   variant: ApprovalVariant;
   title: string;
   body: React.ReactNode;
-  onApprove: () => void;
-  onReject: () => void;
+  onApprove?: () => void;
+  onReject?: () => void;
   onTertiary?: () => void;
   tertiaryLabel?: string;
   disabled?: boolean;
   isLoading?: boolean;
+  /** When set to anything other than 'pending' (or undefined), the Approve / Reject
+   *  buttons are replaced by a resolved-state pill. */
+  status?: ApprovalStatus;
 }
 
 export function ApprovalCard({
@@ -30,7 +47,9 @@ export function ApprovalCard({
   tertiaryLabel = 'Review',
   disabled = false,
   isLoading = false,
+  status,
 }: ApprovalCardProps) {
+  const resolved = status && status !== 'pending';
   return (
     <div aria-busy={isLoading} className="bg-zinc-900 border border-zinc-800 hover:border-zinc-700 rounded-lg p-3">
       <div className="flex items-start justify-between gap-3">
@@ -46,29 +65,43 @@ export function ApprovalCard({
           </div>
         </div>
         <div className="flex gap-1.5 flex-shrink-0">
-          {onTertiary && (
-            <button
-              onClick={onTertiary}
-              disabled={disabled}
-              className="text-xs px-2.5 py-1 rounded bg-zinc-800 hover:bg-zinc-700 disabled:opacity-40"
+          {resolved ? (
+            <span
+              className={`text-[11px] uppercase tracking-wider font-semibold px-2 py-1 rounded ${STATUS_STYLE[status as Exclude<ApprovalStatus, 'pending'>]}`}
             >
-              {tertiaryLabel}
-            </button>
+              {STATUS_LABEL[status as Exclude<ApprovalStatus, 'pending'>]}
+            </span>
+          ) : (
+            <>
+              {onTertiary && (
+                <button
+                  onClick={onTertiary}
+                  disabled={disabled}
+                  className="text-xs px-2.5 py-1 rounded bg-zinc-800 hover:bg-zinc-700 disabled:opacity-40"
+                >
+                  {tertiaryLabel}
+                </button>
+              )}
+              {onReject && (
+                <button
+                  onClick={onReject}
+                  disabled={disabled}
+                  className="text-xs px-2.5 py-1 rounded bg-zinc-800 hover:bg-zinc-700 disabled:opacity-40"
+                >
+                  Reject
+                </button>
+              )}
+              {onApprove && (
+                <button
+                  onClick={onApprove}
+                  disabled={disabled}
+                  className="btn-approve text-xs px-2.5 py-1 rounded font-medium disabled:opacity-40"
+                >
+                  Approve
+                </button>
+              )}
+            </>
           )}
-          <button
-            onClick={onReject}
-            disabled={disabled}
-            className="text-xs px-2.5 py-1 rounded bg-zinc-800 hover:bg-zinc-700 disabled:opacity-40"
-          >
-            Reject
-          </button>
-          <button
-            onClick={onApprove}
-            disabled={disabled}
-            className="btn-approve text-xs px-2.5 py-1 rounded font-medium disabled:opacity-40"
-          >
-            Approve
-          </button>
         </div>
       </div>
     </div>

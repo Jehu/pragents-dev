@@ -44,6 +44,30 @@ export class WorkflowEngine {
     }
   }
 
+  /**
+   * Fire-and-forget variant of execute(). Returns the runId immediately after
+   * the run row is created in the tracker; the workflow then executes in the
+   * background. Errors are logged but not propagated — observe via events.
+   */
+  executeAsync(def: WorkflowDef, params?: any, triggerSourceRunId?: string): string {
+    const run = this.tracker.createRun(def.name, params, triggerSourceRunId);
+    this.emit('workflow.step_started', { runId: run.id, workflow: def.name });
+
+    void (async () => {
+      try {
+        await this.executeSteps(def, run.id, {});
+        this.tracker.completeRun(run.id);
+        this.emit('workflow.completed', { runId: run.id, workflow: def.name });
+      } catch (err: any) {
+        this.tracker.failRun(run.id);
+        this.emit('workflow.failed', { runId: run.id, workflow: def.name, error: err.message });
+        logger.error({ runId: run.id, workflow: def.name, err: err?.message }, 'workflow async execution failed');
+      }
+    })();
+
+    return run.id;
+  }
+
   private async executeSteps(def: WorkflowDef, runId: string, outputs: Record<string, string>): Promise<void> {
     const steps = def.steps;
     for (const step of steps) {

@@ -2,8 +2,35 @@ import { Hono } from 'hono';
 import { getDb } from '../../db/sqlite.js';
 import type { MemoryEngine } from '../../memory/engine.js';
 
-export function createMemoryRoute(engine: MemoryEngine) {
+/**
+ * Resolve a UI scope bucket (`all`, `company`, `project`, `agent`) into a SQL
+ * WHERE clause. Concrete scope values (`kunde-webshop`, `office@company`) are
+ * passed through unchanged for backwards compatibility.
+ */
+function resolveScopeBucket(
+  scope: string | undefined,
+  projectIds: string[],
+): { where: string; params: string[] } {
+  if (!scope || scope === 'all') return { where: '1=1', params: [] };
+  if (scope === 'company') return { where: 'scope = ?', params: ['company'] };
+  if (scope === 'agent') {
+    // Agent-scoped facts use either the literal 'agent' marker or an
+    // `<id>@<project>` form. Match both.
+    return { where: "(scope = 'agent' OR scope LIKE '%@%')", params: [] };
+  }
+  if (scope === 'project') {
+    if (projectIds.length === 0) return { where: '1=0', params: [] };
+    const placeholders = projectIds.map(() => '?').join(', ');
+    return { where: `scope IN (${placeholders})`, params: projectIds };
+  }
+  // Concrete scope value (e.g. project ID or agent ID)
+  return { where: 'scope = ?', params: [scope] };
+}
+
+export function createMemoryRoute(engine: MemoryEngine, config?: { projects: Record<string, unknown> }) {
   const r = new Hono();
+
+  const projectIds = () => (config ? Object.keys(config.projects) : []);
 
   r.get('/facts', async (c) => {
     const scope = c.req.query('scope');
@@ -11,14 +38,25 @@ export function createMemoryRoute(engine: MemoryEngine) {
     const limit = parseInt(c.req.query('limit') || '50');
 
     if (search) {
-      const facts = await engine.recall(search, scope || 'company', limit);
+      // Map UI buckets to engine.recall semantics:
+      //   - 'all' / undefined → search across every scope
+      //   - 'project'         → defer to the first configured project (cross-project visibility kicks in)
+      //   - 'agent'/'company' / concrete value → passed through verbatim
+      let recallScope: string;
+      if (!scope || scope === 'all' || scope === 'project') {
+        recallScope = 'all';
+      } else {
+        recallScope = scope;
+      }
+      const facts = await engine.recall(search, recallScope, limit);
       return c.json(facts);
     }
 
     const db = getDb();
-    const rows = scope
-      ? db.prepare('SELECT * FROM facts WHERE scope = ? ORDER BY created_at DESC LIMIT ?').all(scope, limit)
-      : db.prepare('SELECT * FROM facts ORDER BY created_at DESC LIMIT ?').all(limit);
+    const { where, params } = resolveScopeBucket(scope, projectIds());
+    const rows = db
+      .prepare(`SELECT * FROM facts WHERE ${where} ORDER BY created_at DESC LIMIT ?`)
+      .all(...params, limit);
     return c.json(rows);
   });
 
@@ -27,10 +65,12 @@ export function createMemoryRoute(engine: MemoryEngine) {
     return c.json({ deleted: true });
   });
 
-  // Cross-project search: search company-scope facts (visible to all projects)
+  // Scoped search across facts. The web UI sends one of four buckets
+  // ('all', 'company', 'project', 'agent'); the recall semantics map
+  // identically to /facts above.
   r.get('/search', async (c) => {
     const query = c.req.query('query');
-    const scope = c.req.query('scope') || 'company';
+    const scope = c.req.query('scope');
     const includeProject = c.req.query('includeProject');
     const limit = parseInt(c.req.query('limit') || '20');
 
@@ -38,15 +78,21 @@ export function createMemoryRoute(engine: MemoryEngine) {
       return c.json({ error: 'query parameter is required' }, 400);
     }
 
-    // If scope=company, use global search (cross-project)
+    // Cross-project (company) — backwards-compatible default for callers that
+    // explicitly request company scope with an includeProject hint.
     if (scope === 'company') {
       const facts = await engine.searchGlobal(query, { includeProject: includeProject || undefined, limit });
       return c.json({ scope, query, count: facts.length, facts });
     }
 
-    // Otherwise, standard scoped recall
-    const facts = await engine.recall(query, scope, limit);
-    return c.json({ scope, query, count: facts.length, facts });
+    let recallScope: string;
+    if (!scope || scope === 'all' || scope === 'project') {
+      recallScope = 'all';
+    } else {
+      recallScope = scope;
+    }
+    const facts = await engine.recall(query, recallScope, limit);
+    return c.json({ scope: scope ?? 'all', query, count: facts.length, facts });
   });
 
   // Remember a new fact (POST for creating facts via API)

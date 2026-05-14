@@ -107,6 +107,25 @@ export function createChatRoute(
     return c.json({ conversations });
   });
 
+  // GET /api/v1/chat/conversations/:id/messages — return message history
+  // The conversationId itself is the access token in the current single-tenant
+  // deployment; an optional ?projectId= query enforces a soft scope check.
+  app.get('/conversations/:id/messages', (c) => {
+    const convId = c.req.param('id');
+    const limit = z.coerce.number().int().min(1).max(500).safeParse(c.req.query('limit'));
+    const requestedProject = c.req.query('projectId');
+
+    const conv = conversationManager.getConversation(convId);
+    if (!conv) return c.json({ error: 'Conversation not found' }, 404);
+    if (requestedProject && conv.projectId !== requestedProject) {
+      // Mismatched project — return 404 (not 403) to avoid leaking existence.
+      return c.json({ error: 'Conversation not found' }, 404);
+    }
+
+    const messages = conversationManager.getHistory(convId, limit.success ? limit.data : 50);
+    return c.json({ conversation: conv, messages });
+  });
+
   app.post('/', async (c) => {
     // 1. Parse and validate body
     let body: unknown;

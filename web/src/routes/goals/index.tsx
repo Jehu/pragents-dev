@@ -1,5 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { useState, useEffect } from 'react';
 import { StatusPill, EmptyState } from '../../components/ui/index.js';
 import type { StatusType } from '../../components/ui/index.js';
@@ -118,6 +118,35 @@ function toStatusPill(s: string): StatusType {
 // ─── Goal Table ───────────────────────────────────────────────────────────────
 
 function GoalTable({ goals }: { goals: Goal[] }) {
+  const queryClient = useQueryClient();
+  const [runError, setRunError] = useState<Record<string, string>>({});
+
+  const runMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await fetch(`/api/v1/goals/${encodeURIComponent(id)}/run`, { method: 'POST' });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error ?? `HTTP ${res.status}`);
+      }
+      return res.json();
+    },
+    onSuccess: (_data, id) => {
+      setRunError((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+      void queryClient.invalidateQueries({ queryKey: ['goal-runs'] });
+      // Scroll to Recent Runs section so the user sees the new entry.
+      requestAnimationFrame(() => {
+        document.getElementById('goals-recent-runs')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    },
+    onError: (err: unknown, id) => {
+      setRunError((prev) => ({ ...prev, [id]: err instanceof Error ? err.message : 'Failed' }));
+    },
+  });
+
   if (goals.length === 0) {
     return (
       <EmptyState
@@ -138,38 +167,55 @@ function GoalTable({ goals }: { goals: Goal[] }) {
             <th className="py-2 pr-4 font-medium">Schedule</th>
             <th className="py-2 pr-4 font-medium">Target</th>
             <th className="py-2 pr-4 font-medium">Deadline</th>
+            <th className="py-2 pr-4 font-medium w-24"></th>
           </tr>
         </thead>
         <tbody>
-          {goals.map((g) => (
-            <tr key={g.id} className="border-b border-zinc-800/50 hover:bg-zinc-900/50">
-              <td className="py-2.5 pr-4">
-                <span className="font-mono text-xs text-zinc-400">{g.id}</span>
-              </td>
-              <td className="py-2.5 pr-4">
-                <span className="text-zinc-200">{g.description}</span>
-              </td>
-              <td className="py-2.5 pr-4">
-                <span className="font-mono text-xs text-zinc-300 block">{g.cadence ?? g.cron}</span>
-                <span className="text-[11px] text-zinc-500">{parseCron(g.cadence ?? g.cron ?? '')}</span>
-              </td>
-              <td className="py-2.5 pr-4">
-                <span className="text-xs text-zinc-400">
-                  {g.targetAgentId ?? g.targetWorkflowId ?? g.workflow ?? '—'}
-                </span>
-              </td>
-              <td className="py-2.5 pr-4">
-                <span className="text-xs text-zinc-400">
-                  {g.deadline
-                    ? (() => {
-                        const ms = new Date(g.deadline).getTime();
-                        return isNaN(ms) ? parseCron(g.deadline) : relativeTimeMs(ms);
-                      })()
-                    : '—'}
-                </span>
-              </td>
-            </tr>
-          ))}
+          {goals.map((g) => {
+            const isPending = runMutation.isPending && runMutation.variables === g.id;
+            return (
+              <tr key={g.id} className="border-b border-zinc-800/50 hover:bg-zinc-900/50">
+                <td className="py-2.5 pr-4 align-top">
+                  <span className="font-mono text-xs text-zinc-400">{g.id}</span>
+                </td>
+                <td className="py-2.5 pr-4 align-top">
+                  <span className="text-zinc-200">{g.description}</span>
+                </td>
+                <td className="py-2.5 pr-4 align-top">
+                  <span className="font-mono text-xs text-zinc-300 block">{g.cadence ?? g.cron}</span>
+                  <span className="text-[11px] text-zinc-500">{parseCron(g.cadence ?? g.cron ?? '')}</span>
+                </td>
+                <td className="py-2.5 pr-4 align-top">
+                  <span className="text-xs text-zinc-400">
+                    {g.targetAgentId ?? g.targetWorkflowId ?? g.workflow ?? '—'}
+                  </span>
+                </td>
+                <td className="py-2.5 pr-4 align-top">
+                  <span className="text-xs text-zinc-400">
+                    {g.deadline
+                      ? (() => {
+                          const ms = new Date(g.deadline).getTime();
+                          return isNaN(ms) ? parseCron(g.deadline) : relativeTimeMs(ms);
+                        })()
+                      : '—'}
+                  </span>
+                </td>
+                <td className="py-2.5 pr-4 align-top text-right">
+                  <button
+                    type="button"
+                    onClick={() => runMutation.mutate(g.id)}
+                    disabled={isPending}
+                    className="text-xs px-2.5 py-1 rounded bg-indigo-500/20 text-indigo-300 hover:bg-indigo-500/30 disabled:opacity-50 disabled:cursor-not-allowed border border-indigo-500/30"
+                  >
+                    {isPending ? 'Starting…' : '▶ Run now'}
+                  </button>
+                  {runError[g.id] && (
+                    <p className="text-[11px] text-red-400 mt-1">{runError[g.id]}</p>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
@@ -289,7 +335,7 @@ function GoalsPage() {
         )}
       </section>
 
-      <section>
+      <section id="goals-recent-runs">
         <h2 className="text-sm font-semibold text-zinc-400 uppercase tracking-wider mb-3">
           Recent Runs
           <span className="ml-2 text-zinc-600 font-normal normal-case">({runs.length})</span>

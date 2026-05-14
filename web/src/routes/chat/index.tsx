@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createFileRoute } from '@tanstack/react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { MasterDetail, ApprovalCard } from '../../components/ui/index.js';
+import { useEventBusStore } from '../../stores/eventBus.js';
 
 // ---------------------------------------------------------------------------
 // Route definition
@@ -38,6 +39,11 @@ export interface ChatMessage {
   plan?: {
     steps: Array<{ description: string; agentId: string; dependsOn?: number }>;
   };
+  /** Resolved plan lifecycle status for plan_proposal messages.
+   *  'pending' = waiting for user decision (default)
+   *  'approving' = optimistic local state after click, before SSE confirmation
+   *  'approved' / 'cancelled' = confirmed via plan.approved / plan.cancelled SSE event */
+  planStatus?: 'pending' | 'approving' | 'approved' | 'cancelled';
   streaming?: boolean;
 }
 
@@ -147,7 +153,13 @@ function ConversationList({
 // Message bubble
 // ---------------------------------------------------------------------------
 
-function MessageBubble({ msg }: { msg: ChatMessage }) {
+function MessageBubble({
+  msg,
+  onApprovePlan,
+}: {
+  msg: ChatMessage;
+  onApprovePlan?: (planId: string) => void;
+}) {
   if (msg.subtype === 'status') {
     return (
       <div className="flex justify-center py-1">
@@ -184,12 +196,9 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
               <span>{msg.content}</span>
             )
           }
-          onApprove={() => {
-            if (msg.planId) {
-              fetch(`/api/v1/plans/${msg.planId}/approve`, { method: 'POST' }).catch(() => {});
-            }
-          }}
-          onReject={() => {}}
+          disabled={msg.planStatus !== undefined && msg.planStatus !== 'pending'}
+          status={msg.planStatus}
+          onApprove={() => msg.planId && onApprovePlan?.(msg.planId)}
         />
       </div>
     );
@@ -225,10 +234,14 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
 function ThreadPanel({
   conversationId,
   agentId,
+  availableAgents,
+  onPickDraftAgent,
   onConversationCreated,
 }: {
   conversationId?: string;
   agentId?: string;
+  availableAgents: Array<{ id: string; name?: string }>;
+  onPickDraftAgent: (id: string) => void;
   onConversationCreated: (id: string) => void;
 }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -238,10 +251,77 @@ function ThreadPanel({
   const bottomRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
-  // Sync when outer conversationId changes (user picks a different convo)
+  const [historyState, setHistoryState] = useState<'idle' | 'loading' | 'error'>('idle');
+
+  // SSE event-bus subscription for plan lifecycle updates.
+  const busEvents = useEventBusStore((s) => s.events);
+  useEffect(() => {
+    const latest = busEvents[busEvents.length - 1];
+    if (!latest || typeof latest.type !== 'string') return;
+    if (latest.type !== 'plan.approved' && latest.type !== 'plan.cancelled') return;
+    const planId = (latest.data as { planId?: string } | undefined)?.planId;
+    if (!planId) return;
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.subtype === 'plan_proposal' && m.planId === planId
+          ? { ...m, planStatus: latest.type === 'plan.approved' ? 'approved' : 'cancelled' }
+          : m,
+      ),
+    );
+  }, [busEvents]);
+
+  const handleApprovePlan = useCallback((planId: string) => {
+    // Optimistic: hide buttons immediately, then fire the POST.
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.subtype === 'plan_proposal' && m.planId === planId
+          ? { ...m, planStatus: 'approving' }
+          : m,
+      ),
+    );
+    fetch(`/api/v1/plans/${planId}/approve`, { method: 'POST' }).catch(() => {
+      // Keep the optimistic state — the SSE plan.approved/plan.cancelled event
+      // is the authoritative final state. A 409 ("already done") means another
+      // path already approved, which counts as approved for the UI.
+    });
+  }, []);
+
+  // Sync when outer conversationId changes (user picks a different convo) +
+  // load the conversation's prior messages.
   useEffect(() => {
     setActiveConvId(conversationId);
     setMessages([]);
+    if (!conversationId) {
+      setHistoryState('idle');
+      return;
+    }
+
+    const ctrl = new AbortController();
+    setHistoryState('loading');
+    fetch(`/api/v1/chat/conversations/${encodeURIComponent(conversationId)}/messages`, {
+      signal: ctrl.signal,
+    })
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
+      .then((data: { messages?: Array<{ id?: string; role: string; content: string; type?: string; createdAt?: string }> }) => {
+        const rows = data.messages ?? [];
+        const loaded: ChatMessage[] = rows.map((m, i) => ({
+          id: m.id ? String(m.id) : `hist-${i}`,
+          role: m.role === 'user' ? 'user' : 'assistant',
+          subtype: (m.type as ChatMessage['subtype']) ?? 'text',
+          content: m.content,
+        }));
+        setMessages(loaded);
+        setHistoryState('idle');
+      })
+      .catch((err) => {
+        if (err.name === 'AbortError') return;
+        setHistoryState('error');
+      });
+
+    return () => ctrl.abort();
   }, [conversationId]);
 
   // Auto-scroll
@@ -422,16 +502,70 @@ function ThreadPanel({
     }
   };
 
+  const needsAgentPick = !conversationId && !agentId;
+  const showDraftAgentHeader = !conversationId && agentId;
+
   return (
     <div className="flex flex-col h-full">
+      {/* Draft-conversation header — shows the picked agent above the input */}
+      {showDraftAgentHeader && (
+        <div className="px-3 py-2 border-b border-zinc-800 flex items-center gap-2 text-xs text-zinc-400">
+          <span>Drafting conversation with</span>
+          <span className="font-mono text-zinc-100">
+            {availableAgents.find((a) => a.id === agentId)?.name ?? agentId}
+          </span>
+          <button
+            type="button"
+            onClick={() => onPickDraftAgent('')}
+            className="ml-auto text-[11px] text-zinc-500 hover:text-zinc-300"
+          >
+            change…
+          </button>
+        </div>
+      )}
+
       {/* Messages */}
       <div className="flex-1 overflow-y-auto py-4 space-y-1">
-        {messages.length === 0 ? (
+        {historyState === 'loading' && messages.length === 0 ? (
+          <div className="flex items-center justify-center h-full">
+            <p className="text-sm text-zinc-500">Loading history…</p>
+          </div>
+        ) : historyState === 'error' && messages.length === 0 ? (
+          <div className="flex items-center justify-center h-full">
+            <p className="text-sm text-red-400">Failed to load conversation history.</p>
+          </div>
+        ) : messages.length === 0 && needsAgentPick ? (
+          <div className="flex items-center justify-center h-full">
+            <div className="text-center">
+              <p className="text-sm text-zinc-400 mb-3">Pick an agent to talk to</p>
+              {availableAgents.length === 0 ? (
+                <p className="text-xs text-zinc-500">No agents configured.</p>
+              ) : (
+                <ul role="listbox" aria-label="Available agents" className="flex flex-col gap-1 max-w-xs mx-auto">
+                  {availableAgents.map((a) => (
+                    <li key={a.id} role="option" aria-selected="false">
+                      <button
+                        type="button"
+                        onClick={() => onPickDraftAgent(a.id)}
+                        className="w-full text-left text-sm px-3 py-2 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-100"
+                      >
+                        <span className="font-mono">{a.id}</span>
+                        {a.name && <span className="ml-2 text-zinc-500">{a.name}</span>}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        ) : messages.length === 0 ? (
           <div className="flex items-center justify-center h-full">
             <p className="text-sm text-zinc-500">Start a conversation below</p>
           </div>
         ) : (
-          messages.map((msg) => <MessageBubble key={msg.id} msg={msg} />)
+          messages.map((msg) => (
+            <MessageBubble key={msg.id} msg={msg} onApprovePlan={handleApprovePlan} />
+          ))
         )}
         <div ref={bottomRef} />
       </div>
@@ -449,8 +583,9 @@ function ThreadPanel({
           />
           <button
             onClick={() => void sendMessage()}
-            disabled={streaming || !input.trim()}
+            disabled={streaming || !input.trim() || needsAgentPick}
             className="btn-approve px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-40 flex-shrink-0 self-end"
+            title={needsAgentPick ? 'Pick an agent first' : undefined}
           >
             {streaming ? '…' : 'Send'}
           </button>
@@ -467,8 +602,9 @@ function ThreadPanel({
 function ChatPage() {
   const qc = useQueryClient();
   const search = Route.useSearch();
-  const agentId = search.agentId;
   const [activeConvId, setActiveConvId] = useState<string | undefined>(search.conversationId);
+  const [draftAgentId, setDraftAgentId] = useState<string | undefined>(search.agentId);
+  const agentId = activeConvId ? undefined : draftAgentId;
 
   const { data } = useQuery<{ conversations?: Conversation[] }>({
     queryKey: ['chat-conversations'],
@@ -476,7 +612,24 @@ function ChatPage() {
     staleTime: 30_000,
   });
 
-  const conversations = data?.conversations ?? [];
+  // Agent display-name resolution for the sidebar — /api/v1/agents returns a
+  // bare array (see U15 / F-6). Cache hits avoid re-fetching when the palette
+  // is also open.
+  const { data: agentsRaw } = useQuery<Array<{ id: string; name?: string }> | { agents?: Array<{ id: string; name?: string }> }>({
+    queryKey: ['agents'],
+    queryFn: () => fetch('/api/v1/agents').then((r) => r.json()),
+    staleTime: 30_000,
+  });
+  const agentList: Array<{ id: string; name?: string }> = Array.isArray(agentsRaw)
+    ? agentsRaw
+    : (agentsRaw?.agents ?? []);
+
+  const conversationsRaw = data?.conversations ?? [];
+  // Enrich each conversation with an agentName by joining against the agents list.
+  const conversations: Conversation[] = conversationsRaw.map((c) => ({
+    ...c,
+    agentName: c.agentName ?? agentList.find((a) => a.id === c.agentId)?.name ?? c.agentId,
+  }));
 
   const handleSelect = (id: string) => {
     setActiveConvId(id);
@@ -484,7 +637,10 @@ function ChatPage() {
 
   const handleNew = () => {
     setActiveConvId(undefined);
+    setDraftAgentId(undefined); // re-open the agent picker
   };
+
+  const handleDraftAgentPick = (id: string) => setDraftAgentId(id);
 
   const handleConversationCreated = (id: string) => {
     setActiveConvId(id);
@@ -508,6 +664,8 @@ function ChatPage() {
       <ThreadPanel
         conversationId={activeConvId}
         agentId={agentId}
+        availableAgents={agentList}
+        onPickDraftAgent={handleDraftAgentPick}
         onConversationCreated={handleConversationCreated}
       />
     </MasterDetail>
