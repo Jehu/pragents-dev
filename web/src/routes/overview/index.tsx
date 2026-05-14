@@ -299,7 +299,7 @@ function OverviewPage() {
         <h1 className="text-xl font-semibold tracking-tight text-zinc-100">Overview</h1>
         <button
           className="btn-approve text-xs px-3 py-1.5 rounded font-medium"
-          onClick={() => useCommandPaletteStore.getState().setOpen(true)}
+          onClick={() => useCommandPaletteStore.getState().openDispatch()}
         >
           + New task
         </button>
