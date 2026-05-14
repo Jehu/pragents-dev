@@ -17,6 +17,12 @@ export interface Task {
   externalRef: string | null;
   createdAt: string;
   updatedAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
+  costEur: number;
+  tokensIn: number;
+  tokensOut: number;
+  durationMs: number | null;
 }
 
 export interface TaskCreate {
@@ -51,25 +57,34 @@ export class TaskTracker {
       externalRef: null,
       createdAt: now,
       updatedAt: now,
+      startedAt: null,
+      completedAt: null,
+      costEur: 0,
+      tokensIn: 0,
+      tokensOut: 0,
+      durationMs: null,
     };
   }
 
   setRunning(taskId: string): void {
+    const now = new Date().toISOString();
     getDb()
-      .prepare("UPDATE tasks SET status = 'running', updated_at = ? WHERE id = ?")
-      .run(new Date().toISOString(), taskId);
+      .prepare("UPDATE tasks SET status = 'running', started_at = COALESCE(started_at, ?), updated_at = ? WHERE id = ?")
+      .run(now, now, taskId);
   }
 
   setComplete(taskId: string, result: string): void {
+    const now = new Date().toISOString();
     getDb()
-      .prepare("UPDATE tasks SET status = 'complete', result = ?, updated_at = ? WHERE id = ?")
-      .run(result, new Date().toISOString(), taskId);
+      .prepare("UPDATE tasks SET status = 'complete', result = ?, completed_at = ?, updated_at = ? WHERE id = ?")
+      .run(result, now, now, taskId);
   }
 
   setFailed(taskId: string, error: string): void {
+    const now = new Date().toISOString();
     getDb()
-      .prepare("UPDATE tasks SET status = 'failed', result = ?, updated_at = ? WHERE id = ?")
-      .run(error, new Date().toISOString(), taskId);
+      .prepare("UPDATE tasks SET status = 'failed', result = ?, completed_at = ?, updated_at = ? WHERE id = ?")
+      .run(error, now, now, taskId);
   }
 
   setNeedsReview(taskId: string, reason: string): void {
@@ -90,11 +105,33 @@ export class TaskTracker {
       .run(new Date().toISOString(), taskId);
   }
 
+  private static readonly SELECT_COLS = `
+    t.id, t.project_id as projectId, t.agent_id as agentId, t.status, t.type,
+    t.description, t.result, t.reason, t.external_ref as externalRef,
+    t.created_at as createdAt, t.updated_at as updatedAt,
+    t.started_at as startedAt, t.completed_at as completedAt,
+    COALESCE(c.costEur, 0) as costEur,
+    COALESCE(c.tokensIn, 0) as tokensIn,
+    COALESCE(c.tokensOut, 0) as tokensOut,
+    CASE
+      WHEN t.started_at IS NOT NULL AND t.completed_at IS NOT NULL
+      THEN CAST((julianday(t.completed_at) - julianday(t.started_at)) * 86400000 AS INTEGER)
+      ELSE NULL
+    END as durationMs`;
+
+  private static readonly COST_JOIN = `
+    LEFT JOIN (
+      SELECT task_id,
+             COALESCE(SUM(cost_estimate), 0) as costEur,
+             COALESCE(SUM(tokens_in), 0) as tokensIn,
+             COALESCE(SUM(tokens_out), 0) as tokensOut
+      FROM cost_log WHERE task_id IS NOT NULL GROUP BY task_id
+    ) c ON c.task_id = t.id`;
+
   get(taskId: string): Task | null {
     const row = getDb()
       .prepare(
-        `SELECT id, project_id as projectId, agent_id as agentId, status, type, description, result, reason, external_ref as externalRef,
-                created_at as createdAt, updated_at as updatedAt FROM tasks WHERE id = ?`,
+        `SELECT ${TaskTracker.SELECT_COLS} FROM tasks t ${TaskTracker.COST_JOIN} WHERE t.id = ?`,
       )
       .get(taskId) as Task | undefined;
     return row ?? null;
@@ -104,16 +141,15 @@ export class TaskTracker {
     if (projectId) {
       return getDb()
         .prepare(
-          `SELECT id, project_id as projectId, agent_id as agentId, status, type, description, result, reason, external_ref as externalRef,
-                  created_at as createdAt, updated_at as updatedAt FROM tasks WHERE project_id = ?
-           ORDER BY created_at DESC`,
+          `SELECT ${TaskTracker.SELECT_COLS} FROM tasks t ${TaskTracker.COST_JOIN}
+           WHERE t.project_id = ? ORDER BY t.created_at DESC`,
         )
         .all(projectId) as Task[];
     }
     return getDb()
       .prepare(
-        `SELECT id, project_id as projectId, agent_id as agentId, status, type, description, result, reason, external_ref as externalRef,
-                created_at as createdAt, updated_at as updatedAt FROM tasks ORDER BY created_at DESC`,
+        `SELECT ${TaskTracker.SELECT_COLS} FROM tasks t ${TaskTracker.COST_JOIN}
+         ORDER BY t.created_at DESC`,
       )
       .all() as Task[];
   }

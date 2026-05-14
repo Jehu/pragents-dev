@@ -111,16 +111,15 @@ pragents/
 │
 ├── web/                          # Frontend: React SPA
 │   ├── src/
-│   │   ├── main.tsx              # Entry point — single App component with all views
-│   │   ├── stores/
-│   │   │   ├── connection.ts     # Zustand: WebSocket/SSE connection state
-│   │   │   └── scope.ts          # Zustand: selected project
-│   │   ├── hooks/
-│   │   │   ├── useSSE.ts         # SSE client with auto-reconnect
-│   │   │   └── useWebSocket.ts   # WebSocket client fallback
-│   │   └── routes/
-│   │       ├── __root.tsx, index.tsx
-│   │       └── tasks/, traces/
+│   │   ├── main.tsx              # Entry point — QueryClient + RouterProvider setup
+│   │   ├── stores/               # Zustand stores: connection, scope, eventBus, feed, theme, commandPalette
+│   │   ├── hooks/                # useSSE (auto-reconnect), useWebSocket, useEventStream
+│   │   ├── components/ui/        # Shared component library: StatusPill, StatCard, Sparkline, MasterDetail,
+│   │   │                         #   ApprovalCard, ProgressBar, KbdHint, EmptyState
+│   │   └── routes/               # TanStack Router file-based routes (14 views + __root.tsx)
+│   │       ├── __root.tsx        # App shell: header, sidebar nav, ⌘K palette overlay, SSE bootstrap
+│   │       └── overview/, inbox/, agents/, tasks/, plans/, workflows/, goals/,
+│   │           skills/, memory/, metrics/, costs/, health/, traces/, chat/
 │   └── vite.config.ts, uno.config.ts
 │
 ├── workflows/                    # Workflow YAML definitions (hot-reloaded)

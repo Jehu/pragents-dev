@@ -7,6 +7,7 @@ interface CostEntry {
   model: string;
   tokensIn: number;
   tokensOut: number;
+  taskId?: string;
 }
 
 export class CostTracker {
@@ -32,8 +33,8 @@ export class CostTracker {
     const id = randomUUID();
     const cost = this.estimateCost(entry.model, entry.tokensIn, entry.tokensOut);
     db.prepare(
-      'INSERT INTO cost_log (id, project_id, agent_id, model, tokens_in, tokens_out, cost_estimate, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-    ).run(id, entry.projectId, entry.agentId, entry.model, entry.tokensIn, entry.tokensOut, cost, new Date().toISOString());
+      'INSERT INTO cost_log (id, project_id, agent_id, model, tokens_in, tokens_out, cost_estimate, task_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    ).run(id, entry.projectId, entry.agentId, entry.model, entry.tokensIn, entry.tokensOut, cost, entry.taskId ?? null, new Date().toISOString());
   }
 
   getProjectCost(projectId: string, since?: string): { tokensIn: number; tokensOut: number; cost: number; calls: number } {
@@ -59,5 +60,44 @@ export class CostTracker {
               SUM(cost_estimate) as cost, COUNT(*) as calls
        FROM cost_log GROUP BY project_id, month ORDER BY month DESC, project_id`,
     ).all();
+  }
+
+  getDailyCost(date?: string, projectId?: string): { date: string; costEur: number; calls: number; tokensIn: number; tokensOut: number } {
+    const db = getDb();
+    const targetDate = date ?? new Date().toISOString().slice(0, 10);
+    const params: any[] = [targetDate];
+    let where = "date(created_at) = ?";
+    if (projectId) {
+      where += ' AND project_id = ?';
+      params.push(projectId);
+    }
+    const row = db.prepare(
+      `SELECT COALESCE(SUM(cost_estimate), 0) as costEur,
+              COUNT(*) as calls,
+              COALESCE(SUM(tokens_in), 0) as tokensIn,
+              COALESCE(SUM(tokens_out), 0) as tokensOut
+       FROM cost_log WHERE ${where}`,
+    ).get(...params) as any;
+    return { date: targetDate, costEur: row.costEur, calls: row.calls, tokensIn: row.tokensIn, tokensOut: row.tokensOut };
+  }
+
+  getCostByModel(since?: string): { items: { model: string; costEur: number; calls: number; tokensIn: number; tokensOut: number }[] } {
+    const db = getDb();
+    const params: any[] = [];
+    let where = '';
+    if (since) {
+      where = 'WHERE created_at >= ?';
+      params.push(since);
+    }
+    const rows = db.prepare(
+      `SELECT model,
+              COALESCE(SUM(cost_estimate), 0) as costEur,
+              COUNT(*) as calls,
+              COALESCE(SUM(tokens_in), 0) as tokensIn,
+              COALESCE(SUM(tokens_out), 0) as tokensOut
+       FROM cost_log ${where}
+       GROUP BY model ORDER BY costEur DESC`,
+    ).all(...params) as any[];
+    return { items: rows };
   }
 }

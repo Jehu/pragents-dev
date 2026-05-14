@@ -22,6 +22,7 @@
     "@types/react-dom": "^19.0.0",
     "@unocss/preset-uno": "^0.65.0",
     "@vitejs/plugin-react": "^4.0.0",
+    "axe-core": "^4.11.4",
     "jsdom": "^25.0.0",
     "typescript": "^5.5.0",
     "unocss": "^0.65.0",

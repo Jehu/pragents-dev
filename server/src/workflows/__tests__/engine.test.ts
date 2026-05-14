@@ -399,4 +399,29 @@ describe('WorkflowEngine', () => {
     const runId = await engine.execute(wf);
     expect(runId).toBeTruthy();
   });
+
+  // ---- I3 regression: bookkeeping failure must not flip a successful run to FAILED ----
+  it('executeAsync: completeRun failure leaves successful steps in non-failed state', async () => {
+    const okMgr = { dispatch: vi.fn().mockResolvedValue('done') };
+    const engine = new WorkflowEngine(tracker, router, okMgr, agents, eventBuffer, 'test-project');
+    // Replace completeRun on the *engine's* tracker to throw — simulates a DB
+    // lock or transient error after the workflow steps already finished.
+    const realCompleteRun = (engine as any).tracker.completeRun.bind((engine as any).tracker);
+    const spy = vi.spyOn((engine as any).tracker, 'completeRun').mockImplementation(() => {
+      throw new Error('simulated DB lock during completeRun');
+    });
+    const failRunSpy = vi.spyOn((engine as any).tracker, 'failRun');
+
+    const runId = engine.executeAsync(simpleWf);
+    // Give the IIFE a tick to finish.
+    await new Promise((r) => setTimeout(r, 50));
+
+    // failRun must NOT have been called for the bookkeeping failure.
+    expect(failRunSpy).not.toHaveBeenCalledWith(runId);
+
+    spy.mockRestore();
+    failRunSpy.mockRestore();
+    // Repair the run so other tests see a consistent state.
+    realCompleteRun(runId);
+  });
 });

@@ -33,7 +33,7 @@ export function createTasksRoute(tracker: TaskTracker, agents: ResolvedAgent[], 
     // Dispatch with lifecycle events + capture agent result.
     // Dispatch first: if it throws, task state is untouched (stays pending).
     // Only mark running after a successful dispatch handoff.
-    const dispatchPromise = sessionMgr.dispatch(agent, description.trim());
+    const dispatchPromise = sessionMgr.dispatch(agent, description.trim(), task.id);
 
     try {
       tracker.setRunning(task.id);
@@ -110,7 +110,7 @@ export function createTasksRoute(tracker: TaskTracker, agents: ResolvedAgent[], 
     }
 
     // Dispatch first; only mark running after successful handoff.
-    const retryDispatchPromise = sessionMgr.dispatch(agent, task.description);
+    const retryDispatchPromise = sessionMgr.dispatch(agent, task.description, task.id);
 
     try {
       tracker.setRunning(task.id);

@@ -1,15 +1,60 @@
-import { createFileRoute } from '@tanstack/react-router';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
-import { relativeTime, statusBadge } from '../../lib/badges';
+import { createFileRoute, Link } from '@tanstack/react-router';
+import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
+import { useState, useEffect } from 'react';
+import { StatusPill, EmptyState } from '../../components/ui/index.js';
+import type { StatusType } from '../../components/ui/index.js';
+import { useEventBusStore } from '../../stores/eventBus.js';
 
 export const Route = createFileRoute('/workflows/')({
-  component: WorkflowPage,
+  component: WorkflowsPage,
 });
 
-const API = '';
+// ─── Types ────────────────────────────────────────────────────────────────────
 
-function duration(start: string | null, end: string | null): string {
+interface WorkflowDef {
+  name: string;
+  description?: string;
+  steps?: unknown[];
+  stepCount?: number;
+  trigger?: string;
+}
+
+interface RunStep {
+  id: string;
+  stepId: string;
+  agentId?: string | null;
+  status: string;
+  output?: string | null;
+  startedAt?: string | null;
+  completedAt?: string | null;
+  gateStatus?: string | null;
+  gateFeedback?: string | null;
+  error?: string | null;
+}
+
+interface WorkflowRun {
+  id: string;
+  workflowName: string;
+  status: string;
+  startedAt: string;
+  completedAt?: string | null;
+  steps?: RunStep[];
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function relativeTimeIso(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const s = Math.floor(diff / 1000);
+  if (s < 60) return `${s}s ago`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
+
+function durationStr(start: string | null | undefined, end: string | null | undefined): string {
   if (!start || !end) return '—';
   const ms = new Date(end).getTime() - new Date(start).getTime();
   const secs = Math.floor(ms / 1000);
@@ -18,134 +63,222 @@ function duration(start: string | null, end: string | null): string {
   return `${mins}m ${secs % 60}s`;
 }
 
-function gateLabel(status: string | null): string | null {
-  if (!status) return null;
-  const map: Record<string, string> = {
-    pending: '⏳ Waiting for approval',
-    approved: '✅ Approved',
-    rejected: '❌ Rejected',
-    timed_out: '⏰ Timed out',
-    revision_requested: '🔄 Revision requested',
-  };
-  return map[status] || status;
+const RUN_STATUS_MAP: Record<string, StatusType> = {
+  running: 'running',
+  complete: 'complete',
+  failed: 'failed',
+  pending: 'idle',
+  interrupted: 'cold',
+};
+
+function toRunStatusPill(status: string): StatusType {
+  return RUN_STATUS_MAP[status] ?? 'idle';
 }
 
-interface Step {
-  id: string;
-  stepId: string;
-  agentId: string | null;
-  status: string;
-  output: string | null;
-  startedAt: string | null;
-  completedAt: string | null;
-  gateStatus: string | null;
-  gateFeedback: string | null;
+const STEP_DOT: Record<string, string> = {
+  running: 'bg-sky-500',
+  complete: 'bg-emerald-500',
+  done: 'bg-emerald-500',
+  failed: 'bg-red-500',
+  pending: 'bg-zinc-600',
+  skipped: 'bg-zinc-700',
+};
+
+function stepDot(status: string): string {
+  return STEP_DOT[status] ?? 'bg-zinc-600';
 }
 
-interface Run {
-  id: string;
-  workflowName: string;
-  status: string;
-  startedAt: string;
-  completedAt: string | null;
-  steps?: Step[];
-}
+// ─── Workflow Def Cards ───────────────────────────────────────────────────────
 
-function StepOutput({ output }: { output: string | null }) {
-  const [showFull, setShowFull] = useState(false);
-  if (!output) return <span className="text-xs text-gray-400 dark:text-gray-500 italic">No output</span>;
+function WorkflowDefCard({ wf, latestRun }: { wf: WorkflowDef; latestRun?: WorkflowRun }) {
+  const stepCount = wf.stepCount ?? (Array.isArray(wf.steps) ? wf.steps.length : 0);
+  const queryClient = useQueryClient();
+  const [error, setError] = useState<string | null>(null);
 
-  const preview = output.length > 500 && !showFull ? output.slice(0, 500) + '\n\n… (truncated)' : output;
+  const runMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/v1/workflows/${encodeURIComponent(wf.name)}/run`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      if (!res.ok) throw new Error((await res.text()) || `HTTP ${res.status}`);
+      return res.json();
+    },
+    onSuccess: () => {
+      setError(null);
+      void queryClient.invalidateQueries({ queryKey: ['workflow-runs'] });
+    },
+    onError: (e: unknown) => setError(e instanceof Error ? e.message : 'Failed to start'),
+  });
 
   return (
-    <div>
-      <pre className="text-xs text-gray-600 dark:text-gray-300 whitespace-pre-wrap max-h-64 overflow-y-auto bg-gray-50 dark:bg-gray-800 rounded p-2 mt-1 font-mono">
-        {preview}
-      </pre>
-      {output.length > 500 && (
+    <div className="bg-zinc-900 border border-zinc-800 hover:border-zinc-700 rounded-lg p-3.5">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-mono text-sm text-zinc-100">{wf.name}</span>
+            {wf.trigger && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700 uppercase tracking-wider">
+                {wf.trigger}
+              </span>
+            )}
+          </div>
+          {wf.description && (
+            <p className="text-xs text-zinc-500 mt-1">{wf.description}</p>
+          )}
+          <div className="flex items-center gap-2 mt-1.5 text-[11px] text-zinc-600">
+            {stepCount > 0 && <span>{stepCount} steps</span>}
+            {latestRun && (
+              <>
+                <span>·</span>
+                <span>latest: </span>
+                <StatusPill status={toRunStatusPill(latestRun.status)} />
+              </>
+            )}
+          </div>
+          {error && (
+            <p className="text-[11px] text-red-400 mt-1.5">Failed to start: {error}</p>
+          )}
+        </div>
         <button
-          onClick={() => setShowFull(!showFull)}
-          className="text-xs text-blue-500 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 mt-1"
+          type="button"
+          onClick={() => runMutation.mutate()}
+          disabled={runMutation.isPending}
+          className="text-xs px-2.5 py-1 rounded bg-indigo-500/20 text-indigo-300 hover:bg-indigo-500/30 disabled:opacity-50 disabled:cursor-not-allowed border border-indigo-500/30 flex-shrink-0"
         >
-          {showFull ? 'Show less' : 'Show full output'}
+          {runMutation.isPending ? 'Starting…' : '▶ Run'}
         </button>
-      )}
+      </div>
     </div>
   );
 }
 
-function RunRow({ run }: { run: Run }) {
-  const [expanded, setExpanded] = useState(false);
-  const steps = run.steps || [];
-  const hasPendingGate = steps.some(s => s.gateStatus === 'pending' || s.gateStatus === 'revision_requested');
+// ─── Run Step Rail ────────────────────────────────────────────────────────────
+
+function RunStepList({ steps }: { steps: RunStep[] }) {
+  const [expandedErrors, setExpandedErrors] = useState<Set<string>>(new Set());
+
+  const toggleError = (id: string) => {
+    setExpandedErrors((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   return (
-    <div>
-      <div
-        onClick={() => setExpanded(!expanded)}
-        className={`bg-white dark:bg-gray-800 rounded-lg border p-4 cursor-pointer hover:shadow-sm transition-shadow ${
-          hasPendingGate ? 'border-amber-300 dark:border-amber-600 border-l-4' : 'border-gray-200 dark:border-gray-700'
-        }`}
-      >
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3 min-w-0">
-            {hasPendingGate && <span className="text-sm flex-shrink-0">⏳</span>}
-            <div className="min-w-0">
-              <div className="text-sm font-medium text-gray-800 dark:text-gray-200 truncate">{run.workflowName}</div>
-              <div className="text-xs text-gray-400 dark:text-gray-500">{run.id.slice(0, 8)}</div>
+    <ol className="space-y-0">
+      {steps.map((step, i) => {
+        const isLast = i === steps.length - 1;
+        const isPendingGate = step.gateStatus === 'pending' || step.gateStatus === 'revision_requested';
+        const isFailed = step.status === 'failed';
+        const hasError = isFailed && (step.error || step.output);
+
+        return (
+          <li
+            key={step.id}
+            className={`relative flex gap-3 ${isPendingGate ? 'bg-amber-950/20 rounded-lg' : ''} ${isFailed ? 'bg-red-950/10 rounded-lg' : ''}`}
+          >
+            {/* Rail */}
+            <div className="flex flex-col items-center flex-shrink-0 w-6 ml-1">
+              <div className={`w-3 h-3 rounded-full mt-1 flex-shrink-0 z-10 ${stepDot(step.status)}`} />
+              {!isLast && <div className="w-0.5 bg-zinc-800 flex-1 mt-1" />}
             </div>
-          </div>
-          <div className="flex items-center gap-4 flex-shrink-0">
-            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusBadge(run.status)}`}>
-              {run.status}
-            </span>
-            <span className="text-xs text-gray-400 dark:text-gray-500 w-16 text-right">{relativeTime(run.startedAt)}</span>
-            <span className="text-xs text-gray-400 dark:text-gray-500 w-16 text-right font-mono">
-              {duration(run.startedAt, run.completedAt)}
-            </span>
-            <span className="text-xs text-gray-300 dark:text-gray-600">{expanded ? '▲' : '▼'}</span>
-          </div>
-        </div>
-      </div>
 
-      {expanded && (
-        <div className="bg-gray-50 dark:bg-gray-900 border border-t-0 border-gray-200 dark:border-gray-700 rounded-b-lg ml-4">
-          {steps.length === 0 ? (
-            <div className="p-4 text-xs text-gray-400 dark:text-gray-500 italic">No steps recorded</div>
-          ) : (
-            <div className="divide-y divide-gray-200 dark:divide-gray-700">
-              {steps.map((step, i) => (
-                <div key={step.id} className="p-4">
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-mono text-gray-400 dark:text-gray-500">{i + 1}</span>
-                      <span className="text-sm font-medium text-gray-700 dark:text-gray-300">{step.stepId}</span>
-                      {step.gateStatus ? (
-                        <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${statusBadge(step.gateStatus)}`}>
-                          {gateLabel(step.gateStatus)}
-                        </span>
-                      ) : (
-                        <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${statusBadge(step.status)}`}>
-                          {step.status}
-                        </span>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-3 text-xs text-gray-400 dark:text-gray-500">
-                      {step.startedAt && <span>{new Date(step.startedAt!).toLocaleTimeString()}</span>}
-                      <span className="font-mono">{duration(step.startedAt, step.completedAt)}</span>
-                    </div>
-                  </div>
+            {/* Content */}
+            <div className={`pb-3 flex-1 min-w-0 ${isLast ? 'pb-1' : ''}`}>
+              <div className="flex items-center gap-2 flex-wrap pt-0.5">
+                <span className="text-[11px] text-zinc-600 font-mono">{i + 1}</span>
+                <span className="text-sm text-zinc-200">{step.stepId}</span>
 
-                  {step.gateFeedback && (
-                    <div className="mb-2 p-2 bg-blue-50 dark:bg-blue-900 border border-blue-200 dark:border-blue-800 rounded text-xs text-blue-700 dark:text-blue-300">
-                      <span className="font-medium">Feedback:</span> {step.gateFeedback}
-                    </div>
-                  )}
+                {isPendingGate && (
+                  <>
+                    <span className="inline-flex items-center text-[11px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-medium">
+                      waiting on gate
+                    </span>
+                    <Link
+                      to="/inbox"
+                      className="text-[11px] text-zinc-500 hover:text-zinc-300 underline"
+                    >
+                      Review in inbox →
+                    </Link>
+                  </>
+                )}
 
-                  {step.output && <StepOutput output={step.output} />}
+                {!isPendingGate && step.status !== 'pending' && (
+                  <StatusPill status={toRunStatusPill(step.status)} />
+                )}
+
+                {hasError && (
+                  <button
+                    onClick={() => toggleError(step.id)}
+                    className="text-[11px] text-red-400 hover:text-red-300"
+                  >
+                    {expandedErrors.has(step.id) ? 'hide error ▲' : 'error ▼'}
+                  </button>
+                )}
+              </div>
+
+              {/* Gate feedback */}
+              {step.gateFeedback && (
+                <div className="mt-1.5 text-[11px] text-sky-400/80 bg-sky-950/20 rounded px-2 py-1">
+                  Feedback: {step.gateFeedback}
                 </div>
-              ))}
+              )}
+
+              {/* Error expander */}
+              {hasError && expandedErrors.has(step.id) && (
+                <div className="mt-1.5 text-[11px] text-red-400 font-mono bg-red-950/20 rounded px-2 py-1.5 whitespace-pre-wrap">
+                  {step.error || step.output}
+                </div>
+              )}
             </div>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+// ─── Run Row ──────────────────────────────────────────────────────────────────
+
+function RunRow({ run }: { run: WorkflowRun }) {
+  const [expanded, setExpanded] = useState(false);
+  const steps = run.steps ?? [];
+  const hasPendingGate = steps.some(
+    (s) => s.gateStatus === 'pending' || s.gateStatus === 'revision_requested',
+  );
+
+  return (
+    <div className={`border rounded-lg overflow-hidden ${hasPendingGate ? 'border-amber-700/50' : 'border-zinc-800'}`}>
+      {/* Run header */}
+      <button
+        onClick={() => setExpanded((v) => !v)}
+        className={`w-full text-left px-3.5 py-3 flex items-center justify-between gap-3 hover:bg-zinc-800/50 transition-colors ${hasPendingGate ? 'bg-amber-950/10' : 'bg-zinc-900'}`}
+      >
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-sm font-medium text-zinc-100 truncate">{run.workflowName}</span>
+          <StatusPill status={toRunStatusPill(run.status)} />
+          {hasPendingGate && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300">gate pending</span>
+          )}
+        </div>
+        <div className="flex items-center gap-3 flex-shrink-0 text-[11px] text-zinc-500">
+          <span>{relativeTimeIso(run.startedAt)}</span>
+          <span className="font-mono">{durationStr(run.startedAt, run.completedAt)}</span>
+          <span className="text-zinc-600">{expanded ? '▲' : '▼'}</span>
+        </div>
+      </button>
+
+      {/* Expanded steps */}
+      {expanded && (
+        <div className="bg-zinc-950 border-t border-zinc-800 px-4 py-3">
+          {steps.length === 0 ? (
+            <p className="text-xs text-zinc-600 italic">No steps recorded.</p>
+          ) : (
+            <RunStepList steps={steps} />
           )}
         </div>
       )}
@@ -153,90 +286,100 @@ function RunRow({ run }: { run: Run }) {
   );
 }
 
-function WorkflowPage() {
+// ─── Page ─────────────────────────────────────────────────────────────────────
+
+export function WorkflowsPage() {
   const queryClient = useQueryClient();
-  const [submitting, setSubmitting] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
 
-  const { data: workflows } = useQuery({
-    queryKey: ['workflows'],
-    queryFn: () => fetch(`${API}/api/v1/workflows`).then(r => r.json()),
-  });
-
-  const { data: runsData, isLoading } = useQuery({
-    queryKey: ['workflow-runs'],
-    queryFn: () => fetch(`${API}/api/v1/workflows/runs?includeSteps=true`).then(r => r.json()),
-    refetchInterval: 5000,
-  });
-
-  const handleRun = async (name: string) => {
-    setSubmitting(name);
-    setError(null);
-    try {
-      await fetch(`${API}/api/v1/workflows/${name}/run`, { method: 'POST' });
-      queryClient.invalidateQueries({ queryKey: ['workflow-runs'] });
-    } catch {
-      setError(`Failed to start ${name}`);
-    } finally {
-      setSubmitting(null);
+  const busEvents = useEventBusStore((s) => s.events);
+  useEffect(() => {
+    const latest = busEvents[busEvents.length - 1];
+    if (latest && typeof latest.type === 'string' && latest.type.startsWith('workflow.')) {
+      void queryClient.invalidateQueries({ queryKey: ['workflow-runs'] });
     }
-  };
+  }, [busEvents, queryClient]);
 
-  const workflowList = Array.isArray(workflows) ? workflows : [];
-  const runs: Run[] = Array.isArray(runsData) ? runsData : [];
+  const { data: wfData, isLoading: wfLoading } = useQuery({
+    queryKey: ['workflows'],
+    queryFn: () => fetch('/api/v1/workflows').then((r) => r.json()),
+    staleTime: 30_000,
+  });
+
+  const { data: runsData, isLoading: runsLoading } = useQuery({
+    queryKey: ['workflow-runs'],
+    queryFn: () => fetch('/api/v1/workflows/runs?includeSteps=true').then((r) => r.json()),
+    staleTime: 10_000,
+    refetchInterval: 15_000,
+  });
+
+  const workflows: WorkflowDef[] = Array.isArray(wfData?.workflows)
+    ? wfData.workflows
+    : Array.isArray(wfData)
+    ? wfData
+    : [];
+
+  const runs: WorkflowRun[] = Array.isArray(runsData?.runs)
+    ? runsData.runs
+    : Array.isArray(runsData)
+    ? runsData
+    : [];
+
+  // Map latest run per workflow name
+  const latestRunByName = runs.reduce<Record<string, WorkflowRun>>((acc, run) => {
+    if (!acc[run.workflowName] || new Date(run.startedAt) > new Date(acc[run.workflowName].startedAt)) {
+      acc[run.workflowName] = run;
+    }
+    return acc;
+  }, {});
 
   return (
-    <div className="flex flex-col gap-6">
-      <h2 className="text-xl font-bold dark:text-gray-100">Workflows</h2>
-
-      {error && (
-        <div className="bg-red-50 dark:bg-red-900 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 px-4 py-2 rounded-lg text-sm">{error}</div>
-      )}
-
-      {/* Trigger section */}
+    <div className="p-6 max-w-4xl mx-auto space-y-8">
       <div>
-        <h3 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-3">Available Workflows</h3>
-        {workflowList.length === 0 ? (
-          <p className="text-gray-400 dark:text-gray-500 text-sm">No workflows configured</p>
+        <h1 className="text-xl font-semibold tracking-tight text-zinc-100">Workflows</h1>
+        <p className="text-sm text-zinc-500 mt-1">Configured workflows and run history.</p>
+      </div>
+
+      {/* Workflow definitions */}
+      <section>
+        <h2 className="text-sm font-semibold text-zinc-400 uppercase tracking-wider mb-3">
+          Available Workflows
+        </h2>
+        {wfLoading ? (
+          <div className="text-xs text-zinc-500 py-6 text-center">Loading…</div>
+        ) : workflows.length === 0 ? (
+          <EmptyState
+            icon="⚙️"
+            title="No workflows"
+            description="No workflows configured. Add workflows to pragents.yaml."
+          />
         ) : (
-          <div className="grid gap-3 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
-            {workflowList.map((wf: any) => (
-              <div key={wf.name} className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4 flex flex-col justify-between">
-                <div>
-                  <div className="text-sm font-medium text-gray-800 dark:text-gray-200">{wf.name}</div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">{wf.description || 'No description'}</div>
-                  <div className="text-xs text-gray-400 dark:text-gray-500 mt-2">{wf.steps} steps</div>
-                </div>
-                <button
-                  onClick={() => handleRun(wf.name)}
-                  disabled={submitting !== null}
-                  className="mt-3 bg-blue-600 text-white px-4 py-1.5 rounded text-sm font-medium hover:bg-blue-700 disabled:opacity-40 transition-colors"
-                >
-                  {submitting === wf.name ? 'Starting...' : 'Run'}
-                </button>
-              </div>
+          <div className="grid gap-2 grid-cols-1 sm:grid-cols-2">
+            {workflows.map((wf) => (
+              <WorkflowDefCard
+                key={wf.name}
+                wf={wf}
+                latestRun={latestRunByName[wf.name]}
+              />
             ))}
           </div>
         )}
-      </div>
+      </section>
 
-      {/* Runs section */}
-      <div>
-        <h3 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-3">
+      {/* Run history */}
+      <section>
+        <h2 className="text-sm font-semibold text-zinc-400 uppercase tracking-wider mb-3">
           Recent Runs
-          {runs.length > 0 && <span className="ml-2 text-gray-400 dark:text-gray-500 font-normal normal-case">{runs.length}</span>}
-        </h3>
-        {isLoading ? (
-          <div className="space-y-2">
-            {[1, 2].map(i => (
-              <div key={i} className="bg-white dark:bg-gray-800 rounded-lg border border-gray-100 dark:border-gray-700 p-4 animate-pulse">
-                <div className="h-4 bg-gray-100 dark:bg-gray-700 rounded w-3/4 mb-2" />
-                <div className="h-3 bg-gray-50 dark:bg-gray-700 rounded w-1/2" />
-              </div>
-            ))}
-          </div>
+          <span className="ml-2 text-zinc-600 font-normal normal-case">({runs.length})</span>
+        </h2>
+
+        {runsLoading ? (
+          <div className="text-xs text-zinc-500 py-6 text-center">Loading…</div>
         ) : runs.length === 0 ? (
-          <p className="text-gray-400 dark:text-gray-500 text-sm py-4">No workflow runs yet</p>
+          <EmptyState
+            icon="▶️"
+            title="No runs yet"
+            description="Run a workflow to see history here."
+          />
         ) : (
           <div className="space-y-2">
             {runs.map((run) => (
@@ -244,7 +387,7 @@ function WorkflowPage() {
             ))}
           </div>
         )}
-      </div>
+      </section>
     </div>
   );
 }

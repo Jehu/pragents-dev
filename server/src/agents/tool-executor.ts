@@ -53,7 +53,7 @@ export class ToolExecutor {
             this.deps.tracker.setFailed(task.id, `No agent found for "${agentId}"`);
             return JSON.stringify({ taskId: task.id, status: 'failed', error: `No agent found for "${agentId}"` });
           }
-          this.deps.sessionMgr.dispatch(agent, description).then(
+          this.deps.sessionMgr.dispatch(agent, description, task.id).then(
             (result) => this.deps.tracker.setComplete(task.id, result),
             (err) => this.deps.tracker.setFailed(task.id, err?.message || String(err)),
           );
@@ -96,7 +96,11 @@ export class ToolExecutor {
         }
         case 'search_memory': {
           const { query, scope, limit } = args as { query: string; scope?: string; limit?: number };
-          const facts = await this.deps.memory.recall(query, scope || 'project', limit || 10, agentContext);
+          // Default to the calling agent's own projectId — recall() includes
+          // company-scope automatically. The bare literal 'project' is not a
+          // valid scope value any more.
+          const resolvedScope = scope || agentContext?.projectId || 'company';
+          const facts = await this.deps.memory.recall(query, resolvedScope, limit || 10, agentContext);
           // Emit memory.recall event for live metrics aggregation (issue #22)
           try {
             this.deps.eventBuffer.push(

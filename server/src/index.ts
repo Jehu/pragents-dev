@@ -16,6 +16,7 @@ import { createEventsRoute, broadcastSSE } from './api/routes/events.js';
 import { createHealthRoute } from './api/routes/health.js';
 import { createTasksRoute } from './api/routes/tasks.js';
 import { createProjectsRoute, createAgentsRoute } from './api/routes/projects.js';
+import { createAgentDetailRoute } from './api/routes/agents.js';
 import { createWorkflowsRoute } from './api/routes/workflows.js';
 import { NLDecomposer } from './nl/decomposer.js';
 import { createNLRoutes } from './api/routes/nl.js';
@@ -225,6 +226,20 @@ export async function startServer() {
     logger.info({ threshold: classifierThreshold }, 'IntentClassifier confidence threshold configured');
   }
   const classifier = new IntentClassifier(agents, classifierModel, classifierThreshold);
+
+  // Boot-time safety: a config with zero projects collapses the chat route
+  // into legacy-mode (no project-scope enforcement), which silently re-opens
+  // the C1/C3 cross-project leak. Refuse to boot unless the operator has
+  // explicitly acknowledged the no-projects setup via PRAGENTS_ALLOW_NO_PROJECTS=1.
+  const configuredProjectIds = Object.keys(config.projects);
+  if (configuredProjectIds.length === 0 && process.env.PRAGENTS_ALLOW_NO_PROJECTS !== '1') {
+    logger.fatal(
+      'config.projects is empty — chat/memory scope enforcement would be disabled. ' +
+        'Add at least one project to pragents.yaml or set PRAGENTS_ALLOW_NO_PROJECTS=1 to opt into the legacy single-tenant fallback.',
+    );
+    process.exit(1);
+  }
+
   const chatRoute = createChatRoute(
     conversationManager,
     classifier,
@@ -234,6 +249,7 @@ export async function startServer() {
     eventBuffer,
     tracker,
     planStore,
+    configuredProjectIds,
   );
 
   // Build API
@@ -247,20 +263,22 @@ export async function startServer() {
   const wsInject = await setupWebSocket(app, eventBuffer, () => process.env.PRAGENTS_API_TOKEN || apiToken);
   if (wsInject) logger.info('WebSocket endpoint ready');
 
-  app.route('/', createHealthRoute(memory));
+  app.route('/api/v1', createHealthRoute(memory));
   app.route('/api/v1/projects', createProjectsRoute(config));
-  app.route('/api/v1/agents', createAgentsRoute(agents, sessionMgr));
+  const agentsRouter = createAgentsRoute(agents, sessionMgr);
+  agentsRouter.route('/', createAgentDetailRoute(agents, sessionMgr, eventBuffer, tracker));
+  app.route('/api/v1/agents', agentsRouter);
   app.route('/api/v1/tasks', createTasksRoute(tracker, agents, sessionMgr, eventBuffer));
   app.route('/api/v1/workflows', createWorkflowsRoute(wfRegistry, wfEngine, wfTracker));
   app.route('/api/v1/nl', createNLRoutes(decomposer, agents, planStore, planExecutor));
   app.route('/api/v1/plans', createPlansRoute(planStore, planExecutor));
   app.route('/api/v1/cost', createCostRoute(costTracker));
-  app.route('/api/v1/goals', createGoalsRoute(goalRegistry));
+  app.route('/api/v1/goals', createGoalsRoute(goalRegistry, goalScheduler));
   app.route('/api/v1/gates', createGatesRoute(eventBuffer));
   app.route('/api/v1/feed', createFeedRoute(tracker, eventBuffer, wfTracker, wfRegistry, skillRegistry));
-  app.route('/api/v1/memory', createMemoryRoute(memory));
+  app.route('/api/v1/memory', createMemoryRoute(memory, config));
   app.route('/api/v1/metrics', createMetricsRoute());
-  app.route('/api/v1/skills', createSkillsRoute(skillRegistry, skillExtractor, eventBuffer));
+  app.route('/api/v1/skills', createSkillsRoute(skillRegistry, skillExtractor, eventBuffer, agents));
   app.route('/api/v1/events', createEventsRoute(eventBuffer));
   app.route('/api/v1/chat', chatRoute);
 
@@ -275,7 +293,19 @@ export async function startServer() {
     let sql = 'SELECT id, project_id as projectId, agent_id as agentId, task_id as taskId, type, data, timestamp FROM events WHERE 1=1';
     const params: any[] = [];
 
-    if (taskId) { sql += ' AND task_id = ?'; params.push(taskId); }
+    if (taskId) {
+      // Full UUID: exact match. 8+ char prefix: LIKE-prefix match (uses index).
+      // Shorter prefixes are rejected to prevent bulk enumeration (SL-6).
+      if (taskId.length >= 36) {
+        sql += ' AND task_id = ?';
+        params.push(taskId);
+      } else if (taskId.length >= 8) {
+        sql += ' AND task_id LIKE ?';
+        params.push(taskId + '%');
+      } else {
+        return c.json({ error: 'taskId must be a full UUID or at least 8 characters' }, 400);
+      }
+    }
     if (project) { sql += ' AND project_id = ?'; params.push(project); }
     if (since) { sql += ' AND timestamp > ?'; params.push(since); }
 

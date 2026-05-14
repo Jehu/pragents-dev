@@ -4,7 +4,7 @@ import UnoCSS from 'unocss/vite';
 import { TanStackRouterVite } from '@tanstack/router-plugin/vite';
 
 export default defineConfig({
-  plugins: [TanStackRouterVite(), react(), UnoCSS()],
+  plugins: [TanStackRouterVite({ routeFileIgnorePattern: '__tests__' }), react(), UnoCSS()],
   server: {
     port: 5174,
     proxy: {
