@@ -57,26 +57,46 @@ function DispatchModal({
   agents,
   onClose,
 }: {
-  agents: Array<{ id: string; name?: string }>;
+  agents: Array<{ id: string; name?: string; projectId?: string }>;
   onClose: () => void;
 }) {
   const [agentId, setAgentId] = useState(agents[0]?.id ?? '');
   const [description, setDescription] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  // The backend's POST /tasks requires a projectId. Derive it from the
+  // selected agent's projectId — each agent is bound to exactly one project
+  // in pragents.yaml.
+  const selectedAgentProjectId = agents.find((a) => a.id === agentId)?.projectId;
 
   const mutation = useMutation({
-    mutationFn: (body: { agentId: string; description: string }) =>
-      fetch('/api/v1/tasks', {
+    mutationFn: async (body: { agentId: string; projectId?: string; description: string }) => {
+      const res = await fetch('/api/v1/tasks', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
-      }).then((r) => r.json()),
-    onSuccess: () => onClose(),
+      });
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}));
+        throw new Error(errBody.error ?? `HTTP ${res.status}`);
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      setError(null);
+      onClose();
+    },
+    onError: (err: unknown) => setError(err instanceof Error ? err.message : 'Failed to dispatch'),
   });
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!agentId || !description.trim()) return;
-    mutation.mutate({ agentId, description: description.trim() });
+    mutation.mutate({
+      agentId,
+      projectId: selectedAgentProjectId,
+      description: description.trim(),
+    });
   };
 
   return (
@@ -101,6 +121,9 @@ function DispatchModal({
           rows={3}
           className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 outline-none focus:border-indigo-500 resize-none"
         />
+        {error && (
+          <p className="text-xs text-red-400" role="alert">{error}</p>
+        )}
         <div className="flex gap-2 justify-end">
           <button
             type="button"
@@ -127,7 +150,7 @@ function DispatchModal({
 // ---------------------------------------------------------------------------
 
 export function CommandPalette() {
-  const { open, query, setOpen, setQuery } = useCommandPaletteStore();
+  const { open, query, setOpen, setQuery, initialDispatch } = useCommandPaletteStore();
   const navigate = useNavigate();
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -233,13 +256,15 @@ export function CommandPalette() {
     setActiveIdx(0);
   }, [query]);
 
-  // Focus input when opened
+  // Focus input when opened. If the open was triggered via openDispatch()
+  // (e.g. Overview "+ New task"), jump straight into the dispatch form so
+  // the user doesn't have to navigate the option list first.
   useEffect(() => {
     if (open) {
-      setShowDispatch(false);
+      setShowDispatch(initialDispatch);
       setTimeout(() => inputRef.current?.focus(), 10);
     }
-  }, [open]);
+  }, [open, initialDispatch]);
 
   const close = useCallback(() => {
     setOpen(false);
@@ -304,18 +329,20 @@ export function CommandPalette() {
         onClick={(e) => e.stopPropagation()}
         onKeyDown={handleKeyDown}
       >
-        {/* Search input */}
-        <div className="px-4 py-3 border-b border-zinc-800">
-          <input
-            ref={inputRef}
-            type="text"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search commands, routes, agents, tasks…"
-            className="w-full bg-transparent text-sm text-zinc-100 placeholder-zinc-500 outline-none"
-            autoComplete="off"
-          />
-        </div>
+        {/* Search input — hidden when launched directly into dispatch mode */}
+        {!showDispatch && (
+          <div className="px-4 py-3 border-b border-zinc-800">
+            <input
+              ref={inputRef}
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search commands, routes, agents, tasks…"
+              className="w-full bg-transparent text-sm text-zinc-100 placeholder-zinc-500 outline-none"
+              autoComplete="off"
+            />
+          </div>
+        )}
 
         {/* Results */}
         {!showDispatch && (
