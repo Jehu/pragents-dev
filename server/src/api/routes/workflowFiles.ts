@@ -12,8 +12,8 @@ import {
   existsSync,
 } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
 import { ProjectConfig } from '../../config/schema.js';
+import { expandHome } from '../../util/paths.js';
 import { WorkflowDef as WorkflowSchema } from '@pragents/schema/workflow';
 import {
   readYamlDoc,
@@ -48,8 +48,12 @@ import { logger } from '../../logging/index.js';
  * re-interpret the UI save as an external edit.
  */
 
-// kebab-case-friendly workflow name. Disallows slashes, dots, traversal.
-const NAME_RE = /^[a-z0-9][a-z0-9_-]*$/i;
+// Lowercase kebab-case workflow name. Disallows slashes, dots, traversal,
+// and uppercase letters — the latter to keep behaviour identical on
+// case-sensitive (Linux ext4) and case-insensitive (macOS APFS-default)
+// filesystems so a `Publish.yaml` / `publish.yaml` pair can never silently
+// overwrite each other.
+const NAME_RE = /^[a-z0-9][a-z0-9_-]*$/;
 const PROJECT_RE = /^[a-z0-9][a-z0-9-]*$/i;
 
 interface WorkflowFilesOptions {
@@ -74,17 +78,16 @@ class WorkflowNotFoundError extends Error {
   }
 }
 
-function expandHome(p: string): string {
-  if (p.startsWith('~/') || p === '~') {
-    return p.replace(/^~/, homedir());
-  }
-  return p;
-}
-
 /**
  * Resolve `projects[projectId]` from `pragents.yaml`, returning the
  * absolute workflow directory. Throws `ProjectNotFoundError` if the
  * project block is missing.
+ *
+ * Re-reads `pragents.yaml` on every call. That keeps route behaviour in
+ * lockstep with on-disk truth (operator edits via Vim land
+ * immediately) at the cost of one parse per request. Chosen over a
+ * cached-with-invalidation approach because the file is tiny and the
+ * stale-state bug class is worse than the parse overhead.
  */
 function resolveWorkflowRoot(configPath: string, projectId: string): string {
   const { doc } = readYamlDoc(configPath);
@@ -112,7 +115,28 @@ function resolveWorkflowRoot(configPath: string, projectId: string): string {
 }
 
 function workflowPath(root: string, name: string): string {
-  return assertWithinRoot(`${name}.yaml`, root, { followSymlinks: false });
+  // `followSymlinks: true` so a malicious symlink planted under the
+  // workflow root (e.g. `workflows/escape.yaml → /etc/passwd`) can't
+  // bypass containment — `assertWithinRoot` canonicalizes the target
+  // via `realpathSync` and re-checks the prefix.
+  //
+  // When the workflow root does not exist yet (fresh project, first
+  // workflow not yet created), fall back to lexical containment: no
+  // symlinks can live under a directory that doesn't exist, and
+  // mixing a non-canonical root prefix with a realpath-canonicalized
+  // candidate would otherwise produce a false PathOutOfBoundsError on
+  // macOS (where `/var` is a symlink to `/private/var`).
+  const followSymlinks = existsSync(root);
+  return assertWithinRoot(`${name}.yaml`, root, { followSymlinks });
+}
+
+/**
+ * Strip a UTF-8 BOM (`﻿`) from operator-supplied YAML before we
+ * write it. Editors occasionally inject one; downstream `yaml-rw`
+ * round-trips choke on it, and the cost of stripping is negligible.
+ */
+function stripBom(s: string): string {
+  return s.charCodeAt(0) === 0xfeff ? s.slice(1) : s;
 }
 
 function zodError(c: Context, parseResult: z.SafeParseError<unknown>, message: string) {
@@ -214,13 +238,14 @@ export function createWorkflowFilesRoute(opts: WorkflowFilesOptions) {
       return c.json({ error: 'Body must be JSON' }, 400);
     }
     const name = (body as any).name;
-    const content = (body as any).content;
+    const rawContent = (body as any).content;
     if (typeof name !== 'string' || !NAME_RE.test(name)) {
       return c.json({ error: 'Invalid workflow name (kebab-case identifier)' }, 400);
     }
-    if (typeof content !== 'string') {
+    if (typeof rawContent !== 'string') {
       return c.json({ error: '`content` must be a YAML string' }, 400);
     }
+    const content = stripBom(rawContent);
     // Validate parsed shape against the shared workflow schema before we
     // touch the filesystem. Surface Zod issues like the other routes do.
     let parsedDoc: unknown;
@@ -263,10 +288,11 @@ export function createWorkflowFilesRoute(opts: WorkflowFilesOptions) {
     if (!body || typeof body !== 'object') {
       return c.json({ error: 'Body must be JSON' }, 400);
     }
-    const content = (body as any).content;
-    if (typeof content !== 'string') {
+    const rawContent = (body as any).content;
+    if (typeof rawContent !== 'string') {
       return c.json({ error: '`content` must be a YAML string' }, 400);
     }
+    const content = stripBom(rawContent);
     let parsedDoc: unknown;
     try {
       parsedDoc = YAML.parse(content);

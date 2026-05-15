@@ -152,6 +152,27 @@ describe('createWorkflowFilesRoute', () => {
       // filesystem safe; the contract is "never 200 with /etc/passwd content".
       expect([400, 404]).toContain(res.status);
     });
+
+    it('rejects a symlink that escapes the workflow root', async () => {
+      // Plant `workflows/escape.yaml` as a symlink to a file outside the
+      // project directory. Without `followSymlinks: true` in
+      // `assertWithinRoot` the GET would happily return its content.
+      const root = join(projectDir, 'workflows');
+      mkdirSync(root, { recursive: true });
+      const outside = join(dir, 'outside-secret.yaml');
+      writeFileSync(outside, 'name: secret\nsteps: []\n', 'utf8');
+      const { symlinkSync } = await import('node:fs');
+      try {
+        symlinkSync(outside, join(root, 'escape.yaml'));
+      } catch {
+        // Some CI environments forbid symlinks (e.g. restricted Windows
+        // runners). Skip the assertion in that case — Linux/macOS will
+        // exercise the path.
+        return;
+      }
+      const res = await app.request('/api/v1/projects/alpha/workflows/escape');
+      expect([400, 404]).toContain(res.status);
+    });
   });
 
   describe('POST /:projectId/workflows', () => {
@@ -315,9 +336,11 @@ describe('createWorkflowFilesRoute', () => {
       });
 
       // One suppression per mutating call, each targeting a workflow file.
+      // Regex matches `NAME_RE` so kebab-/snake-case + digit-bearing names
+      // (publish-post, audit_v2, …) don't slip past the assertion.
       expect(spy.mock.calls.length).toBeGreaterThanOrEqual(3);
       for (const call of spy.mock.calls.slice(-3)) {
-        expect(call[0]).toMatch(/workflows\/[a-z]+\.yaml$/);
+        expect(call[0]).toMatch(/workflows\/[a-z0-9][a-z0-9_-]*\.yaml$/);
       }
       spy.mockRestore();
     });

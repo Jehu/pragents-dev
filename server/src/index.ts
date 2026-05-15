@@ -47,6 +47,7 @@ import { shutdownDecomposerSessions } from './nl/decomposer.js';
 import { createAgentSession, DefaultResourceLoader, SessionManager } from '@mariozechner/pi-coding-agent';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
+import { expandHome } from './util/paths.js';
 import { mkdirSync, readFileSync, existsSync, watch } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { logger } from './logging/index.js';
@@ -289,21 +290,20 @@ export async function startServer() {
   app.route('/api/v1/settings', createSettingsRoute({ configPath }));
   // Config-UI: file-metadata read for conflict detection (R12 / R18).
   // Allow-list includes the pragents config file, the skills root, and
-  // every configured project directory — `assertWithinRoot` enforces
-  // per-root containment so a project root only exposes workflows
-  // beneath it, never sibling projects.
-  const projectRoots: string[] = [];
+  // each project's *workflow* subdirectory only — never the bare
+  // project directory. Probing meta on arbitrary project files is not
+  // a feature pragents needs to expose, and a `directory: ~` config
+  // would otherwise widen the allow-list to the operator's whole
+  // home tree.
+  const workflowRoots: string[] = [];
   for (const projectCfg of Object.values(config.projects)) {
-    const dir = projectCfg.directory;
-    const expanded = dir.startsWith('~')
-      ? dir.replace(/^~/, process.env.HOME || homedir())
-      : dir;
-    projectRoots.push(expanded);
+    const expandedDir = expandHome(projectCfg.directory);
+    workflowRoots.push(join(expandedDir, projectCfg.workflowDirectory));
   }
   app.route(
     '/api/v1/files',
     createFilesRoute({
-      allowedRoots: [configPath, skillsDir, ...projectRoots],
+      allowedRoots: [configPath, skillsDir, ...workflowRoots],
     }),
   );
   app.route('/api/v1/events', createEventsRoute(eventBuffer));
