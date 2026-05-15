@@ -32,9 +32,19 @@ afterEach(() => {
 });
 
 beforeEach(() => {
+  // The probe GET returns an ETag; the POST returns 201. Both are
+  // distinguishable by method so the wizard's flow can be asserted.
   vi.stubGlobal(
     'fetch',
-    vi.fn(async () => new Response(JSON.stringify({ id: 'blog' }), { status: 201 })),
+    vi.fn(async (_url: any, init: any) => {
+      if (init?.method === 'POST') {
+        return new Response(JSON.stringify({ id: 'blog' }), { status: 201 });
+      }
+      return new Response('[]', {
+        status: 200,
+        headers: { ETag: 'W/"probe-etag"' },
+      });
+    }),
   );
 });
 
@@ -79,15 +89,27 @@ describe('NewProjectPage wizard', () => {
     });
     const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-    const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe('/api/v1/projects');
-    expect((init as RequestInit).method).toBe('POST');
-    const body = JSON.parse((init as RequestInit).body as string) as {
+    // The wizard now probes `/api/v1/projects` for an ETag before POSTing
+    // (lost-update guard), so the POST is no longer always calls[0].
+    const postCall = fetchMock.mock.calls.find(
+      (c) => (c[1] as RequestInit | undefined)?.method === 'POST',
+    );
+    if (!postCall) throw new Error('expected a POST call');
+    expect(postCall[0]).toBe('/api/v1/projects');
+    const body = JSON.parse((postCall[1] as RequestInit).body as string) as {
       id: string;
       agents: Record<string, unknown>;
     };
     expect(body.id).toBe('blog');
     expect(body.agents).toEqual({});
+    // R-PR71-#1: the probe-then-POST sequence forwards the current
+    // /api/v1/projects ETag as If-Match so a concurrent edit lands as
+    // 412 rather than silently overwriting.
+    expect(
+      (postCall[1] as RequestInit & { headers: Record<string, string> }).headers[
+        'If-Match'
+      ],
+    ).toBe('W/"probe-etag"');
   });
 
   it('adds agents to the POST body keyed by type', async () => {

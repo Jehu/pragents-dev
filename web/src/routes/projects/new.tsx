@@ -100,11 +100,28 @@ function NewProjectPage() {
         directory: project.directory,
         agents: agentsPayload,
       };
+      // Probe the current `/api/v1/projects` ETag right before the POST
+      // so a parallel writer (another tab, an external editor) surfaces
+      // as 412 instead of silently overwriting the file under us.
+      // Probe failure is non-fatal — fall back to no-If-Match.
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      try {
+        const probe = await fetch('/api/v1/projects');
+        const etag = probe.headers.get('ETag');
+        if (etag) headers['If-Match'] = etag;
+      } catch {
+        /* probe failed; let the POST proceed without If-Match */
+      }
       const res = await fetch('/api/v1/projects', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify(body),
       });
+      if (res.status === 412) {
+        throw new Error(
+          'pragents.yaml changed since this wizard opened — refresh and re-try.',
+        );
+      }
       if (!res.ok) {
         const errBody = await res.json().catch(() => ({}));
         throw new Error(errBody.error ?? `HTTP ${res.status}`);
