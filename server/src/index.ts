@@ -115,11 +115,36 @@ export async function startServer() {
     goalScheduler?.onEvent(evt);
   });
 
-  // Workflow system
+  // Workflow system. The registry loads from two kinds of roots:
+  //   1) the repo-level `<repo>/workflows/` directory (projectId = null)
+  //   2) each configured project's `<projectDir>/<workflowDirectory>/`
+  // Project-tagged entries let the global Workflows view link to the
+  // per-project editor.
   const wfRegistry = new WorkflowRegistry();
   const wfDir = join(__dirname, '..', '..', 'workflows');
-  const { loaded, warnings } = wfRegistry.load(wfDir);
+  const { loaded, warnings } = wfRegistry.load(wfDir, null);
   logger.info({ loaded: loaded.join(', ') || 'none' }, 'Workflows loaded');
+
+  function projectWorkflowDir(projectId: string): string | null {
+    const projectCfg = config.projects[projectId];
+    if (!projectCfg) return null;
+    return join(expandHome(projectCfg.directory), projectCfg.workflowDirectory);
+  }
+
+  function loadProjectWorkflows(projectId: string): void {
+    const dir = projectWorkflowDir(projectId);
+    if (!dir) return;
+    wfRegistry.unloadProject(projectId);
+    const { loaded: pLoaded, warnings: pWarn } = wfRegistry.load(dir, projectId);
+    if (pLoaded.length > 0) {
+      logger.info({ projectId, loaded: pLoaded.join(', ') }, 'Project workflows loaded');
+    }
+    for (const w of pWarn) logger.warn({ projectId, warning: w }, 'Project workflow warning');
+  }
+
+  for (const projectId of Object.keys(config.projects)) {
+    loadProjectWorkflows(projectId);
+  }
 
   const goalRegistry = new GoalRegistry();
   const goalsDir = join(__dirname, '..', '..', 'goals');
@@ -141,7 +166,11 @@ export async function startServer() {
     if (reloadTimer) clearTimeout(reloadTimer);
     reloadTimer = setTimeout(() => {
       logger.info('Hot-reload: file change detected, reloading registries...');
-      const { loaded: wf } = wfRegistry.load(wfDir);
+      wfRegistry.unloadRepo();
+      const { loaded: wf } = wfRegistry.load(wfDir, null);
+      for (const projectId of Object.keys(config.projects)) {
+        loadProjectWorkflows(projectId);
+      }
       const { loaded: gl } = goalRegistry.load(goalsDir);
       skillRegistry.load();
       logger.info({ workflows: wf.join(', ') || 'none', goals: gl.join(', ') || 'none' }, 'Registries reloaded');
@@ -149,6 +178,12 @@ export async function startServer() {
   };
   for (const dir of [wfDir, goalsDir, skillsDir]) {
     try { watch(dir, debouncedReload); } catch {}
+  }
+  for (const projectId of Object.keys(config.projects)) {
+    const dir = projectWorkflowDir(projectId);
+    if (dir) {
+      try { watch(dir, debouncedReload); } catch { /* dir may not exist yet */ }
+    }
   }
   logger.info('Hot-reload watchers active');
 
@@ -272,7 +307,13 @@ export async function startServer() {
   app.route('/api/v1/projects', createProjectsRoute({ configPath, sessionMgr }));
   // Slice 4 / U11: per-project workflow files — mounted on the projects
   // sub-tree so URLs read `/api/v1/projects/:projectId/workflows[/:name]`.
-  app.route('/api/v1/projects', createWorkflowFilesRoute({ configPath }));
+  app.route(
+    '/api/v1/projects',
+    createWorkflowFilesRoute({
+      configPath,
+      onProjectWorkflowsChanged: (projectId) => loadProjectWorkflows(projectId),
+    }),
+  );
   const agentsRouter = createAgentsRoute(agents, sessionMgr);
   agentsRouter.route('/', createAgentDetailRoute(agents, sessionMgr, eventBuffer, tracker));
   app.route('/api/v1/agents', agentsRouter);

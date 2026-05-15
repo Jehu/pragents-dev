@@ -1,6 +1,8 @@
 import { createFileRoute, Link } from '@tanstack/react-router';
-import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
+import { useQuery, useQueries, useQueryClient, useMutation } from '@tanstack/react-query';
 import { useState, useEffect } from 'react';
+import * as YAML from 'yaml';
+import { Modal } from '../../components/Modal.js';
 import { StatusPill, EmptyState } from '../../components/ui/index.js';
 import type { StatusType } from '../../components/ui/index.js';
 import { useEventBusStore } from '../../stores/eventBus.js';
@@ -13,6 +15,8 @@ export const Route = createFileRoute('/workflows/')({
 
 interface WorkflowDef {
   name: string;
+  /** null for repo-global workflows; project id when loaded from a project's workflow dir. */
+  projectId?: string | null;
   description?: string;
   steps?: unknown[];
   stepCount?: number;
@@ -88,12 +92,120 @@ function stepDot(status: string): string {
   return STEP_DOT[status] ?? 'bg-zinc-600';
 }
 
+// ─── Projects-by-workflow section ─────────────────────────────────────────────
+// The global registry (`/api/v1/workflows`) and per-project workflow files
+// (`<projectDir>/workflows/<name>.yaml`) are two separate systems. The global
+// list above only covers the registry; this section gives users a discoverable
+// route to project-scoped CRUD without conflating the two surfaces.
+
+interface ProjectSummary {
+  id: string;
+  name: string;
+  directory: string;
+}
+
+interface ProjectWorkflowFile {
+  name: string;
+  description?: string;
+  mtime: number;
+}
+
+function ProjectWorkflowsSection() {
+  const { data: projects, isLoading } = useQuery<ProjectSummary[]>({
+    queryKey: ['projects'],
+    queryFn: async () => {
+      const res = await fetch('/api/v1/projects');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return (await res.json()) as ProjectSummary[];
+    },
+    staleTime: 30_000,
+  });
+
+  const wfQueries = useQueries({
+    queries: (projects ?? []).map((p) => ({
+      queryKey: ['workflows', p.id],
+      queryFn: async () => {
+        const res = await fetch(
+          `/api/v1/projects/${encodeURIComponent(p.id)}/workflows`,
+        );
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return (await res.json()) as ProjectWorkflowFile[];
+      },
+      staleTime: 15_000,
+    })),
+  });
+
+  if (isLoading) {
+    return <div className="text-xs text-zinc-500 py-6 text-center">Loading…</div>;
+  }
+  if (!projects || projects.length === 0) {
+    return (
+      <EmptyState
+        icon="📁"
+        title="No projects"
+        description="Create a project to author project-scoped workflows."
+      />
+    );
+  }
+
+  return (
+    <div className="grid gap-2 grid-cols-1 sm:grid-cols-2">
+      {projects.map((p, i) => {
+        const q = wfQueries[i];
+        const files = (q?.data ?? []) as ProjectWorkflowFile[];
+        return (
+          <Link
+            key={p.id}
+            to="/projects/$projectId/workflows"
+            params={{ projectId: p.id }}
+            className="bg-zinc-900 border border-zinc-800 hover:border-zinc-700 rounded-lg p-3.5 no-underline block"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-sm text-zinc-100 truncate">
+                  {p.name || p.id}
+                </div>
+                <p className="text-[11px] text-zinc-500 font-mono mt-0.5 truncate">
+                  {p.id}
+                </p>
+              </div>
+              <span className="text-[11px] text-zinc-500 flex-shrink-0">
+                {q?.isLoading
+                  ? '…'
+                  : files.length === 0
+                  ? 'no files'
+                  : `${files.length} file${files.length === 1 ? '' : 's'}`}
+              </span>
+            </div>
+            <p className="text-[11px] text-indigo-400 mt-2">Manage workflows →</p>
+          </Link>
+        );
+      })}
+    </div>
+  );
+}
+
 // ─── Workflow Def Cards ───────────────────────────────────────────────────────
 
 function WorkflowDefCard({ wf, latestRun }: { wf: WorkflowDef; latestRun?: WorkflowRun }) {
   const stepCount = wf.stepCount ?? (Array.isArray(wf.steps) ? wf.steps.length : 0);
   const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
+  const [viewing, setViewing] = useState(false);
+
+  // Lazy fetch of the full definition for the read-only YAML viewer.
+  // Only repo workflows surface this affordance — project workflows
+  // already have a full editor reachable from the clickable name.
+  const viewQuery = useQuery({
+    queryKey: ['workflow-def', wf.name],
+    enabled: viewing,
+    queryFn: async () => {
+      const res = await fetch(`/api/v1/workflows/${encodeURIComponent(wf.name)}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    },
+    staleTime: 60_000,
+  });
 
   const runMutation = useMutation({
     mutationFn: async () => {
@@ -112,12 +224,38 @@ function WorkflowDefCard({ wf, latestRun }: { wf: WorkflowDef; latestRun?: Workf
     onError: (e: unknown) => setError(e instanceof Error ? e.message : 'Failed to start'),
   });
 
+  const editorHref = wf.projectId
+    ? `/projects/${encodeURIComponent(wf.projectId)}/workflows/${encodeURIComponent(wf.name)}`
+    : null;
+
   return (
     <div className="bg-zinc-900 border border-zinc-800 hover:border-zinc-700 rounded-lg p-3.5">
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-mono text-sm text-zinc-100">{wf.name}</span>
+            {editorHref ? (
+              <Link
+                to="/projects/$projectId/workflows/$workflowName"
+                params={{ projectId: wf.projectId!, workflowName: wf.name }}
+                className="font-mono text-sm text-zinc-100 hover:text-indigo-300 no-underline"
+              >
+                {wf.name}
+              </Link>
+            ) : (
+              <span className="font-mono text-sm text-zinc-100">{wf.name}</span>
+            )}
+            {wf.projectId ? (
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 font-mono">
+                {wf.projectId}
+              </span>
+            ) : (
+              <span
+                className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-500 border border-zinc-700 uppercase tracking-wider"
+                title="Loaded from <repo>/workflows/ — edit the YAML file on disk"
+              >
+                repo
+              </span>
+            )}
             {wf.trigger && (
               <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700 uppercase tracking-wider">
                 {wf.trigger}
@@ -141,15 +279,66 @@ function WorkflowDefCard({ wf, latestRun }: { wf: WorkflowDef; latestRun?: Workf
             <p className="text-[11px] text-red-400 mt-1.5">Failed to start: {error}</p>
           )}
         </div>
-        <button
-          type="button"
-          onClick={() => runMutation.mutate()}
-          disabled={runMutation.isPending}
-          className="text-xs px-2.5 py-1 rounded bg-indigo-500/20 text-indigo-300 hover:bg-indigo-500/30 disabled:opacity-50 disabled:cursor-not-allowed border border-indigo-500/30 flex-shrink-0"
-        >
-          {runMutation.isPending ? 'Starting…' : '▶ Run'}
-        </button>
+        <div className="flex flex-col gap-1.5 flex-shrink-0">
+          <button
+            type="button"
+            onClick={() => runMutation.mutate()}
+            disabled={runMutation.isPending}
+            className="text-xs px-2.5 py-1 rounded bg-indigo-500/20 text-indigo-300 hover:bg-indigo-500/30 disabled:opacity-50 disabled:cursor-not-allowed border border-indigo-500/30"
+          >
+            {runMutation.isPending ? 'Starting…' : '▶ Run'}
+          </button>
+          {!editorHref && (
+            <button
+              type="button"
+              onClick={() => setViewing(true)}
+              className="text-xs px-2.5 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700"
+            >
+              View YAML
+            </button>
+          )}
+        </div>
       </div>
+
+      {viewing && (
+        <Modal
+          open
+          onClose={() => setViewing(false)}
+          ariaLabel={`View ${wf.name}`}
+        >
+          <div className="px-5 py-3 border-b border-zinc-800 flex items-center justify-between gap-3">
+            <h3 className="text-sm font-semibold text-zinc-100 font-mono">{wf.name}</h3>
+            <span
+              className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-500 border border-zinc-700 uppercase tracking-wider"
+              title="Loaded from <repo>/workflows/ — edit the YAML file on disk"
+            >
+              repo · read-only
+            </span>
+          </div>
+          <div className="p-5 max-h-[60vh] overflow-auto">
+            {viewQuery.isLoading ? (
+              <div className="text-xs text-zinc-500">Loading…</div>
+            ) : viewQuery.error ? (
+              <div className="text-xs text-red-400" role="alert">
+                Failed to load: {String((viewQuery.error as Error).message)}
+              </div>
+            ) : (
+              <pre className="text-[12px] leading-5 text-zinc-200 font-mono whitespace-pre-wrap">
+                {YAML.stringify(viewQuery.data ?? {}, { indent: 2 })}
+              </pre>
+            )}
+          </div>
+          <div className="border-t border-zinc-800 px-5 py-3 flex justify-end">
+            <button
+              type="button"
+              onClick={() => setViewing(false)}
+              className="text-xs px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300"
+            >
+              Close
+            </button>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
@@ -338,6 +527,14 @@ export function WorkflowsPage() {
         <h1 className="text-xl font-semibold tracking-tight text-zinc-100">Workflows</h1>
         <p className="text-sm text-zinc-500 mt-1">Configured workflows and run history.</p>
       </div>
+
+      {/* Project-scoped workflows: discovery entry into per-project CRUD/editor */}
+      <section>
+        <h2 className="text-sm font-semibold text-zinc-400 uppercase tracking-wider mb-3">
+          Workflows by Project
+        </h2>
+        <ProjectWorkflowsSection />
+      </section>
 
       {/* Workflow definitions */}
       <section>

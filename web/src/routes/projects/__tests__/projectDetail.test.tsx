@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, waitFor, act } from '@testing-library/react';
 import React from 'react';
-import { buildAgentPayload, type AgentFormValues } from '../../../components/AgentForm.js';
-import { toAgentFormValues } from '../$projectId.js';
+import { buildAgentPayload } from '../../../components/AgentForm.js';
+import { toAgentFormValues } from '../$projectId.index.js';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -15,6 +15,7 @@ vi.mock('@tanstack/react-router', () => ({
   },
   Link: ({ children, to }: { children: React.ReactNode; to: string }) =>
     React.createElement('a', { href: to }, children),
+  Outlet: () => null,
   useNavigate: () => vi.fn(),
 }));
 
@@ -80,7 +81,7 @@ describe('toAgentFormValues ↔ buildAgentPayload round trip', () => {
   });
 });
 
-// ─── Route component integration ─────────────────────────────────────────────
+// ─── Layout integration ──────────────────────────────────────────────────────
 
 const SAMPLE_PROJECT = {
   id: 'alpha',
@@ -114,14 +115,13 @@ function setUseEtagFetch(state: {
 }
 
 beforeEach(() => {
-  // Provide a default fetch stub the route may call (PUT/POST/DELETE).
   vi.stubGlobal(
     'fetch',
     vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 })),
   );
 });
 
-describe('ProjectDetailPage', () => {
+describe('ProjectDetailLayout', () => {
   it('renders loading state', async () => {
     setUseEtagFetch({ data: undefined, loading: true });
     const mod = await import('../$projectId.js');
@@ -138,30 +138,31 @@ describe('ProjectDetailPage', () => {
     expect(screen.getByRole('alert').textContent).toMatch(/boom/);
   });
 
-  it('shows the configured dev agent and offers slots for missing types', async () => {
+  it('renders project header + tab navigation when data is ready', async () => {
     setUseEtagFetch({ data: SAMPLE_PROJECT, etag: 'W/"abc"' });
     const mod = await import('../$projectId.js');
     const Comp = mod.Route.component as React.FC;
     render(<Comp />);
-    // dev shows up; seo and content offer "Add" affordances.
-    expect(screen.getByText('dev')).toBeTruthy();
-    expect(screen.getAllByText(/Add/i).length).toBeGreaterThan(0);
+    expect(screen.getByRole('heading', { name: 'Alpha' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /edit project/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /delete/i })).toBeTruthy();
+    // Tabs rendered as links pointing at the URL segments
+    const tabList = screen.getByRole('tablist');
+    expect(tabList.querySelectorAll('a').length).toBe(2);
   });
 
-  it('renders ConflictDialog when saveAgent gets 412 from the server (I4)', async () => {
+  it('renders ConflictDialog when saveProject gets 412 from the server (I4)', async () => {
     setUseEtagFetch({ data: SAMPLE_PROJECT, etag: 'W/"abc"' });
-    // First fetch: the PUT that 412s. Second fetch: the diff probe.
     const fetchMock = vi.fn(async (url: unknown, init?: RequestInit) => {
       if (init && init.method === 'PUT') {
         return new Response(JSON.stringify({ error: 'stale' }), { status: 412 });
       }
-      // GET the diff probe — return a different agents block.
       return new Response(
         JSON.stringify({
           id: 'alpha',
           name: 'Alpha (changed externally)',
-          directory: '~/alpha',
-          agents: { dev: { type: 'dev', model: 'OTHER MODEL' } },
+          directory: '~/alpha-other',
+          agents: {},
         }),
         { status: 200 },
       );
@@ -171,50 +172,21 @@ describe('ProjectDetailPage', () => {
     const mod = await import('../$projectId.js');
     const Comp = mod.Route.component as React.FC;
     render(<Comp />);
-    const editButtons = screen.getAllByRole('button', { name: /edit/i });
-    fireEvent.click(editButtons[editButtons.length - 1]);
+    fireEvent.click(screen.getByRole('button', { name: /edit project/i }));
     const saveBtn = await waitFor(() => screen.getByRole('button', { name: /save/i }));
     await act(async () => {
       fireEvent.click(saveBtn);
     });
 
-    // ConflictDialog renders with the German heading from the component.
     await waitFor(() => screen.getByText(/Externe Änderung erkannt/i));
-    // The remote diff content is visible after clicking "Side-by-Side ansehen".
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /Side-by-Side ansehen/i }));
     });
-    expect(screen.getByText(/OTHER MODEL/)).toBeTruthy();
+    expect(screen.getByText(/alpha-other/)).toBeTruthy();
 
-    // "Verwerfen" closes the dialog and re-fetches.
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /Verwerfen/i }));
     });
     expect(screen.queryByText(/Externe Änderung erkannt/i)).toBeNull();
-  });
-
-  it('saveAgent uses PUT when editing an existing agent and threads If-Match', async () => {
-    setUseEtagFetch({ data: SAMPLE_PROJECT, etag: 'W/"abc"' });
-    const fetchSpy = (globalThis.fetch as unknown as ReturnType<typeof vi.fn>);
-    const mod = await import('../$projectId.js');
-    const Comp = mod.Route.component as React.FC;
-    render(<Comp />);
-    // Open the dev agent for edit, submit unchanged.
-    const editButtons = screen.getAllByRole('button', { name: /edit/i });
-    // The first "Edit" button is for the project; the per-agent edit follows.
-    fireEvent.click(editButtons[editButtons.length - 1]);
-    const saveBtn = await waitFor(() => screen.getByRole('button', { name: /save/i }));
-    await act(async () => {
-      fireEvent.click(saveBtn);
-    });
-    await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
-    const lastCall = fetchSpy.mock.calls.find((c) =>
-      String(c[0]).includes('/agents/dev'),
-    );
-    expect(lastCall).toBeDefined();
-    const init = lastCall![1] as RequestInit;
-    expect(init.method).toBe('PUT');
-    const headers = init.headers as Record<string, string>;
-    expect(headers['If-Match']).toBe('W/"abc"');
   });
 });

@@ -22,7 +22,13 @@ export function createWorkflowsRoute(registry: WorkflowRegistry, engine: Workflo
   }
 
   r.get('/', (c) => {
-    const workflows = registry.list().map((w) => ({ name: w.name, description: w.description, steps: w.steps.length, trigger: w.trigger?.event }));
+    const workflows = registry.listEntries().map(({ def, projectId }) => ({
+      name: def.name,
+      projectId,
+      description: def.description,
+      steps: def.steps.length,
+      trigger: def.trigger?.event,
+    }));
     return c.json(workflows);
   });
 

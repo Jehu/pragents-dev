@@ -83,21 +83,8 @@ function WorkflowsListPage() {
   }
 
   return (
-    <div className="p-6 max-w-3xl mx-auto">
-      <div className="flex items-start justify-between mb-6 gap-4">
-        <div className="min-w-0">
-          <Link
-            to="/projects/$projectId"
-            params={{ projectId }}
-            className="text-[11px] text-zinc-500 hover:text-zinc-300 no-underline"
-          >
-            ← Project
-          </Link>
-          <h1 className="text-xl font-semibold tracking-tight text-zinc-100 mt-1">
-            Workflows
-          </h1>
-          <p className="text-xs text-zinc-500 mt-0.5 font-mono">{projectId}</p>
-        </div>
+    <>
+      <div className="flex items-center justify-end mb-4">
         <button
           type="button"
           onClick={() => setCreating(true)}
@@ -240,6 +227,6 @@ function WorkflowsListPage() {
           </div>
         </Modal>
       )}
-    </div>
+    </>
   );
 }

@@ -62,6 +62,14 @@ interface WorkflowFilesOptions {
    * behaviour reflects the on-disk truth even after a hot-reload.
    */
   configPath: string;
+  /**
+   * Invoked after a successful POST/PUT/DELETE so the in-memory
+   * `WorkflowRegistry` can reload that project's entries. The fs watcher
+   * also triggers a debounced reload, but suppressWatcherChange masks
+   * the next event for ~250ms — without this hook the registry would lag
+   * behind disk until the next unrelated change.
+   */
+  onProjectWorkflowsChanged?: (projectId: string) => void;
 }
 
 class ProjectNotFoundError extends Error {
@@ -165,7 +173,7 @@ function mapWriteError(c: Context, err: unknown) {
 }
 
 export function createWorkflowFilesRoute(opts: WorkflowFilesOptions) {
-  const { configPath } = opts;
+  const { configPath, onProjectWorkflowsChanged } = opts;
   const r = new Hono();
 
   // GET /:projectId/workflows — list `.yaml` / `.yml` files in the
@@ -271,6 +279,7 @@ export function createWorkflowFilesRoute(opts: WorkflowFilesOptions) {
       const etag = computeEtag(content);
       c.header('ETag', etag);
       logger.info({ projectId, name }, 'Workflow created via API');
+      onProjectWorkflowsChanged?.(projectId);
       return c.json({ projectId, name, etag }, 201);
     } catch (err) {
       return mapWriteError(c, err);
@@ -319,6 +328,7 @@ export function createWorkflowFilesRoute(opts: WorkflowFilesOptions) {
       const etag = computeEtag(content);
       c.header('ETag', etag);
       logger.info({ projectId, name }, 'Workflow updated via API');
+      onProjectWorkflowsChanged?.(projectId);
       return c.json({ projectId, name, etag });
     } catch (err) {
       return mapWriteError(c, err);
@@ -345,6 +355,7 @@ export function createWorkflowFilesRoute(opts: WorkflowFilesOptions) {
       suppressWatcherChange(filePath, 250);
       unlinkSync(filePath);
       logger.info({ projectId, name }, 'Workflow deleted via API');
+      onProjectWorkflowsChanged?.(projectId);
       return c.json({ deleted: name });
     } catch (err) {
       return mapWriteError(c, err);

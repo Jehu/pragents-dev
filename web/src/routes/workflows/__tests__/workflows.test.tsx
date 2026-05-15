@@ -6,6 +6,7 @@ import React from 'react';
 
 vi.mock('@tanstack/react-query', () => ({
   useQuery: vi.fn(),
+  useQueries: vi.fn(() => []),
   useQueryClient: vi.fn(() => ({ invalidateQueries: vi.fn() })),
   useMutation: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
   QueryClient: class {},
