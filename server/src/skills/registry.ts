@@ -21,7 +21,7 @@ const logger = pino({ name: 'skill-registry' });
 const DEFAULT_REJECT_THRESHOLD = 3;
 
 export class SkillRegistry {
-  private skillsDir: string;
+  public readonly skillsDir: string;
   private skills: Map<string, SkillFM> = new Map();
   private skillBodies: Map<string, string> = new Map();
   /** Tracks cumulative rejection count per skill name (in-memory mirror of DB). */

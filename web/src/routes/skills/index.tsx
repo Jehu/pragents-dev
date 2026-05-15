@@ -1,4 +1,4 @@
-import { createFileRoute } from '@tanstack/react-router';
+import { createFileRoute, Link } from '@tanstack/react-router';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { useState, useEffect } from 'react';
 import { EmptyState } from '../../components/ui/index.js';
@@ -234,6 +234,14 @@ function ProposedSkillCard({ skill, onApprove, onReject, onViewBody, isApproving
           >
             View body
           </button>
+          <Link
+            to="/skills/$skillName"
+            params={{ skillName: skill.name }}
+            search={{ bucket: 'quarantine' as const }}
+            className="text-xs px-2.5 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 no-underline"
+          >
+            Edit
+          </Link>
           <button
             onClick={() => onReject(skill.name)}
             disabled={busy}

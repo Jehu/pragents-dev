@@ -3,7 +3,8 @@
   "private": true,
   "workspaces": [
     "server",
-    "web"
+    "web",
+    "packages/*"
   ],
   "dependencies": {
     "@hono/node-ws": "^1.3.1",

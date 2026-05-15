@@ -26,6 +26,7 @@ import { Route as ChatIndexRouteImport } from './routes/chat/index'
 import { Route as AgentsIndexRouteImport } from './routes/agents/index'
 import { Route as TracesTraceIdRouteImport } from './routes/traces/$traceId'
 import { Route as TasksTaskIdRouteImport } from './routes/tasks/$taskId'
+import { Route as SkillsSkillNameRouteImport } from './routes/skills/$skillName'
 import { Route as PlansPlanIdRouteImport } from './routes/plans/$planId'
 import { Route as AgentsAgentIdRouteImport } from './routes/agents/$agentId'
 
@@ -114,6 +115,11 @@ const TasksTaskIdRoute = TasksTaskIdRouteImport.update({
   path: '/tasks/$taskId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SkillsSkillNameRoute = SkillsSkillNameRouteImport.update({
+  id: '/skills/$skillName',
+  path: '/skills/$skillName',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const PlansPlanIdRoute = PlansPlanIdRouteImport.update({
   id: '/plans/$planId',
   path: '/plans/$planId',
@@ -129,6 +135,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/agents/$agentId': typeof AgentsAgentIdRoute
   '/plans/$planId': typeof PlansPlanIdRoute
+  '/skills/$skillName': typeof SkillsSkillNameRoute
   '/tasks/$taskId': typeof TasksTaskIdRoute
   '/traces/$traceId': typeof TracesTraceIdRoute
   '/agents/': typeof AgentsIndexRoute
@@ -150,6 +157,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/agents/$agentId': typeof AgentsAgentIdRoute
   '/plans/$planId': typeof PlansPlanIdRoute
+  '/skills/$skillName': typeof SkillsSkillNameRoute
   '/tasks/$taskId': typeof TasksTaskIdRoute
   '/traces/$traceId': typeof TracesTraceIdRoute
   '/agents': typeof AgentsIndexRoute
@@ -172,6 +180,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/agents/$agentId': typeof AgentsAgentIdRoute
   '/plans/$planId': typeof PlansPlanIdRoute
+  '/skills/$skillName': typeof SkillsSkillNameRoute
   '/tasks/$taskId': typeof TasksTaskIdRoute
   '/traces/$traceId': typeof TracesTraceIdRoute
   '/agents/': typeof AgentsIndexRoute
@@ -195,6 +204,7 @@ export interface FileRouteTypes {
     | '/'
     | '/agents/$agentId'
     | '/plans/$planId'
+    | '/skills/$skillName'
     | '/tasks/$taskId'
     | '/traces/$traceId'
     | '/agents/'
@@ -216,6 +226,7 @@ export interface FileRouteTypes {
     | '/'
     | '/agents/$agentId'
     | '/plans/$planId'
+    | '/skills/$skillName'
     | '/tasks/$taskId'
     | '/traces/$traceId'
     | '/agents'
@@ -237,6 +248,7 @@ export interface FileRouteTypes {
     | '/'
     | '/agents/$agentId'
     | '/plans/$planId'
+    | '/skills/$skillName'
     | '/tasks/$taskId'
     | '/traces/$traceId'
     | '/agents/'
@@ -259,6 +271,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AgentsAgentIdRoute: typeof AgentsAgentIdRoute
   PlansPlanIdRoute: typeof PlansPlanIdRoute
+  SkillsSkillNameRoute: typeof SkillsSkillNameRoute
   TasksTaskIdRoute: typeof TasksTaskIdRoute
   TracesTraceIdRoute: typeof TracesTraceIdRoute
   AgentsIndexRoute: typeof AgentsIndexRoute
@@ -398,6 +411,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof TasksTaskIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/skills/$skillName': {
+      id: '/skills/$skillName'
+      path: '/skills/$skillName'
+      fullPath: '/skills/$skillName'
+      preLoaderRoute: typeof SkillsSkillNameRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/plans/$planId': {
       id: '/plans/$planId'
       path: '/plans/$planId'
@@ -419,6 +439,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AgentsAgentIdRoute: AgentsAgentIdRoute,
   PlansPlanIdRoute: PlansPlanIdRoute,
+  SkillsSkillNameRoute: SkillsSkillNameRoute,
   TasksTaskIdRoute: TasksTaskIdRoute,
   TracesTraceIdRoute: TracesTraceIdRoute,
   AgentsIndexRoute: AgentsIndexRoute,
