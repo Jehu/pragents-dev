@@ -36,6 +36,8 @@ import { SkillRegistry } from './skills/registry.js';
 import { SkillExtractor } from './skills/extractor.js';
 import { SkillAutoExtractor, createSemanticCompareFn } from './skills/auto-extractor.js';
 import { createSkillsRoute } from './api/routes/skills.js';
+import { createSettingsRoute } from './api/routes/settings.js';
+import { createWorkflowFilesRoute } from './api/routes/workflowFiles.js';
 import { createFilesRoute } from './api/routes/files.js';
 import { createChatRoute } from './api/routes/chat.js';
 import { authMiddleware, getOrCreateApiToken } from './api/middleware/auth.js';
@@ -45,6 +47,7 @@ import { shutdownDecomposerSessions } from './nl/decomposer.js';
 import { createAgentSession, DefaultResourceLoader, SessionManager } from '@mariozechner/pi-coding-agent';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
+import { expandHome } from './util/paths.js';
 import { mkdirSync, readFileSync, existsSync, watch } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { logger } from './logging/index.js';
@@ -265,7 +268,11 @@ export async function startServer() {
   if (wsInject) logger.info('WebSocket endpoint ready');
 
   app.route('/api/v1', createHealthRoute(memory));
-  app.route('/api/v1/projects', createProjectsRoute(config));
+  const configPath = process.env.PRAGENTS_CONFIG_PATH || join(homedir(), '.pragents', 'pragents.yaml');
+  app.route('/api/v1/projects', createProjectsRoute({ configPath, sessionMgr }));
+  // Slice 4 / U11: per-project workflow files — mounted on the projects
+  // sub-tree so URLs read `/api/v1/projects/:projectId/workflows[/:name]`.
+  app.route('/api/v1/projects', createWorkflowFilesRoute({ configPath }));
   const agentsRouter = createAgentsRoute(agents, sessionMgr);
   agentsRouter.route('/', createAgentDetailRoute(agents, sessionMgr, eventBuffer, tracker));
   app.route('/api/v1/agents', agentsRouter);
@@ -279,17 +286,24 @@ export async function startServer() {
   app.route('/api/v1/feed', createFeedRoute(tracker, eventBuffer, wfTracker, wfRegistry, skillRegistry));
   app.route('/api/v1/memory', createMemoryRoute(memory, config));
   app.route('/api/v1/metrics', createMetricsRoute());
-  app.route('/api/v1/skills', createSkillsRoute(skillRegistry, skillExtractor, eventBuffer, agents));
-  // Config-UI: file-metadata read for conflict detection (R12 / R18). The
-  // allow-list deliberately limits exposure to the pragents config file and
-  // the skills root; project workflow roots are added in Slice 4 (U11).
+  app.route('/api/v1/skills', createSkillsRoute(skillRegistry, skillExtractor, eventBuffer));
+  app.route('/api/v1/settings', createSettingsRoute({ configPath }));
+  // Config-UI: file-metadata read for conflict detection (R12 / R18).
+  // Allow-list includes the pragents config file, the skills root, and
+  // each project's *workflow* subdirectory only — never the bare
+  // project directory. Probing meta on arbitrary project files is not
+  // a feature pragents needs to expose, and a `directory: ~` config
+  // would otherwise widen the allow-list to the operator's whole
+  // home tree.
+  const workflowRoots: string[] = [];
+  for (const projectCfg of Object.values(config.projects)) {
+    const expandedDir = expandHome(projectCfg.directory);
+    workflowRoots.push(join(expandedDir, projectCfg.workflowDirectory));
+  }
   app.route(
     '/api/v1/files',
     createFilesRoute({
-      allowedRoots: [
-        process.env.PRAGENTS_CONFIG_PATH || join(homedir(), '.pragents', 'pragents.yaml'),
-        skillsDir,
-      ],
+      allowedRoots: [configPath, skillsDir, ...workflowRoots],
     }),
   );
   app.route('/api/v1/events', createEventsRoute(eventBuffer));

@@ -19,7 +19,7 @@ export const AgentConfig = z.object({
   personality: z.string().optional(),
   memory: MemoryAccess.optional(),
   capabilities: z.array(z.string()).optional(),
-  tokenBudget: z.number().int().positive().optional(),
+  tokenBudget: z.number().int().positive().max(10_000_000).optional(),
   /**
    * When true, the agent's session is pre-spawned on server boot and never
    * idle-shutdown. Useful for cron-driven goal agents that pay a high
@@ -33,6 +33,11 @@ export const CompanyAgentConfig = AgentConfig.extend({
 });
 
 export const ProjectAgentConfig = AgentConfig;
+
+/** Agent types that may live under a project (excludes company-scope office/pm). */
+export const PROJECT_AGENT_TYPES = ['dev', 'seo', 'content'] as const;
+export const ProjectAgentType = z.enum(PROJECT_AGENT_TYPES);
+export type ProjectAgentType = z.infer<typeof ProjectAgentType>;
 
 export const ShortTermConfig = z.object({
   max_entries: z.number().int().positive().default(100),
@@ -70,6 +75,13 @@ export const CompanyConfig = z.object({
 export const ProjectConfig = z.object({
   name: z.string(),
   directory: z.string(),
+  /**
+   * Relative subdirectory (under `directory`) where the project's
+   * workflow YAML files live. Defaults to `workflows`. Made explicit in
+   * the schema so the config-UI workflow editor can resolve per-project
+   * workflows without baking a constant into the server.
+   */
+  workflowDirectory: z.string().default('workflows'),
   agents: z
     .object({
       dev: ProjectAgentConfig.optional(),
@@ -106,8 +118,8 @@ export const InterfacesConfig = z.object({
 });
 
 export const CostRate = z.object({
-  in: z.number(),
-  out: z.number(),
+  in: z.number().nonnegative('in rate must be ≥ 0'),
+  out: z.number().nonnegative('out rate must be ≥ 0'),
 });
 
 export const PoolConfig = z.object({

@@ -14,6 +14,8 @@ import { Route as WorkflowsIndexRouteImport } from './routes/workflows/index'
 import { Route as TracesIndexRouteImport } from './routes/traces/index'
 import { Route as TasksIndexRouteImport } from './routes/tasks/index'
 import { Route as SkillsIndexRouteImport } from './routes/skills/index'
+import { Route as SettingsIndexRouteImport } from './routes/settings/index'
+import { Route as ProjectsIndexRouteImport } from './routes/projects/index'
 import { Route as PlansIndexRouteImport } from './routes/plans/index'
 import { Route as OverviewIndexRouteImport } from './routes/overview/index'
 import { Route as MetricsIndexRouteImport } from './routes/metrics/index'
@@ -27,8 +29,12 @@ import { Route as AgentsIndexRouteImport } from './routes/agents/index'
 import { Route as TracesTraceIdRouteImport } from './routes/traces/$traceId'
 import { Route as TasksTaskIdRouteImport } from './routes/tasks/$taskId'
 import { Route as SkillsSkillNameRouteImport } from './routes/skills/$skillName'
+import { Route as ProjectsNewRouteImport } from './routes/projects/new'
+import { Route as ProjectsProjectIdRouteImport } from './routes/projects/$projectId'
 import { Route as PlansPlanIdRouteImport } from './routes/plans/$planId'
 import { Route as AgentsAgentIdRouteImport } from './routes/agents/$agentId'
+import { Route as ProjectsProjectIdWorkflowsRouteImport } from './routes/projects/$projectId.workflows'
+import { Route as ProjectsProjectIdWorkflowsWorkflowNameRouteImport } from './routes/projects/$projectId.workflows.$workflowName'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -53,6 +59,16 @@ const TasksIndexRoute = TasksIndexRouteImport.update({
 const SkillsIndexRoute = SkillsIndexRouteImport.update({
   id: '/skills/',
   path: '/skills/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SettingsIndexRoute = SettingsIndexRouteImport.update({
+  id: '/settings/',
+  path: '/settings/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ProjectsIndexRoute = ProjectsIndexRouteImport.update({
+  id: '/projects/',
+  path: '/projects/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const PlansIndexRoute = PlansIndexRouteImport.update({
@@ -120,6 +136,16 @@ const SkillsSkillNameRoute = SkillsSkillNameRouteImport.update({
   path: '/skills/$skillName',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ProjectsNewRoute = ProjectsNewRouteImport.update({
+  id: '/projects/new',
+  path: '/projects/new',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ProjectsProjectIdRoute = ProjectsProjectIdRouteImport.update({
+  id: '/projects/$projectId',
+  path: '/projects/$projectId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const PlansPlanIdRoute = PlansPlanIdRouteImport.update({
   id: '/plans/$planId',
   path: '/plans/$planId',
@@ -130,11 +156,25 @@ const AgentsAgentIdRoute = AgentsAgentIdRouteImport.update({
   path: '/agents/$agentId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ProjectsProjectIdWorkflowsRoute =
+  ProjectsProjectIdWorkflowsRouteImport.update({
+    id: '/workflows',
+    path: '/workflows',
+    getParentRoute: () => ProjectsProjectIdRoute,
+  } as any)
+const ProjectsProjectIdWorkflowsWorkflowNameRoute =
+  ProjectsProjectIdWorkflowsWorkflowNameRouteImport.update({
+    id: '/$workflowName',
+    path: '/$workflowName',
+    getParentRoute: () => ProjectsProjectIdWorkflowsRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/agents/$agentId': typeof AgentsAgentIdRoute
   '/plans/$planId': typeof PlansPlanIdRoute
+  '/projects/$projectId': typeof ProjectsProjectIdRouteWithChildren
+  '/projects/new': typeof ProjectsNewRoute
   '/skills/$skillName': typeof SkillsSkillNameRoute
   '/tasks/$taskId': typeof TasksTaskIdRoute
   '/traces/$traceId': typeof TracesTraceIdRoute
@@ -148,15 +188,21 @@ export interface FileRoutesByFullPath {
   '/metrics/': typeof MetricsIndexRoute
   '/overview/': typeof OverviewIndexRoute
   '/plans/': typeof PlansIndexRoute
+  '/projects/': typeof ProjectsIndexRoute
+  '/settings/': typeof SettingsIndexRoute
   '/skills/': typeof SkillsIndexRoute
   '/tasks/': typeof TasksIndexRoute
   '/traces/': typeof TracesIndexRoute
   '/workflows/': typeof WorkflowsIndexRoute
+  '/projects/$projectId/workflows': typeof ProjectsProjectIdWorkflowsRouteWithChildren
+  '/projects/$projectId/workflows/$workflowName': typeof ProjectsProjectIdWorkflowsWorkflowNameRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/agents/$agentId': typeof AgentsAgentIdRoute
   '/plans/$planId': typeof PlansPlanIdRoute
+  '/projects/$projectId': typeof ProjectsProjectIdRouteWithChildren
+  '/projects/new': typeof ProjectsNewRoute
   '/skills/$skillName': typeof SkillsSkillNameRoute
   '/tasks/$taskId': typeof TasksTaskIdRoute
   '/traces/$traceId': typeof TracesTraceIdRoute
@@ -170,16 +216,22 @@ export interface FileRoutesByTo {
   '/metrics': typeof MetricsIndexRoute
   '/overview': typeof OverviewIndexRoute
   '/plans': typeof PlansIndexRoute
+  '/projects': typeof ProjectsIndexRoute
+  '/settings': typeof SettingsIndexRoute
   '/skills': typeof SkillsIndexRoute
   '/tasks': typeof TasksIndexRoute
   '/traces': typeof TracesIndexRoute
   '/workflows': typeof WorkflowsIndexRoute
+  '/projects/$projectId/workflows': typeof ProjectsProjectIdWorkflowsRouteWithChildren
+  '/projects/$projectId/workflows/$workflowName': typeof ProjectsProjectIdWorkflowsWorkflowNameRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/agents/$agentId': typeof AgentsAgentIdRoute
   '/plans/$planId': typeof PlansPlanIdRoute
+  '/projects/$projectId': typeof ProjectsProjectIdRouteWithChildren
+  '/projects/new': typeof ProjectsNewRoute
   '/skills/$skillName': typeof SkillsSkillNameRoute
   '/tasks/$taskId': typeof TasksTaskIdRoute
   '/traces/$traceId': typeof TracesTraceIdRoute
@@ -193,10 +245,14 @@ export interface FileRoutesById {
   '/metrics/': typeof MetricsIndexRoute
   '/overview/': typeof OverviewIndexRoute
   '/plans/': typeof PlansIndexRoute
+  '/projects/': typeof ProjectsIndexRoute
+  '/settings/': typeof SettingsIndexRoute
   '/skills/': typeof SkillsIndexRoute
   '/tasks/': typeof TasksIndexRoute
   '/traces/': typeof TracesIndexRoute
   '/workflows/': typeof WorkflowsIndexRoute
+  '/projects/$projectId/workflows': typeof ProjectsProjectIdWorkflowsRouteWithChildren
+  '/projects/$projectId/workflows/$workflowName': typeof ProjectsProjectIdWorkflowsWorkflowNameRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -204,6 +260,8 @@ export interface FileRouteTypes {
     | '/'
     | '/agents/$agentId'
     | '/plans/$planId'
+    | '/projects/$projectId'
+    | '/projects/new'
     | '/skills/$skillName'
     | '/tasks/$taskId'
     | '/traces/$traceId'
@@ -217,15 +275,21 @@ export interface FileRouteTypes {
     | '/metrics/'
     | '/overview/'
     | '/plans/'
+    | '/projects/'
+    | '/settings/'
     | '/skills/'
     | '/tasks/'
     | '/traces/'
     | '/workflows/'
+    | '/projects/$projectId/workflows'
+    | '/projects/$projectId/workflows/$workflowName'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/agents/$agentId'
     | '/plans/$planId'
+    | '/projects/$projectId'
+    | '/projects/new'
     | '/skills/$skillName'
     | '/tasks/$taskId'
     | '/traces/$traceId'
@@ -239,15 +303,21 @@ export interface FileRouteTypes {
     | '/metrics'
     | '/overview'
     | '/plans'
+    | '/projects'
+    | '/settings'
     | '/skills'
     | '/tasks'
     | '/traces'
     | '/workflows'
+    | '/projects/$projectId/workflows'
+    | '/projects/$projectId/workflows/$workflowName'
   id:
     | '__root__'
     | '/'
     | '/agents/$agentId'
     | '/plans/$planId'
+    | '/projects/$projectId'
+    | '/projects/new'
     | '/skills/$skillName'
     | '/tasks/$taskId'
     | '/traces/$traceId'
@@ -261,16 +331,22 @@ export interface FileRouteTypes {
     | '/metrics/'
     | '/overview/'
     | '/plans/'
+    | '/projects/'
+    | '/settings/'
     | '/skills/'
     | '/tasks/'
     | '/traces/'
     | '/workflows/'
+    | '/projects/$projectId/workflows'
+    | '/projects/$projectId/workflows/$workflowName'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AgentsAgentIdRoute: typeof AgentsAgentIdRoute
   PlansPlanIdRoute: typeof PlansPlanIdRoute
+  ProjectsProjectIdRoute: typeof ProjectsProjectIdRouteWithChildren
+  ProjectsNewRoute: typeof ProjectsNewRoute
   SkillsSkillNameRoute: typeof SkillsSkillNameRoute
   TasksTaskIdRoute: typeof TasksTaskIdRoute
   TracesTraceIdRoute: typeof TracesTraceIdRoute
@@ -284,6 +360,8 @@ export interface RootRouteChildren {
   MetricsIndexRoute: typeof MetricsIndexRoute
   OverviewIndexRoute: typeof OverviewIndexRoute
   PlansIndexRoute: typeof PlansIndexRoute
+  ProjectsIndexRoute: typeof ProjectsIndexRoute
+  SettingsIndexRoute: typeof SettingsIndexRoute
   SkillsIndexRoute: typeof SkillsIndexRoute
   TasksIndexRoute: typeof TasksIndexRoute
   TracesIndexRoute: typeof TracesIndexRoute
@@ -325,6 +403,20 @@ declare module '@tanstack/react-router' {
       path: '/skills'
       fullPath: '/skills/'
       preLoaderRoute: typeof SkillsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/settings/': {
+      id: '/settings/'
+      path: '/settings'
+      fullPath: '/settings/'
+      preLoaderRoute: typeof SettingsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/projects/': {
+      id: '/projects/'
+      path: '/projects'
+      fullPath: '/projects/'
+      preLoaderRoute: typeof ProjectsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/plans/': {
@@ -418,6 +510,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SkillsSkillNameRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/projects/new': {
+      id: '/projects/new'
+      path: '/projects/new'
+      fullPath: '/projects/new'
+      preLoaderRoute: typeof ProjectsNewRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/projects/$projectId': {
+      id: '/projects/$projectId'
+      path: '/projects/$projectId'
+      fullPath: '/projects/$projectId'
+      preLoaderRoute: typeof ProjectsProjectIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/plans/$planId': {
       id: '/plans/$planId'
       path: '/plans/$planId'
@@ -432,13 +538,55 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AgentsAgentIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/projects/$projectId/workflows': {
+      id: '/projects/$projectId/workflows'
+      path: '/workflows'
+      fullPath: '/projects/$projectId/workflows'
+      preLoaderRoute: typeof ProjectsProjectIdWorkflowsRouteImport
+      parentRoute: typeof ProjectsProjectIdRoute
+    }
+    '/projects/$projectId/workflows/$workflowName': {
+      id: '/projects/$projectId/workflows/$workflowName'
+      path: '/$workflowName'
+      fullPath: '/projects/$projectId/workflows/$workflowName'
+      preLoaderRoute: typeof ProjectsProjectIdWorkflowsWorkflowNameRouteImport
+      parentRoute: typeof ProjectsProjectIdWorkflowsRoute
+    }
   }
 }
+
+interface ProjectsProjectIdWorkflowsRouteChildren {
+  ProjectsProjectIdWorkflowsWorkflowNameRoute: typeof ProjectsProjectIdWorkflowsWorkflowNameRoute
+}
+
+const ProjectsProjectIdWorkflowsRouteChildren: ProjectsProjectIdWorkflowsRouteChildren =
+  {
+    ProjectsProjectIdWorkflowsWorkflowNameRoute:
+      ProjectsProjectIdWorkflowsWorkflowNameRoute,
+  }
+
+const ProjectsProjectIdWorkflowsRouteWithChildren =
+  ProjectsProjectIdWorkflowsRoute._addFileChildren(
+    ProjectsProjectIdWorkflowsRouteChildren,
+  )
+
+interface ProjectsProjectIdRouteChildren {
+  ProjectsProjectIdWorkflowsRoute: typeof ProjectsProjectIdWorkflowsRouteWithChildren
+}
+
+const ProjectsProjectIdRouteChildren: ProjectsProjectIdRouteChildren = {
+  ProjectsProjectIdWorkflowsRoute: ProjectsProjectIdWorkflowsRouteWithChildren,
+}
+
+const ProjectsProjectIdRouteWithChildren =
+  ProjectsProjectIdRoute._addFileChildren(ProjectsProjectIdRouteChildren)
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AgentsAgentIdRoute: AgentsAgentIdRoute,
   PlansPlanIdRoute: PlansPlanIdRoute,
+  ProjectsProjectIdRoute: ProjectsProjectIdRouteWithChildren,
+  ProjectsNewRoute: ProjectsNewRoute,
   SkillsSkillNameRoute: SkillsSkillNameRoute,
   TasksTaskIdRoute: TasksTaskIdRoute,
   TracesTraceIdRoute: TracesTraceIdRoute,
@@ -452,6 +600,8 @@ const rootRouteChildren: RootRouteChildren = {
   MetricsIndexRoute: MetricsIndexRoute,
   OverviewIndexRoute: OverviewIndexRoute,
   PlansIndexRoute: PlansIndexRoute,
+  ProjectsIndexRoute: ProjectsIndexRoute,
+  SettingsIndexRoute: SettingsIndexRoute,
   SkillsIndexRoute: SkillsIndexRoute,
   TasksIndexRoute: TasksIndexRoute,
   TracesIndexRoute: TracesIndexRoute,

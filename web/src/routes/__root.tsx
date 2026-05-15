@@ -28,6 +28,8 @@ const NAV: NavGroup[] = [
     items: [
       { label: 'Overview', to: '/overview' },
       { label: 'Inbox', to: '/inbox' },
+      { label: 'Projects', to: '/projects' },
+      { label: 'Settings', to: '/settings' },
     ],
   },
   {
@@ -68,13 +70,13 @@ const NAV: NavGroup[] = [
 
 function ProjectPicker() {
   const { selectedProject, setProject } = useScopeStore();
-  const { data } = useQuery<{ projects?: { id: string; name: string }[] }>({
+  const { data } = useQuery<{ id: string; name: string }[]>({
     queryKey: ['projects'],
     queryFn: () => fetch('/api/v1/projects').then((r) => r.json()),
     staleTime: 60_000,
   });
 
-  const projects = data?.projects ?? [];
+  const projects = Array.isArray(data) ? data : [];
 
   return (
     <div className="flex items-center gap-1 text-xs">

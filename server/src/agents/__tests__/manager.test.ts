@@ -842,3 +842,43 @@ describe('AgentSessionManager keepWarm + session pool', () => {
     expect(second.warm).toBe(true);
   });
 });
+
+describe('AgentSessionManager.getActiveSessionsForProject', () => {
+  // Filter logic only — we poke fake entries directly into the private
+  // sessions map to avoid spinning up the real session lifecycle. Behaviour
+  // under test: `endsWith('@<projectId>')` discriminates similar suffixes
+  // (`alpha` must not match `alpha-v2`).
+  function buildMgr() {
+    const memory = new MemoryEngine(10);
+    return new AgentSessionManager(memory);
+  }
+  function addFakeSession(mgr: AgentSessionManager, id: string) {
+    (mgr as unknown as { sessions: Map<string, unknown> }).sessions.set(id, {
+      agentId: id,
+      runtimeHandle: { id: `s-${id}`, isStreaming: false, raw: {} },
+      createdAt: Date.now(),
+      lastActivityAt: Date.now(),
+    });
+  }
+
+  it('returns sessions whose id ends with `@<projectId>`', () => {
+    const mgr = buildMgr();
+    addFakeSession(mgr, 'dev@alpha');
+    addFakeSession(mgr, 'seo@alpha');
+    addFakeSession(mgr, 'dev@beta');
+    expect(mgr.getActiveSessionsForProject('alpha').sort()).toEqual(['dev@alpha', 'seo@alpha']);
+  });
+
+  it('does not match a longer projectId that shares a suffix prefix', () => {
+    // `dev@alpha` must NOT be returned for projectId `alpha-v2` and vice versa.
+    const mgr = buildMgr();
+    addFakeSession(mgr, 'dev@alpha');
+    addFakeSession(mgr, 'dev@alpha-v2');
+    expect(mgr.getActiveSessionsForProject('alpha')).toEqual(['dev@alpha']);
+    expect(mgr.getActiveSessionsForProject('alpha-v2')).toEqual(['dev@alpha-v2']);
+  });
+
+  it('returns [] when no sessions are active', () => {
+    expect(buildMgr().getActiveSessionsForProject('anything')).toEqual([]);
+  });
+});

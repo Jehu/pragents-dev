@@ -24,7 +24,7 @@ export interface FilesRouteOptions {
 export function createFilesRoute(opts: FilesRouteOptions) {
   const router = new Hono();
 
-  function resolveOr400(rawPath: string | null) {
+  function resolveOr400(rawPath: string | null | undefined) {
     if (!rawPath) {
       return { status: 400 as const, error: '`path` query parameter is required' };
     }
