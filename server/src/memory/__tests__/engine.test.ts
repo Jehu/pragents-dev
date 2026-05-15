@@ -15,7 +15,7 @@ function makeAgent(overrides: Partial<ResolvedAgent> = {}): ResolvedAgent {
     model: 'anthropic/claude-sonnet-4-20250514',
     personality: 'Test agent',
     memory: { company: 'read/write', project: 'read/write' },
-    skills: [],
+    capabilities: [],
     projectDir: '/tmp',
     tokenBudget: 40000,
     keepWarm: false,

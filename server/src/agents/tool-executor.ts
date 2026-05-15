@@ -144,7 +144,7 @@ export class ToolExecutor {
         }
         case 'list_agents': {
           return JSON.stringify(this.deps.agents.map(a => ({
-            id: a.id, type: a.type, projectId: a.projectId, skills: a.skills,
+            id: a.id, type: a.type, projectId: a.projectId, capabilities: a.capabilities,
           })));
         }
         case 'list_goals': {

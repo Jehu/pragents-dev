@@ -33,8 +33,8 @@ describe('PragentsConfig schema', () => {
           name: 'My Project',
           directory: '~/projects/my-project',
           agents: {
-            dev: { type: 'dev', skills: ['typescript', 'react'] },
-            seo: { type: 'seo', skills: ['keyword-research'] },
+            dev: { type: 'dev', capabilities: ['typescript', 'react'] },
+            seo: { type: 'seo', capabilities: ['keyword-research'] },
           },
         },
       },
@@ -80,7 +80,7 @@ describe('resolveAllAgents', () => {
           name: 'Project A',
           directory: '/tmp/a',
           agents: {
-            dev: { type: 'dev', skills: ['ts'] },
+            dev: { type: 'dev', capabilities: ['ts'] },
           },
         },
       },
@@ -89,7 +89,7 @@ describe('resolveAllAgents', () => {
     expect(agents).toHaveLength(1);
     expect(agents[0].id).toBe('dev@proj-a');
     expect(agents[0].projectId).toBe('proj-a');
-    expect(agents[0].skills).toEqual(['ts']);
+    expect(agents[0].capabilities).toEqual(['ts']);
   });
 
   it('applies config cascade: agent model > default', () => {

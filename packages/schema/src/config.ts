@@ -18,7 +18,7 @@ export const AgentConfig = z.object({
   model: z.string().optional(),
   personality: z.string().optional(),
   memory: MemoryAccess.optional(),
-  skills: z.array(z.string()).optional(),
+  capabilities: z.array(z.string()).optional(),
   tokenBudget: z.number().int().positive().optional(),
   /**
    * When true, the agent's session is pre-spawned on server boot and never
@@ -152,7 +152,7 @@ export interface ResolvedAgent {
   model: string;
   personality: string;
   memory: MemoryAccess;
-  skills: string[];
+  capabilities: string[];
   projectDir: string;
   tokenBudget: number;
   keepWarm: boolean;

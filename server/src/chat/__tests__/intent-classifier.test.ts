@@ -32,7 +32,7 @@ const mockAgent: ResolvedAgent = {
   model: 'anthropic/claude-haiku',
   personality: 'You are a test agent.',
   memory: { project: 'read', company: 'read' },
-  skills: [],
+  capabilities: [],
   projectDir: '/tmp/test',
   tokenBudget: 10000,
   keepWarm: false,

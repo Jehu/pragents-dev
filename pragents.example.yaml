@@ -11,7 +11,7 @@ company:
         Meetings und sorge für unternehmensweite Ordnung.
       memory:
         company: read/write
-      skills:
+      capabilities:
         - calendar-management
         - task-tracking
 
@@ -28,7 +28,7 @@ company:
         company: read/write
         projects:
           all: read
-      skills:
+      capabilities:
         - task-prioritization
         - quality-review
 
@@ -57,7 +57,7 @@ projects:
         model: deepseek/deepseek-v4-flash
         personality: |
           Senior Fullstack-Entwickler. Stack: Next.js 14, TypeScript, Prisma, PostgreSQL, Tailwind.
-        skills:
+        capabilities:
           - typescript
           - nextjs
           - prisma
@@ -65,7 +65,7 @@ projects:
       seo:
         type: seo
         model: deepseek/deepseek-v4-flash
-        skills:
+        capabilities:
           - keyword-research
           - technical-seo
 

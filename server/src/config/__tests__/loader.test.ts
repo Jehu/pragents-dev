@@ -14,7 +14,7 @@ projects:
     agents:
       dev:
         type: dev
-        skills: [typescript]
+        capabilities: [typescript]
         model: deepseek/deepseek-v4-flash
 `;
 
@@ -28,11 +28,11 @@ projects:
     agents:
       dev:
         type: dev
-        skills: [typescript, react]
+        capabilities: [typescript, react]
         model: deepseek/deepseek-v4-flash
       seo:
         type: seo
-        skills: [keyword-research]
+        capabilities: [keyword-research]
         model: deepseek/deepseek-v4-flash
   proj-b:
     directory: "/tmp/test-project-b"
@@ -40,7 +40,7 @@ projects:
     agents:
       content:
         type: content
-        skills: [writing]
+        capabilities: [writing]
         model: deepseek/deepseek-v4-flash
 costs:
   deepseek/deepseek-v4-flash:
@@ -58,7 +58,7 @@ projects:
     agents:
       dev:
         type: dev
-        skills: [typescript]
+        capabilities: [typescript]
         model: deepseek/deepseek-v4-flash
 `;
 
@@ -75,14 +75,14 @@ describe('ConfigLoader', () => {
     rmSync(tmpDir, { recursive: true });
   });
 
-  it('resolves agents with skills and projectDir', () => {
+  it('resolves agents with capabilities and projectDir', () => {
     const tmpDir = mkdtempSync(join(tmpdir(), 'pragents-config-test-'));
     const path = join(tmpDir, 'full.yaml');
     writeFileSync(path, fullYaml);
     const { agents } = loadConfig(path);
     expect(agents.length).toBe(3);
     const dev = agents.find(a => a.id.includes('dev'));
-    expect(dev?.skills).toContain('typescript');
+    expect(dev?.capabilities).toContain('typescript');
     expect(dev?.projectDir).toBe('/tmp/test-project');
     expect(dev?.projectId).toBe('proj-a');
     rmSync(tmpDir, { recursive: true });
@@ -131,7 +131,7 @@ projects:
     agents:
       dev:
         type: dev
-        skills: [typescript]
+        capabilities: [typescript]
         model: deepseek/deepseek-v4-flash
 `;
     const tmpDir = mkdtempSync(join(tmpdir(), 'pragents-config-test-'));
@@ -162,7 +162,7 @@ projects:
     agents:
       dev:
         type: dev
-        skills: [typescript]
+        capabilities: [typescript]
         model: deepseek/deepseek-v4-flash
 `;
     const tmpDir = mkdtempSync(join(tmpdir(), 'pragents-config-test-'));
@@ -184,7 +184,7 @@ projects:
     agents:
       dev:
         type: dev
-        skills: [typescript]
+        capabilities: [typescript]
         model: deepseek/deepseek-v4-flash
 `;
     const tmpDir = mkdtempSync(join(tmpdir(), 'pragents-config-test-'));

@@ -137,7 +137,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   },
   {
     name: 'list_agents',
-    description: 'List all configured agents with their types, skills, and project assignments.',
+    description: 'List all configured agents with their types, capabilities, and project assignments.',
     parameters: { type: 'object', properties: {} },
   },
   {

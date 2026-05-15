@@ -13,7 +13,7 @@ const mockPM: ResolvedAgent = {
   model: 'claude-sonnet',
   personality: 'You are a PM.',
   memory: { project: 'read', company: 'read/write' },
-  skills: [],
+  capabilities: [],
   projectDir: '/tmp/test',
   tokenBudget: 30000,
   keepWarm: false,

@@ -14,7 +14,7 @@ function makeAgent(id: string, overrides: Partial<ResolvedAgent> = {}): Resolved
     projectId: 'project-test',
     type: 'dev',
     model: 'claude-sonnet',
-    skills: ['coding', 'review'],
+    capabilities: ['coding', 'review'],
     personality: 'helpful',
     memory: { project: 'read/write', company: 'read' },
     projectDir: '/tmp',
@@ -111,15 +111,32 @@ describe('GET /agents/:id', () => {
     expect(body.stats.tasksTodayComplete).toBeGreaterThanOrEqual(1);
   });
 
-  it('includes skillsLoaded from agent config', async () => {
-    const agent = makeAgent('dev@skills', { skills: ['skill-a', 'skill-b'] });
+  it('skillsLoaded only includes capabilities that resolve to a registered skill', async () => {
+    const agent = makeAgent('dev@skills', { capabilities: ['skill-a', 'skill-b', 'no-match'] });
     const sessionMgr = makeSessionMgr('dev@skills', false);
-    const app = createAgentDetailRoute([agent], sessionMgr, eventBuffer, tracker);
+    const skillRegistry = {
+      list: () => [
+        { name: 'skill-a' } as any,
+        { name: 'skill-b' } as any,
+        { name: 'unrelated-skill' } as any,
+      ],
+    } as any;
+    const app = createAgentDetailRoute([agent], sessionMgr, eventBuffer, tracker, skillRegistry);
     const res = await app.request('/dev@skills');
     const body = await res.json();
     expect(body.skillsLoaded).toHaveLength(2);
-    expect(body.skillsLoaded[0]).toHaveProperty('name');
+    expect(body.skillsLoaded.map((s: { name: string }) => s.name).sort()).toEqual(['skill-a', 'skill-b']);
     expect(body.skillsLoaded[0]).toHaveProperty('jit');
+  });
+
+  it('skillsLoaded is empty when no skill registry is wired (defensive default)', async () => {
+    const agent = makeAgent('dev@no-registry', { capabilities: ['only-a-tag'] });
+    const sessionMgr = makeSessionMgr('dev@no-registry', false);
+    const app = createAgentDetailRoute([agent], sessionMgr, eventBuffer, tracker);
+    const res = await app.request('/dev@no-registry');
+    const body = await res.json();
+    expect(body.skillsLoaded).toEqual([]);
+    expect(body.capabilities).toEqual(['only-a-tag']);
   });
 });
 

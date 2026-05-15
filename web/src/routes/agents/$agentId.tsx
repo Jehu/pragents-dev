@@ -26,7 +26,7 @@ interface AgentSummary {
   type: string;
   projectId: string;
   model: string;
-  skills: string[];
+  capabilities: string[];
   status: AgentStatus;
 }
 
@@ -35,7 +35,7 @@ interface AgentDetail {
   type: string;
   projectId: string;
   model: string;
-  skills: string[];
+  capabilities: string[];
   status: AgentStatus;
   session: { id: string; startedAt: string; idleTimeoutMs: number; msUntilIdle: number } | null;
   stats: {
@@ -181,7 +181,7 @@ function AgentSidebar({
 // Detail tabs
 // ──────────────────────────────────────────────────────────────────
 
-type Tab = 'events' | 'tasks' | 'skills';
+type Tab = 'events' | 'tasks' | 'capabilities';
 
 function EventsTab({ agentId }: { agentId: string }) {
   const events = useEventBus({ agentId });
@@ -282,35 +282,54 @@ function TasksTab({ agentId }: { agentId: string }) {
   );
 }
 
-function SkillsTab({ agent }: { agent: AgentDetail }) {
-  if (agent.skills.length === 0) {
+function CapabilitiesTab({ agent }: { agent: AgentDetail }) {
+  if (agent.capabilities.length === 0) {
     return (
       <EmptyState
         icon="🧠"
-        title="No skills"
-        description="This agent has no skills configured."
+        title="No capabilities"
+        description="This agent has no capabilities configured."
       />
     );
   }
 
   return (
     <div className="p-4 space-y-1">
-      {agent.skills.map((skill) => {
-        const loaded = agent.skillsLoaded.find((s) => s.name === skill);
-        return (
-          <Link
-            key={skill}
-            to="/skills"
-            search={{ name: skill }}
-            className="flex items-center justify-between px-3 py-2 rounded hover:bg-zinc-800/60 transition-colors"
-          >
-            <span className="text-sm text-zinc-200">{skill}</span>
-            {loaded?.jit && (
-              <span className="text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300">
-                jit
+      <p className="text-[11px] text-zinc-500 px-3 pb-2">
+        Routing tags used by the SkillRouter. Tags with a matching{' '}
+        <Link to="/skills" search={{ name: undefined }} className="text-sky-400 hover:text-sky-300 underline">SKILL.md</Link>{' '}
+        link to that skill; the rest are tag-only.
+      </p>
+      {agent.capabilities.map((cap) => {
+        const loaded = agent.skillsLoaded.find((s) => s.name === cap);
+        const className = 'flex items-center justify-between px-3 py-2 rounded transition-colors';
+        const content = (
+          <>
+            <span className="text-sm text-zinc-200">{cap}</span>
+            {loaded ? (
+              <span className="text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300">
+                skill
+              </span>
+            ) : (
+              <span className="text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-500">
+                tag
               </span>
             )}
+          </>
+        );
+        return loaded ? (
+          <Link
+            key={cap}
+            to="/skills"
+            search={{ name: cap }}
+            className={`${className} hover:bg-zinc-800/60`}
+          >
+            {content}
           </Link>
+        ) : (
+          <div key={cap} className={className}>
+            {content}
+          </div>
         );
       })}
     </div>
@@ -421,7 +440,7 @@ function AgentDetail({ agentId }: { agentId: string }) {
 
       {/* Tabs */}
       <div className="flex items-center gap-1 px-6 py-2 border-b border-zinc-800 flex-shrink-0">
-        {(['events', 'tasks', 'skills'] as Tab[]).map((tab) => (
+        {(['events', 'tasks', 'capabilities'] as Tab[]).map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -440,7 +459,7 @@ function AgentDetail({ agentId }: { agentId: string }) {
       <div className="flex-1 overflow-auto">
         {activeTab === 'events' && <EventsTab agentId={agentId} />}
         {activeTab === 'tasks' && <TasksTab agentId={agentId} />}
-        {activeTab === 'skills' && <SkillsTab agent={agent} />}
+        {activeTab === 'capabilities' && <CapabilitiesTab agent={agent} />}
       </div>
     </div>
   );

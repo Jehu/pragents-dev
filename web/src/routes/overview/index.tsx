@@ -21,7 +21,7 @@ export interface Agent {
   type?: string;
   projectId?: string;
   model?: string;
-  skills?: string[];
+  capabilities?: string[];
   status?: string;
 }
 
@@ -173,7 +173,7 @@ export async function rejectItem(item: InboxItem): Promise<void> {
 
 function AgentCard({ agent }: { agent: Agent }) {
   const status = (agent.status ?? 'idle') as StatusType;
-  const skillCount = agent.skills?.length ?? 0;
+  const skillCount = agent.capabilities?.length ?? 0;
   const displayName = agent.name ?? agent.id;
 
   return (

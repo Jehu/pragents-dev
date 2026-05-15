@@ -4,6 +4,7 @@ import type { AgentSessionManager } from '../../agents/manager.js';
 import type { EventBuffer } from '../../events/buffer.js';
 import type { ResolvedAgent } from '../../config/schema.js';
 import type { TaskTracker } from '../../tasks/tracker.js';
+import type { SkillRegistry } from '../../skills/registry.js';
 import { logger } from '../../logging/index.js';
 
 /** Per-agent in-memory cache entry. */
@@ -17,7 +18,7 @@ interface AgentDetailResponse {
   type: string;
   projectId: string;
   model: string;
-  skills: string[];
+  capabilities: string[];
   status: 'busy' | 'idle' | 'offline';
   session: { id: string; startedAt: string; idleTimeoutMs: number; msUntilIdle: number } | null;
   stats: {
@@ -32,7 +33,11 @@ interface AgentDetailResponse {
 const CACHE_TTL_MS = 5_000;
 const cache = new Map<string, CacheEntry>();
 
-function buildDetail(agent: ResolvedAgent, sessionMgr: AgentSessionManager): AgentDetailResponse {
+function buildDetail(
+  agent: ResolvedAgent,
+  sessionMgr: AgentSessionManager,
+  skillRegistry: SkillRegistry | null,
+): AgentDetailResponse {
   const db = getDb();
 
   // Today's task stats
@@ -70,15 +75,22 @@ function buildDetail(agent: ResolvedAgent, sessionMgr: AgentSessionManager): Age
 
   const session = sessionMgr.getSessionInfo(agent.id);
 
-  // Skills loaded — map config skill names; none are JIT by default
-  const skillsLoaded = agent.skills.map((name) => ({ name, jit: false }));
+  // Skills loaded — only capabilities that resolve to an actual SKILL.md file in
+  // the registry. Capabilities without a matching skill are routing tags only
+  // and are surfaced via the Capabilities tab, not here.
+  const registeredNames = new Set(
+    (skillRegistry?.list() ?? []).map((s) => s.name),
+  );
+  const skillsLoaded = agent.capabilities
+    .filter((name) => registeredNames.has(name))
+    .map((name) => ({ name, jit: false }));
 
   return {
     id: agent.id,
     type: agent.type,
     projectId: agent.projectId,
     model: agent.model,
-    skills: agent.skills,
+    capabilities: agent.capabilities,
     status: sessionMgr.getAgentStatus(agent.id),
     session,
     stats: {
@@ -96,6 +108,7 @@ export function createAgentDetailRoute(
   sessionMgr: AgentSessionManager,
   eventBuffer: EventBuffer,
   tracker: TaskTracker,
+  skillRegistry: SkillRegistry | null = null,
 ) {
   const r = new Hono();
 
@@ -110,7 +123,7 @@ export function createAgentDetailRoute(
       return c.json(cached.data);
     }
 
-    const data = buildDetail(agent, sessionMgr);
+    const data = buildDetail(agent, sessionMgr, skillRegistry);
     cache.set(agentId, { data, expiresAt: Date.now() + CACHE_TTL_MS });
     return c.json(data);
   });

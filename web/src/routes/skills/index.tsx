@@ -27,8 +27,6 @@ export interface Skill {
   rejectCount?: number;
   rejectReason?: string;
   createdAt: string;
-  /** 'registry' = managed via approve/reject; 'config' = declared in pragents.yaml, read-only here */
-  source?: 'registry' | 'config';
 }
 
 export type SkillTab = 'active' | 'proposed' | 'rejected';
@@ -151,7 +149,6 @@ function BodyModal({ skillName, onClose }: BodyModalProps) {
 // ─── Skill Cards ──────────────────────────────────────────────────────────────
 
 function ActiveSkillCard({ skill }: { skill: Skill }) {
-  const isConfig = skill.source === 'config';
   return (
     <div className="bg-zinc-900 border border-zinc-800 hover:border-zinc-700 rounded-lg p-3.5">
       <div className="flex items-start justify-between gap-3">
@@ -162,14 +159,6 @@ function ActiveSkillCard({ skill }: { skill: Skill }) {
               <span className="text-[10px] text-zinc-600">v{skill.version}</span>
             )}
             {skill.scope && <ScopeBadge scope={skill.scope} />}
-            {isConfig && (
-              <span
-                className="text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700"
-                title="Declared in pragents.yaml and cannot be approved or rejected here."
-              >
-                from pragents.yaml
-              </span>
-            )}
           </div>
           {skill.description && (
             <p className="text-xs text-zinc-500 mt-1">{skill.description}</p>

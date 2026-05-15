@@ -3,7 +3,6 @@ import { getDb } from '../../db/sqlite.js';
 import type { SkillRegistry } from '../../skills/registry.js';
 import type { SkillExtractor } from '../../skills/extractor.js';
 import type { EventBuffer } from '../../events/buffer.js';
-import type { ResolvedAgent } from '../../config/schema.js';
 import {
   PragentsSkillFrontmatter,
   type PragentsSkillFrontmatter as SkillFM,
@@ -41,24 +40,8 @@ export function createSkillsRoute(
   registry: SkillRegistry,
   extractor: SkillExtractor,
   eventBuffer?: EventBuffer,
-  agents: ResolvedAgent[] = [],
 ) {
   const r = new Hono();
-
-  /**
-   * Collect skills declared in pragents.yaml that are not in the registry yet.
-   * Returns only the skill name (string) — never spreads other agent config
-   * fields like `model`, `tokenBudget`, or `apiKey` into the response.
-   */
-  function configOnlySkills(registeredNames: Set<string>): Array<{ name: string }> {
-    const seen = new Set<string>();
-    for (const a of agents) {
-      for (const name of a.skills ?? []) {
-        if (!registeredNames.has(name) && !seen.has(name)) seen.add(name);
-      }
-    }
-    return [...seen].map((name) => ({ name }));
-  }
 
   // List all skills
   r.get('/', (c) => {
@@ -75,8 +58,6 @@ export function createSkillsRoute(
     if (status) {
       skills = skills.filter((s) => s['x-pragents-status'] === status);
     }
-
-    const registeredNames = new Set(skills.map((s) => s.name));
 
     const result: any[] = skills.map((s) => {
       const extraction = s['x-pragents-extraction'];
@@ -96,34 +77,8 @@ export function createSkillsRoute(
         extraction_metadata: extraction || null,
         usageCount: usage.usageCount,
         lastUsedAt: usage.lastUsedAt,
-        source: 'registry' as const,
       };
     });
-
-    // Surface config-declared skills that aren't yet in the registry. They show
-    // as read-only Active entries (the UI disables approve/reject for them).
-    if (!tag) {
-      const configSkills = configOnlySkills(registeredNames);
-      const filteredConfig = status && status !== 'active' ? [] : configSkills;
-      for (const cs of filteredConfig) {
-        result.push({
-          name: cs.name,
-          description: null,
-          tags: [],
-          source_agent: null,
-          extracted_at: null,
-          tools: [],
-          parameters: 0,
-          scope: null,
-          status: 'active',
-          version: null,
-          extraction_metadata: null,
-          usageCount: 0,
-          lastUsedAt: null,
-          source: 'config' as const,
-        });
-      }
-    }
 
     // Cache only the unfiltered response
     if (!tag && !status && !since) {

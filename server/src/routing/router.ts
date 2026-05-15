@@ -5,10 +5,10 @@ export class SkillRouter {
   constructor(private agents: ResolvedAgent[]) {}
 
   /**
-   * Resolve the best agent for a task based on keyword matching against agent skills.
+   * Resolve the best agent for a task based on keyword matching against agent capabilities.
    * @param task - Task description to match
    * @param projectId - Project ID to scope agents
-   * @param prefer - Optional preferred skill keywords (boosted 2x)
+   * @param prefer - Optional preferred capability keywords (boosted 2x)
    * @param skillTags - Optional x-pragents-tags from loaded skills for additional matching
    */
   async resolveAgent(task: string, projectId: string, prefer?: string[], skillTags?: string[]): Promise<string> {
@@ -36,18 +36,18 @@ export class SkillRouter {
       .split(/[^a-z0-9+#-]+/)
       .filter((t) => t.length >= 3 && !STOPWORDS.has(t));
     const scored = projectAgents.map((agent) => {
-      const matches = agent.skills.filter((skill) => {
-        const sk = skill.toLowerCase();
-        return tokens.some((t) => sk.includes(t) || t.includes(sk));
+      const matches = agent.capabilities.filter((cap) => {
+        const c = cap.toLowerCase();
+        return tokens.some((t) => c.includes(t) || t.includes(c));
       });
       return { agent, matches, score: matches.length };
     });
 
-    // Boost preferred skills
+    // Boost preferred capabilities
     if (prefer?.length) {
       for (const s of scored) {
         const preferMatches = prefer.filter((p) =>
-          s.agent.skills.some((sk) => sk.toLowerCase().includes(p.toLowerCase()) || p.toLowerCase().includes(sk.toLowerCase())),
+          s.agent.capabilities.some((c) => c.toLowerCase().includes(p.toLowerCase()) || p.toLowerCase().includes(c.toLowerCase())),
         );
         s.score += preferMatches.length * 2;
       }
@@ -57,7 +57,7 @@ export class SkillRouter {
     if (skillTags?.length) {
       for (const s of scored) {
         const tagMatches = skillTags.filter((tag) =>
-          s.agent.skills.some((sk) => sk.toLowerCase().includes(tag.toLowerCase()) || tag.toLowerCase().includes(sk.toLowerCase())),
+          s.agent.capabilities.some((c) => c.toLowerCase().includes(tag.toLowerCase()) || tag.toLowerCase().includes(c.toLowerCase())),
         );
         s.score += tagMatches.length;
       }

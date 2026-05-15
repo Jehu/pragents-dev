@@ -15,7 +15,7 @@ PrAgents fixes that:
 - **Auto-skill extraction** — completed sessions are automatically scanned for repeatable patterns; skills are extracted via LLM, deduplicated, and optionally auto-approved
 - **Human-in-the-loop gates** — when an agent needs your input, it shows up in a unified **inbox feed** with approve/reject actions
 - **Web dashboard** — cross-project visibility into what every agent is doing, right now
-- **Config-driven** — agents, skills, models, and token budgets are defined in a single YAML file; no hardcoded agents
+- **Config-driven** — agents, capabilities, models, and token budgets are defined in a single YAML file; no hardcoded agents
 
 PrAgents is built for the one-person agency that wants agents working *for* them — not the other way around.
 

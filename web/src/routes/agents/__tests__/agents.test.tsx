@@ -9,7 +9,7 @@ interface AgentSummary {
   type: string;
   projectId: string;
   model: string;
-  skills: string[];
+  capabilities: string[];
   status: AgentStatus;
 }
 
@@ -30,7 +30,7 @@ function agentInitials(id: string): string {
 }
 
 function makeAgent(id: string, status: AgentStatus = 'idle'): AgentSummary {
-  return { id, type: 'agent', projectId: 'proj', model: 'claude', skills: [], status };
+  return { id, type: 'agent', projectId: 'proj', model: 'claude', capabilities: [], status };
 }
 
 // ─── sortAgents ───────────────────────────────────────────────────────────────

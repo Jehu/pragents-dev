@@ -17,7 +17,7 @@ describe('NL routes — /api/v1/nl', () => {
   const agents: ResolvedAgent[] = [
     {
       id: 'dev', projectId: 'p', type: 'dev', model: 'm', personality: '',
-      memory: {}, skills: [], projectDir: '/tmp', tokenBudget: 1000, keepWarm: false,
+      memory: {}, capabilities: [], projectDir: '/tmp', tokenBudget: 1000, keepWarm: false,
     } as any,
   ];
   const mockDecomposer = {

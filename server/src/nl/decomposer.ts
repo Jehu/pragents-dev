@@ -116,7 +116,7 @@ export class NLDecomposer {
     const modelString = (fastAgent ?? agents[0]).model;
 
     const agentList = agents
-      .map((a) => `- ${a.id} (${a.type}): ${a.skills.join(', ') || 'general'}`)
+      .map((a) => `- ${a.id} (${a.type}): ${a.capabilities.join(', ') || 'general'}`)
       .join('\n');
 
     const userMessage = `Available agents:\n${agentList}\n\nUser request: ${prompt}`;

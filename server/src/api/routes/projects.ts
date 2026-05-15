@@ -20,7 +20,7 @@ export function createAgentsRoute(agents: ResolvedAgent[], sessionMgr: AgentSess
       type: a.type,
       projectId: a.projectId,
       model: a.model,
-      skills: a.skills,
+      capabilities: a.capabilities,
       status: sessionMgr.getAgentStatus(a.id),
     }));
     return c.json(result);

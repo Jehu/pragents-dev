@@ -15,7 +15,7 @@ interface AgentSummary {
   type: string;
   projectId: string;
   model: string;
-  skills: string[];
+  capabilities: string[];
   status: AgentStatus;
 }
 

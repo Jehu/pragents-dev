@@ -140,7 +140,7 @@ pragents/
 ## Key Design Decisions
 
 ### Config-Driven Agents
-Agents are defined entirely in `~/.pragents/pragents.yaml` — types, models, personalities, skills, memory access, and token budgets. No hardcoded agents. The `ResolvedAgent` type (see `server/src/config/schema.ts`) is the canonical runtime representation.
+Agents are defined entirely in `~/.pragents/pragents.yaml` — types, models, personalities, capabilities, memory access, and token budgets. No hardcoded agents. The `ResolvedAgent` type (see `server/src/config/schema.ts`) is the canonical runtime representation. `capabilities` is a list of free-form keyword tags used by the `SkillRouter` to score-match an agent against a task; it does **not** reference real `SKILL.md` files in `~/.pragents/skills/`.
 
 ### pi SDK Session Model
 Agent sessions are managed via `@mariozechner/pi-coding-agent`. Each agent gets one persistent session (reused across tasks), created lazily on first dispatch. The SDK handles model routing, tool definitions, and event streaming. pragents injects system prompt overrides (personality + tool list + REMEMBER: format) via the `resourceLoader.systemPromptOverride` hook.

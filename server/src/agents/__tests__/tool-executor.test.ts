@@ -42,8 +42,8 @@ function makeDeps(overrides: Record<string, any> = {}) {
       getProjectCost: vi.fn().mockReturnValue({ tokensIn: 1000, tokensOut: 500, cost: 0.05 }),
     },
     agents: [
-      { id: 'dev@proj-a', type: 'dev', projectId: 'proj-a', skills: ['typescript'] },
-      { id: 'seo@proj-a', type: 'seo', projectId: 'proj-a', skills: ['keyword-research'] },
+      { id: 'dev@proj-a', type: 'dev', projectId: 'proj-a', capabilities: ['typescript'] },
+      { id: 'seo@proj-a', type: 'seo', projectId: 'proj-a', capabilities: ['keyword-research'] },
     ],
     goalRegistry: {
       list: vi.fn().mockReturnValue([{ id: 'weekly-article', cadence: '0 8 * * 1', workflow: 'content-pipeline' }]),
