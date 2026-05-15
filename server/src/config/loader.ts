@@ -75,37 +75,69 @@ export function loadConfig(configPath?: string): LoadedConfig {
   return { config, agents };
 }
 
+export interface WatchHandle {
+  stop: () => void;
+  /**
+   * Tell the watcher to ignore the next change event for `filePath`. The
+   * suppression is single-shot AND time-bounded: the first matching change
+   * event within `durationMs` (default 250) is dropped, anything after is
+   * delivered normally. UI-originated writes call this so `fs.watch` does
+   * not fire a duplicate reload after the write.
+   */
+  suppressNextChange: (filePath: string, durationMs?: number) => void;
+}
+
+/**
+ * Module-level pointer to the active watcher's suppression API.
+ *
+ * Route handlers that write to `pragents.yaml` import `suppressWatcherChange`
+ * from this module instead of receiving the watcher handle through their
+ * factory. This keeps the existing `createXxxRoute(getDb)` factory signatures
+ * unchanged while still letting the watcher know about UI-originated writes.
+ *
+ * When no watcher is active (e.g., in unit tests), the proxy is a no-op.
+ */
+let activeWatcher: WatchHandle | null = null;
+
+export function suppressWatcherChange(filePath: string, durationMs = 250): void {
+  activeWatcher?.suppressNextChange(filePath, durationMs);
+}
+
 /**
  * Watch `pragents.yaml` for changes and call `onReload` with the new config
- * whenever the file changes. Returns a cleanup function to stop watching.
- *
- * @param onReload - called with the new agents list and the set of changed agent IDs
- * @param configPath - optional override path (same default as loadConfig)
+ * whenever the file changes. Returns a {@link WatchHandle} with `stop` to
+ * shut the watcher down and `suppressNextChange` so callers (or the
+ * module-level `suppressWatcherChange` proxy) can mark UI-originated writes.
  */
 export function watchConfig(
   onReload: (agents: ResolvedAgent[], changedAgentIds: Set<string>) => void,
   configPath?: string,
-): () => void {
+): WatchHandle {
   const paths = configPath
     ? [resolve(configPath)]
     : DEFAULT_CONFIG_PATHS;
 
-  // Pick the first path that was used by loadConfig
   const watchPath = paths[0];
 
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
   let previousAgentIds: Set<string> = new Set();
 
+  const suppressions = new Map<string, number>();
+
   const watcher = watch(watchPath, () => {
+    const expiresAt = suppressions.get(watchPath);
+    if (expiresAt !== undefined && Date.now() < expiresAt) {
+      suppressions.delete(watchPath);
+      return;
+    }
+    suppressions.delete(watchPath);
+
     if (debounceTimer) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
       try {
         const { agents } = loadConfig(configPath);
         const newAgentIds = new Set(agents.map((a) => a.id));
-        // Changed = any agent that existed before (stale config is only relevant for
-        // sessions that were already spawned, so we mark all previously-known agents)
         const changedIds = new Set([...previousAgentIds].filter((id) => newAgentIds.has(id)));
-        // Also mark new agents that weren't in the old set (spawned fresh anyway)
         previousAgentIds = newAgentIds;
         onReload(agents, changedIds);
       } catch {
@@ -114,8 +146,21 @@ export function watchConfig(
     }, 500);
   });
 
-  return () => {
-    if (debounceTimer) clearTimeout(debounceTimer);
-    watcher.close();
+  const handle: WatchHandle = {
+    stop: () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      watcher.close();
+      if (activeWatcher === handle) {
+        activeWatcher = null;
+      }
+    },
+    suppressNextChange: (filePath, durationMs = 250) => {
+      const absolute = resolve(filePath);
+      if (absolute !== watchPath) return;
+      suppressions.set(watchPath, Date.now() + durationMs);
+    },
   };
+
+  activeWatcher = handle;
+  return handle;
 }
