@@ -36,6 +36,7 @@ import { SkillRegistry } from './skills/registry.js';
 import { SkillExtractor } from './skills/extractor.js';
 import { SkillAutoExtractor, createSemanticCompareFn } from './skills/auto-extractor.js';
 import { createSkillsRoute } from './api/routes/skills.js';
+import { createSettingsRoute } from './api/routes/settings.js';
 import { createFilesRoute } from './api/routes/files.js';
 import { createChatRoute } from './api/routes/chat.js';
 import { authMiddleware, getOrCreateApiToken } from './api/middleware/auth.js';
@@ -280,7 +281,8 @@ export async function startServer() {
   app.route('/api/v1/feed', createFeedRoute(tracker, eventBuffer, wfTracker, wfRegistry, skillRegistry));
   app.route('/api/v1/memory', createMemoryRoute(memory, config));
   app.route('/api/v1/metrics', createMetricsRoute());
-  app.route('/api/v1/skills', createSkillsRoute(skillRegistry, skillExtractor, eventBuffer, agents));
+  app.route('/api/v1/skills', createSkillsRoute(skillRegistry, skillExtractor, eventBuffer));
+  app.route('/api/v1/settings', createSettingsRoute({ configPath }));
   // Config-UI: file-metadata read for conflict detection (R12 / R18). The
   // allow-list deliberately limits exposure to the pragents config file and
   // the skills root; project workflow roots are added in Slice 4 (U11).
