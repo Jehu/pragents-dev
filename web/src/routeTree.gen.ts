@@ -14,6 +14,7 @@ import { Route as WorkflowsIndexRouteImport } from './routes/workflows/index'
 import { Route as TracesIndexRouteImport } from './routes/traces/index'
 import { Route as TasksIndexRouteImport } from './routes/tasks/index'
 import { Route as SkillsIndexRouteImport } from './routes/skills/index'
+import { Route as ProjectsIndexRouteImport } from './routes/projects/index'
 import { Route as PlansIndexRouteImport } from './routes/plans/index'
 import { Route as OverviewIndexRouteImport } from './routes/overview/index'
 import { Route as MetricsIndexRouteImport } from './routes/metrics/index'
@@ -27,6 +28,8 @@ import { Route as AgentsIndexRouteImport } from './routes/agents/index'
 import { Route as TracesTraceIdRouteImport } from './routes/traces/$traceId'
 import { Route as TasksTaskIdRouteImport } from './routes/tasks/$taskId'
 import { Route as SkillsSkillNameRouteImport } from './routes/skills/$skillName'
+import { Route as ProjectsNewRouteImport } from './routes/projects/new'
+import { Route as ProjectsProjectIdRouteImport } from './routes/projects/$projectId'
 import { Route as PlansPlanIdRouteImport } from './routes/plans/$planId'
 import { Route as AgentsAgentIdRouteImport } from './routes/agents/$agentId'
 
@@ -53,6 +56,11 @@ const TasksIndexRoute = TasksIndexRouteImport.update({
 const SkillsIndexRoute = SkillsIndexRouteImport.update({
   id: '/skills/',
   path: '/skills/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ProjectsIndexRoute = ProjectsIndexRouteImport.update({
+  id: '/projects/',
+  path: '/projects/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const PlansIndexRoute = PlansIndexRouteImport.update({
@@ -120,6 +128,16 @@ const SkillsSkillNameRoute = SkillsSkillNameRouteImport.update({
   path: '/skills/$skillName',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ProjectsNewRoute = ProjectsNewRouteImport.update({
+  id: '/projects/new',
+  path: '/projects/new',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ProjectsProjectIdRoute = ProjectsProjectIdRouteImport.update({
+  id: '/projects/$projectId',
+  path: '/projects/$projectId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const PlansPlanIdRoute = PlansPlanIdRouteImport.update({
   id: '/plans/$planId',
   path: '/plans/$planId',
@@ -135,6 +153,8 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/agents/$agentId': typeof AgentsAgentIdRoute
   '/plans/$planId': typeof PlansPlanIdRoute
+  '/projects/$projectId': typeof ProjectsProjectIdRoute
+  '/projects/new': typeof ProjectsNewRoute
   '/skills/$skillName': typeof SkillsSkillNameRoute
   '/tasks/$taskId': typeof TasksTaskIdRoute
   '/traces/$traceId': typeof TracesTraceIdRoute
@@ -148,6 +168,7 @@ export interface FileRoutesByFullPath {
   '/metrics/': typeof MetricsIndexRoute
   '/overview/': typeof OverviewIndexRoute
   '/plans/': typeof PlansIndexRoute
+  '/projects/': typeof ProjectsIndexRoute
   '/skills/': typeof SkillsIndexRoute
   '/tasks/': typeof TasksIndexRoute
   '/traces/': typeof TracesIndexRoute
@@ -157,6 +178,8 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/agents/$agentId': typeof AgentsAgentIdRoute
   '/plans/$planId': typeof PlansPlanIdRoute
+  '/projects/$projectId': typeof ProjectsProjectIdRoute
+  '/projects/new': typeof ProjectsNewRoute
   '/skills/$skillName': typeof SkillsSkillNameRoute
   '/tasks/$taskId': typeof TasksTaskIdRoute
   '/traces/$traceId': typeof TracesTraceIdRoute
@@ -170,6 +193,7 @@ export interface FileRoutesByTo {
   '/metrics': typeof MetricsIndexRoute
   '/overview': typeof OverviewIndexRoute
   '/plans': typeof PlansIndexRoute
+  '/projects': typeof ProjectsIndexRoute
   '/skills': typeof SkillsIndexRoute
   '/tasks': typeof TasksIndexRoute
   '/traces': typeof TracesIndexRoute
@@ -180,6 +204,8 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/agents/$agentId': typeof AgentsAgentIdRoute
   '/plans/$planId': typeof PlansPlanIdRoute
+  '/projects/$projectId': typeof ProjectsProjectIdRoute
+  '/projects/new': typeof ProjectsNewRoute
   '/skills/$skillName': typeof SkillsSkillNameRoute
   '/tasks/$taskId': typeof TasksTaskIdRoute
   '/traces/$traceId': typeof TracesTraceIdRoute
@@ -193,6 +219,7 @@ export interface FileRoutesById {
   '/metrics/': typeof MetricsIndexRoute
   '/overview/': typeof OverviewIndexRoute
   '/plans/': typeof PlansIndexRoute
+  '/projects/': typeof ProjectsIndexRoute
   '/skills/': typeof SkillsIndexRoute
   '/tasks/': typeof TasksIndexRoute
   '/traces/': typeof TracesIndexRoute
@@ -204,6 +231,8 @@ export interface FileRouteTypes {
     | '/'
     | '/agents/$agentId'
     | '/plans/$planId'
+    | '/projects/$projectId'
+    | '/projects/new'
     | '/skills/$skillName'
     | '/tasks/$taskId'
     | '/traces/$traceId'
@@ -217,6 +246,7 @@ export interface FileRouteTypes {
     | '/metrics/'
     | '/overview/'
     | '/plans/'
+    | '/projects/'
     | '/skills/'
     | '/tasks/'
     | '/traces/'
@@ -226,6 +256,8 @@ export interface FileRouteTypes {
     | '/'
     | '/agents/$agentId'
     | '/plans/$planId'
+    | '/projects/$projectId'
+    | '/projects/new'
     | '/skills/$skillName'
     | '/tasks/$taskId'
     | '/traces/$traceId'
@@ -239,6 +271,7 @@ export interface FileRouteTypes {
     | '/metrics'
     | '/overview'
     | '/plans'
+    | '/projects'
     | '/skills'
     | '/tasks'
     | '/traces'
@@ -248,6 +281,8 @@ export interface FileRouteTypes {
     | '/'
     | '/agents/$agentId'
     | '/plans/$planId'
+    | '/projects/$projectId'
+    | '/projects/new'
     | '/skills/$skillName'
     | '/tasks/$taskId'
     | '/traces/$traceId'
@@ -261,6 +296,7 @@ export interface FileRouteTypes {
     | '/metrics/'
     | '/overview/'
     | '/plans/'
+    | '/projects/'
     | '/skills/'
     | '/tasks/'
     | '/traces/'
@@ -271,6 +307,8 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AgentsAgentIdRoute: typeof AgentsAgentIdRoute
   PlansPlanIdRoute: typeof PlansPlanIdRoute
+  ProjectsProjectIdRoute: typeof ProjectsProjectIdRoute
+  ProjectsNewRoute: typeof ProjectsNewRoute
   SkillsSkillNameRoute: typeof SkillsSkillNameRoute
   TasksTaskIdRoute: typeof TasksTaskIdRoute
   TracesTraceIdRoute: typeof TracesTraceIdRoute
@@ -284,6 +322,7 @@ export interface RootRouteChildren {
   MetricsIndexRoute: typeof MetricsIndexRoute
   OverviewIndexRoute: typeof OverviewIndexRoute
   PlansIndexRoute: typeof PlansIndexRoute
+  ProjectsIndexRoute: typeof ProjectsIndexRoute
   SkillsIndexRoute: typeof SkillsIndexRoute
   TasksIndexRoute: typeof TasksIndexRoute
   TracesIndexRoute: typeof TracesIndexRoute
@@ -325,6 +364,13 @@ declare module '@tanstack/react-router' {
       path: '/skills'
       fullPath: '/skills/'
       preLoaderRoute: typeof SkillsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/projects/': {
+      id: '/projects/'
+      path: '/projects'
+      fullPath: '/projects/'
+      preLoaderRoute: typeof ProjectsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/plans/': {
@@ -418,6 +464,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SkillsSkillNameRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/projects/new': {
+      id: '/projects/new'
+      path: '/projects/new'
+      fullPath: '/projects/new'
+      preLoaderRoute: typeof ProjectsNewRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/projects/$projectId': {
+      id: '/projects/$projectId'
+      path: '/projects/$projectId'
+      fullPath: '/projects/$projectId'
+      preLoaderRoute: typeof ProjectsProjectIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/plans/$planId': {
       id: '/plans/$planId'
       path: '/plans/$planId'
@@ -439,6 +499,8 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AgentsAgentIdRoute: AgentsAgentIdRoute,
   PlansPlanIdRoute: PlansPlanIdRoute,
+  ProjectsProjectIdRoute: ProjectsProjectIdRoute,
+  ProjectsNewRoute: ProjectsNewRoute,
   SkillsSkillNameRoute: SkillsSkillNameRoute,
   TasksTaskIdRoute: TasksTaskIdRoute,
   TracesTraceIdRoute: TracesTraceIdRoute,
@@ -452,6 +514,7 @@ const rootRouteChildren: RootRouteChildren = {
   MetricsIndexRoute: MetricsIndexRoute,
   OverviewIndexRoute: OverviewIndexRoute,
   PlansIndexRoute: PlansIndexRoute,
+  ProjectsIndexRoute: ProjectsIndexRoute,
   SkillsIndexRoute: SkillsIndexRoute,
   TasksIndexRoute: TasksIndexRoute,
   TracesIndexRoute: TracesIndexRoute,
