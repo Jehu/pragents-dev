@@ -146,7 +146,7 @@ function SkillDetailPage() {
     );
     setShowApproveConfirm(false);
     if (res.ok) {
-      void navigate({ to: '/skills' });
+      void navigate({ to: '/skills', search: { name: undefined } });
     }
   }, [etag, skillName, navigate]);
 
@@ -159,7 +159,7 @@ function SkillDetailPage() {
     );
     setShowRejectConfirm(false);
     if (res.ok) {
-      void navigate({ to: '/skills' });
+      void navigate({ to: '/skills', search: { name: undefined } });
     }
   }, [etag, skillName, navigate]);
 
@@ -283,7 +283,7 @@ function SkillDetailPage() {
             remoteContent={saveState.current}
             onDiscard={() => {
               closeSavePreview();
-              navigate({ to: '/skills' });
+              navigate({ to: '/skills', search: { name: undefined } });
             }}
             onReload={() => {
               closeSavePreview();
