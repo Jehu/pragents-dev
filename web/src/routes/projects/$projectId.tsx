@@ -390,8 +390,18 @@ function ProjectDetailPage() {
       )}
 
       {tab === 'workflows' && (
-        <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-6 text-center text-xs text-zinc-500">
-          Coming in Slice 4 — per-project workflow management.
+        <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-6 text-center">
+          <p className="text-xs text-zinc-400">
+            Workflow files live under{' '}
+            <span className="font-mono">&lt;projectDir&gt;/workflows/</span>.
+          </p>
+          <Link
+            to="/projects/$projectId/workflows"
+            params={{ projectId: data.id }}
+            className="inline-block mt-3 text-xs px-3 py-1.5 rounded-lg bg-indigo-700 hover:bg-indigo-600 text-zinc-100 font-medium no-underline"
+          >
+            Open workflows
+          </Link>
         </div>
       )}
 

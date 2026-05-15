@@ -33,6 +33,8 @@ import { Route as ProjectsNewRouteImport } from './routes/projects/new'
 import { Route as ProjectsProjectIdRouteImport } from './routes/projects/$projectId'
 import { Route as PlansPlanIdRouteImport } from './routes/plans/$planId'
 import { Route as AgentsAgentIdRouteImport } from './routes/agents/$agentId'
+import { Route as ProjectsProjectIdWorkflowsRouteImport } from './routes/projects/$projectId.workflows'
+import { Route as ProjectsProjectIdWorkflowsWorkflowNameRouteImport } from './routes/projects/$projectId.workflows.$workflowName'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -154,12 +156,24 @@ const AgentsAgentIdRoute = AgentsAgentIdRouteImport.update({
   path: '/agents/$agentId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ProjectsProjectIdWorkflowsRoute =
+  ProjectsProjectIdWorkflowsRouteImport.update({
+    id: '/workflows',
+    path: '/workflows',
+    getParentRoute: () => ProjectsProjectIdRoute,
+  } as any)
+const ProjectsProjectIdWorkflowsWorkflowNameRoute =
+  ProjectsProjectIdWorkflowsWorkflowNameRouteImport.update({
+    id: '/$workflowName',
+    path: '/$workflowName',
+    getParentRoute: () => ProjectsProjectIdWorkflowsRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/agents/$agentId': typeof AgentsAgentIdRoute
   '/plans/$planId': typeof PlansPlanIdRoute
-  '/projects/$projectId': typeof ProjectsProjectIdRoute
+  '/projects/$projectId': typeof ProjectsProjectIdRouteWithChildren
   '/projects/new': typeof ProjectsNewRoute
   '/skills/$skillName': typeof SkillsSkillNameRoute
   '/tasks/$taskId': typeof TasksTaskIdRoute
@@ -180,12 +194,14 @@ export interface FileRoutesByFullPath {
   '/tasks/': typeof TasksIndexRoute
   '/traces/': typeof TracesIndexRoute
   '/workflows/': typeof WorkflowsIndexRoute
+  '/projects/$projectId/workflows': typeof ProjectsProjectIdWorkflowsRouteWithChildren
+  '/projects/$projectId/workflows/$workflowName': typeof ProjectsProjectIdWorkflowsWorkflowNameRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/agents/$agentId': typeof AgentsAgentIdRoute
   '/plans/$planId': typeof PlansPlanIdRoute
-  '/projects/$projectId': typeof ProjectsProjectIdRoute
+  '/projects/$projectId': typeof ProjectsProjectIdRouteWithChildren
   '/projects/new': typeof ProjectsNewRoute
   '/skills/$skillName': typeof SkillsSkillNameRoute
   '/tasks/$taskId': typeof TasksTaskIdRoute
@@ -206,13 +222,15 @@ export interface FileRoutesByTo {
   '/tasks': typeof TasksIndexRoute
   '/traces': typeof TracesIndexRoute
   '/workflows': typeof WorkflowsIndexRoute
+  '/projects/$projectId/workflows': typeof ProjectsProjectIdWorkflowsRouteWithChildren
+  '/projects/$projectId/workflows/$workflowName': typeof ProjectsProjectIdWorkflowsWorkflowNameRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/agents/$agentId': typeof AgentsAgentIdRoute
   '/plans/$planId': typeof PlansPlanIdRoute
-  '/projects/$projectId': typeof ProjectsProjectIdRoute
+  '/projects/$projectId': typeof ProjectsProjectIdRouteWithChildren
   '/projects/new': typeof ProjectsNewRoute
   '/skills/$skillName': typeof SkillsSkillNameRoute
   '/tasks/$taskId': typeof TasksTaskIdRoute
@@ -233,6 +251,8 @@ export interface FileRoutesById {
   '/tasks/': typeof TasksIndexRoute
   '/traces/': typeof TracesIndexRoute
   '/workflows/': typeof WorkflowsIndexRoute
+  '/projects/$projectId/workflows': typeof ProjectsProjectIdWorkflowsRouteWithChildren
+  '/projects/$projectId/workflows/$workflowName': typeof ProjectsProjectIdWorkflowsWorkflowNameRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -261,6 +281,8 @@ export interface FileRouteTypes {
     | '/tasks/'
     | '/traces/'
     | '/workflows/'
+    | '/projects/$projectId/workflows'
+    | '/projects/$projectId/workflows/$workflowName'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -287,6 +309,8 @@ export interface FileRouteTypes {
     | '/tasks'
     | '/traces'
     | '/workflows'
+    | '/projects/$projectId/workflows'
+    | '/projects/$projectId/workflows/$workflowName'
   id:
     | '__root__'
     | '/'
@@ -313,13 +337,15 @@ export interface FileRouteTypes {
     | '/tasks/'
     | '/traces/'
     | '/workflows/'
+    | '/projects/$projectId/workflows'
+    | '/projects/$projectId/workflows/$workflowName'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AgentsAgentIdRoute: typeof AgentsAgentIdRoute
   PlansPlanIdRoute: typeof PlansPlanIdRoute
-  ProjectsProjectIdRoute: typeof ProjectsProjectIdRoute
+  ProjectsProjectIdRoute: typeof ProjectsProjectIdRouteWithChildren
   ProjectsNewRoute: typeof ProjectsNewRoute
   SkillsSkillNameRoute: typeof SkillsSkillNameRoute
   TasksTaskIdRoute: typeof TasksTaskIdRoute
@@ -512,14 +538,54 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AgentsAgentIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/projects/$projectId/workflows': {
+      id: '/projects/$projectId/workflows'
+      path: '/workflows'
+      fullPath: '/projects/$projectId/workflows'
+      preLoaderRoute: typeof ProjectsProjectIdWorkflowsRouteImport
+      parentRoute: typeof ProjectsProjectIdRoute
+    }
+    '/projects/$projectId/workflows/$workflowName': {
+      id: '/projects/$projectId/workflows/$workflowName'
+      path: '/$workflowName'
+      fullPath: '/projects/$projectId/workflows/$workflowName'
+      preLoaderRoute: typeof ProjectsProjectIdWorkflowsWorkflowNameRouteImport
+      parentRoute: typeof ProjectsProjectIdWorkflowsRoute
+    }
   }
 }
+
+interface ProjectsProjectIdWorkflowsRouteChildren {
+  ProjectsProjectIdWorkflowsWorkflowNameRoute: typeof ProjectsProjectIdWorkflowsWorkflowNameRoute
+}
+
+const ProjectsProjectIdWorkflowsRouteChildren: ProjectsProjectIdWorkflowsRouteChildren =
+  {
+    ProjectsProjectIdWorkflowsWorkflowNameRoute:
+      ProjectsProjectIdWorkflowsWorkflowNameRoute,
+  }
+
+const ProjectsProjectIdWorkflowsRouteWithChildren =
+  ProjectsProjectIdWorkflowsRoute._addFileChildren(
+    ProjectsProjectIdWorkflowsRouteChildren,
+  )
+
+interface ProjectsProjectIdRouteChildren {
+  ProjectsProjectIdWorkflowsRoute: typeof ProjectsProjectIdWorkflowsRouteWithChildren
+}
+
+const ProjectsProjectIdRouteChildren: ProjectsProjectIdRouteChildren = {
+  ProjectsProjectIdWorkflowsRoute: ProjectsProjectIdWorkflowsRouteWithChildren,
+}
+
+const ProjectsProjectIdRouteWithChildren =
+  ProjectsProjectIdRoute._addFileChildren(ProjectsProjectIdRouteChildren)
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AgentsAgentIdRoute: AgentsAgentIdRoute,
   PlansPlanIdRoute: PlansPlanIdRoute,
-  ProjectsProjectIdRoute: ProjectsProjectIdRoute,
+  ProjectsProjectIdRoute: ProjectsProjectIdRouteWithChildren,
   ProjectsNewRoute: ProjectsNewRoute,
   SkillsSkillNameRoute: SkillsSkillNameRoute,
   TasksTaskIdRoute: TasksTaskIdRoute,

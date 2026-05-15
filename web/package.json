@@ -9,13 +9,17 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@monaco-editor/react": "^4.7.0",
     "@pragents/schema": "*",
     "@tanstack/react-query": "^5.0.0",
     "@tanstack/react-router": "^1.0.0",
     "@tanstack/router-plugin": "^1.167.35",
-    "zod": "^3.23.0",
+    "monaco-editor": "^0.55.1",
+    "monaco-yaml": "^5.5.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "zod": "^3.23.0",
+    "zod-to-json-schema": "^3.25.2",
     "zustand": "^5.0.0"
   },
   "devDependencies": {
