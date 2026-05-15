@@ -75,6 +75,13 @@ export const CompanyConfig = z.object({
 export const ProjectConfig = z.object({
   name: z.string(),
   directory: z.string(),
+  /**
+   * Relative subdirectory (under `directory`) where the project's
+   * workflow YAML files live. Defaults to `workflows`. Made explicit in
+   * the schema so the config-UI workflow editor can resolve per-project
+   * workflows without baking a constant into the server.
+   */
+  workflowDirectory: z.string().default('workflows'),
   agents: z
     .object({
       dev: ProjectAgentConfig.optional(),

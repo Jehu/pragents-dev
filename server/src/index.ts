@@ -37,6 +37,7 @@ import { SkillExtractor } from './skills/extractor.js';
 import { SkillAutoExtractor, createSemanticCompareFn } from './skills/auto-extractor.js';
 import { createSkillsRoute } from './api/routes/skills.js';
 import { createSettingsRoute } from './api/routes/settings.js';
+import { createWorkflowFilesRoute } from './api/routes/workflowFiles.js';
 import { createFilesRoute } from './api/routes/files.js';
 import { createChatRoute } from './api/routes/chat.js';
 import { authMiddleware, getOrCreateApiToken } from './api/middleware/auth.js';
@@ -268,6 +269,9 @@ export async function startServer() {
   app.route('/api/v1', createHealthRoute(memory));
   const configPath = process.env.PRAGENTS_CONFIG_PATH || join(homedir(), '.pragents', 'pragents.yaml');
   app.route('/api/v1/projects', createProjectsRoute({ configPath, sessionMgr }));
+  // Slice 4 / U11: per-project workflow files — mounted on the projects
+  // sub-tree so URLs read `/api/v1/projects/:projectId/workflows[/:name]`.
+  app.route('/api/v1/projects', createWorkflowFilesRoute({ configPath }));
   const agentsRouter = createAgentsRoute(agents, sessionMgr);
   agentsRouter.route('/', createAgentDetailRoute(agents, sessionMgr, eventBuffer, tracker));
   app.route('/api/v1/agents', agentsRouter);
@@ -283,13 +287,23 @@ export async function startServer() {
   app.route('/api/v1/metrics', createMetricsRoute());
   app.route('/api/v1/skills', createSkillsRoute(skillRegistry, skillExtractor, eventBuffer));
   app.route('/api/v1/settings', createSettingsRoute({ configPath }));
-  // Config-UI: file-metadata read for conflict detection (R12 / R18). The
-  // allow-list deliberately limits exposure to the pragents config file and
-  // the skills root; project workflow roots are added in Slice 4 (U11).
+  // Config-UI: file-metadata read for conflict detection (R12 / R18).
+  // Allow-list includes the pragents config file, the skills root, and
+  // every configured project directory — `assertWithinRoot` enforces
+  // per-root containment so a project root only exposes workflows
+  // beneath it, never sibling projects.
+  const projectRoots: string[] = [];
+  for (const projectCfg of Object.values(config.projects)) {
+    const dir = projectCfg.directory;
+    const expanded = dir.startsWith('~')
+      ? dir.replace(/^~/, process.env.HOME || homedir())
+      : dir;
+    projectRoots.push(expanded);
+  }
   app.route(
     '/api/v1/files',
     createFilesRoute({
-      allowedRoots: [configPath, skillsDir],
+      allowedRoots: [configPath, skillsDir, ...projectRoots],
     }),
   );
   app.route('/api/v1/events', createEventsRoute(eventBuffer));
