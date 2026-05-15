@@ -11,3 +11,4 @@ pragents.yaml
 *.local
 .compound-engineering/*.local.yaml
 CLAUDE.md
+.claude/
