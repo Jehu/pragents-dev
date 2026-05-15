@@ -14,6 +14,7 @@ import { Route as WorkflowsIndexRouteImport } from './routes/workflows/index'
 import { Route as TracesIndexRouteImport } from './routes/traces/index'
 import { Route as TasksIndexRouteImport } from './routes/tasks/index'
 import { Route as SkillsIndexRouteImport } from './routes/skills/index'
+import { Route as SettingsIndexRouteImport } from './routes/settings/index'
 import { Route as ProjectsIndexRouteImport } from './routes/projects/index'
 import { Route as PlansIndexRouteImport } from './routes/plans/index'
 import { Route as OverviewIndexRouteImport } from './routes/overview/index'
@@ -56,6 +57,11 @@ const TasksIndexRoute = TasksIndexRouteImport.update({
 const SkillsIndexRoute = SkillsIndexRouteImport.update({
   id: '/skills/',
   path: '/skills/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SettingsIndexRoute = SettingsIndexRouteImport.update({
+  id: '/settings/',
+  path: '/settings/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ProjectsIndexRoute = ProjectsIndexRouteImport.update({
@@ -169,6 +175,7 @@ export interface FileRoutesByFullPath {
   '/overview/': typeof OverviewIndexRoute
   '/plans/': typeof PlansIndexRoute
   '/projects/': typeof ProjectsIndexRoute
+  '/settings/': typeof SettingsIndexRoute
   '/skills/': typeof SkillsIndexRoute
   '/tasks/': typeof TasksIndexRoute
   '/traces/': typeof TracesIndexRoute
@@ -194,6 +201,7 @@ export interface FileRoutesByTo {
   '/overview': typeof OverviewIndexRoute
   '/plans': typeof PlansIndexRoute
   '/projects': typeof ProjectsIndexRoute
+  '/settings': typeof SettingsIndexRoute
   '/skills': typeof SkillsIndexRoute
   '/tasks': typeof TasksIndexRoute
   '/traces': typeof TracesIndexRoute
@@ -220,6 +228,7 @@ export interface FileRoutesById {
   '/overview/': typeof OverviewIndexRoute
   '/plans/': typeof PlansIndexRoute
   '/projects/': typeof ProjectsIndexRoute
+  '/settings/': typeof SettingsIndexRoute
   '/skills/': typeof SkillsIndexRoute
   '/tasks/': typeof TasksIndexRoute
   '/traces/': typeof TracesIndexRoute
@@ -247,6 +256,7 @@ export interface FileRouteTypes {
     | '/overview/'
     | '/plans/'
     | '/projects/'
+    | '/settings/'
     | '/skills/'
     | '/tasks/'
     | '/traces/'
@@ -272,6 +282,7 @@ export interface FileRouteTypes {
     | '/overview'
     | '/plans'
     | '/projects'
+    | '/settings'
     | '/skills'
     | '/tasks'
     | '/traces'
@@ -297,6 +308,7 @@ export interface FileRouteTypes {
     | '/overview/'
     | '/plans/'
     | '/projects/'
+    | '/settings/'
     | '/skills/'
     | '/tasks/'
     | '/traces/'
@@ -323,6 +335,7 @@ export interface RootRouteChildren {
   OverviewIndexRoute: typeof OverviewIndexRoute
   PlansIndexRoute: typeof PlansIndexRoute
   ProjectsIndexRoute: typeof ProjectsIndexRoute
+  SettingsIndexRoute: typeof SettingsIndexRoute
   SkillsIndexRoute: typeof SkillsIndexRoute
   TasksIndexRoute: typeof TasksIndexRoute
   TracesIndexRoute: typeof TracesIndexRoute
@@ -364,6 +377,13 @@ declare module '@tanstack/react-router' {
       path: '/skills'
       fullPath: '/skills/'
       preLoaderRoute: typeof SkillsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/settings/': {
+      id: '/settings/'
+      path: '/settings'
+      fullPath: '/settings/'
+      preLoaderRoute: typeof SettingsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/projects/': {
@@ -515,6 +535,7 @@ const rootRouteChildren: RootRouteChildren = {
   OverviewIndexRoute: OverviewIndexRoute,
   PlansIndexRoute: PlansIndexRoute,
   ProjectsIndexRoute: ProjectsIndexRoute,
+  SettingsIndexRoute: SettingsIndexRoute,
   SkillsIndexRoute: SkillsIndexRoute,
   TasksIndexRoute: TasksIndexRoute,
   TracesIndexRoute: TracesIndexRoute,

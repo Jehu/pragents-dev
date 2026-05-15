@@ -29,6 +29,7 @@ const NAV: NavGroup[] = [
       { label: 'Overview', to: '/overview' },
       { label: 'Inbox', to: '/inbox' },
       { label: 'Projects', to: '/projects' },
+      { label: 'Settings', to: '/settings' },
     ],
   },
   {
