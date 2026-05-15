@@ -1,151 +1,38 @@
-import { z } from 'zod';
+/**
+ * Server-local config schema entry point.
+ *
+ * Zod schemas and ResolvedAgent type live in the shared workspace
+ * `@pragents/schema/config` so the web bundle can import the same definitions
+ * for client-side validation (R3 in the config-ui plan).
+ *
+ * This file re-exports them and keeps the server-only runtime helpers
+ * (resolveAgent, resolveAllAgents, model/budget defaults) that depend on
+ * `process.env` and would pull node-only code into the web bundle.
+ */
+export {
+  AgentType,
+  MemoryAccess,
+  AgentConfig,
+  CompanyAgentConfig,
+  ProjectAgentConfig,
+  ShortTermConfig,
+  MemoryConfig,
+  CompanyConfig,
+  ProjectConfig,
+  ChatConfig,
+  InterfacesConfig,
+  CostRate,
+  PoolConfig,
+  PragentsConfig,
+} from '@pragents/schema/config';
+export type { ResolvedAgent } from '@pragents/schema/config';
 
-const AgentType = z.enum(['office', 'pm', 'dev', 'seo', 'content']);
-
-const MemoryAccess = z.object({
-  company: z.enum(['read', 'read/write']).optional(),
-  project: z.enum(['read', 'read/write']).optional(),
-  projects: z
-    .object({
-      all: z.enum(['read']).optional(),
-    })
-    .optional(),
-});
-
-const AgentConfig = z.object({
-  type: AgentType,
-  role: z.enum(['fast', 'standard']).optional(),
-  model: z.string().optional(),
-  personality: z.string().optional(),
-  memory: MemoryAccess.optional(),
-  skills: z.array(z.string()).optional(),
-  tokenBudget: z.number().int().positive().optional(),
-  /**
-   * When true, the agent's session is pre-spawned on server boot and never
-   * idle-shutdown. Useful for cron-driven goal agents that pay a high
-   * cold-start cost on every wakeup. Default: false.
-   */
-  keepWarm: z.boolean().optional().default(false),
-});
-
-const CompanyAgentConfig = AgentConfig.extend({
-  memory: MemoryAccess.optional(),
-});
-
-const ProjectAgentConfig = AgentConfig;
-
-const ShortTermConfig = z.object({
-  max_entries: z.number().int().positive().default(100),
-});
-
-const MemoryConfig = z.object({
-  short_term: ShortTermConfig.default({}),
-  embeddings: z.object({
-    provider: z.enum(['openai', 'pseudo']).default('pseudo'),
-    apiKey: z.string().optional(),
-    baseUrl: z.string().optional(),
-    model: z.string().default('text-embedding-3-small'),
-    dimensions: z.number().int().positive().default(384),
-  }).optional(),
-  vectorStore: z.enum(['simple', 'lancedb']).default('simple'),
-});
-
-const CompanyConfig = z.object({
-  name: z.string().min(1, 'Company name is required'),
-  agents: z
-    .object({
-      office: CompanyAgentConfig.optional(),
-      pm: CompanyAgentConfig.optional(),
-    })
-    .default({}),
-  memory: MemoryConfig.optional(),
-  autoApproveSkills: z.boolean().optional().default(false),
-  similarityThreshold: z.number().min(0).max(1).optional().default(0.8),
-  skillApproval: z.object({
-    confidenceThreshold: z.number().min(0).max(1).default(0.9),
-    blockedTools: z.array(z.string()).default(['bash', 'write', 'computer']),
-  }).optional(),
-});
-
-const ProjectConfig = z.object({
-  name: z.string(),
-  directory: z.string(),
-  agents: z
-    .object({
-      dev: ProjectAgentConfig.optional(),
-      seo: ProjectAgentConfig.optional(),
-      content: ProjectAgentConfig.optional(),
-    })
-    .default({}),
-});
-
-const ChatConfig = z.object({
-  /**
-   * Model used by the IntentClassifier. Format: "provider/modelId"
-   * (e.g. "anthropic/claude-haiku-3-5-20241022", "deepseek/deepseek-v4-flash").
-   * Pick a fast, cheap model — the classifier prompt is short and only
-   * needs to return a JSON object with a tool name. Falls back to the
-   * first agent's model when omitted.
-   */
-  classifierModel: z.string().optional(),
-  /**
-   * Minimum confidence score (0.0–1.0) required for the IntentClassifier to
-   * route to a specific tool. Results below this threshold fall back to the
-   * "complex" (full agent) path. Defaults to 0.7.
-   */
-  classifierThreshold: z.number().min(0).max(1).default(0.7),
-});
-
-const InterfacesConfig = z.object({
-  web: z
-    .object({
-      port: z.number().int().default(3000),
-      host: z.string().default('localhost'),
-    })
-    .default({}),
-});
-
-const CostRate = z.object({
-  in: z.number(),
-  out: z.number(),
-});
-
-const PoolConfig = z.object({
-  /**
-   * Maximum number of agent sessions that may be marked keepWarm at once.
-   * If more agents request keepWarm than this cap allows, the extras stay
-   * cold and a warning is logged. Default: 10.
-   */
-  maxWarmSessions: z.number().int().positive().default(10),
-});
-
-export const PragentsConfig = z.object({
-  company: CompanyConfig,
-  projects: z.record(z.string(), ProjectConfig).default({}),
-  interfaces: InterfacesConfig.default({}),
-  chat: ChatConfig.optional(),
-  costs: z.record(z.string(), CostRate).optional(),
-  pool: PoolConfig.optional(),
-});
-
-export type PragentsConfig = z.infer<typeof PragentsConfig>;
-export type AgentType = z.infer<typeof AgentType>;
-export type MemoryAccess = z.infer<typeof MemoryAccess>;
-export type AgentConfig = z.infer<typeof AgentConfig>;
-
-export interface ResolvedAgent {
-  id: string;
-  projectId: string;
-  type: AgentType;
-  role?: 'fast' | 'standard';
-  model: string;
-  personality: string;
-  memory: MemoryAccess;
-  skills: string[];
-  projectDir: string;
-  tokenBudget: number;
-  keepWarm: boolean;
-}
+import type {
+  AgentConfig as AgentConfigType,
+  CompanyConfig as CompanyConfigType,
+  PragentsConfig,
+  ResolvedAgent,
+} from '@pragents/schema/config';
 
 const TOKEN_BUDGETS: Record<string, number> = {
   dev: 40000,
@@ -163,7 +50,7 @@ const MODEL_MAP: Record<string, string> = {
 };
 
 function resolveModel(model: string): string {
-  return MODEL_MAP[model] || model; // pass through unknown models directly
+  return MODEL_MAP[model] || model;
 }
 
 const SYSTEM_DEFAULTS: Record<string, string> = {
@@ -174,9 +61,9 @@ const SYSTEM_DEFAULTS: Record<string, string> = {
 export function resolveAgent(
   agentId: string,
   projectId: string,
-  agentConfig: AgentConfig,
+  agentConfig: AgentConfigType,
   projectConfig: { name?: string; directory?: string },
-  companyConfig: z.infer<typeof CompanyConfig>,
+  _companyConfig: CompanyConfigType,
 ): ResolvedAgent {
   return {
     id: agentId,
@@ -197,7 +84,6 @@ export function resolveAgent(
 export function resolveAllAgents(config: PragentsConfig): ResolvedAgent[] {
   const agents: ResolvedAgent[] = [];
 
-  // Company agents
   const company = config.company;
   for (const [type, agentCfg] of Object.entries(company.agents)) {
     if (agentCfg) {
@@ -210,7 +96,6 @@ export function resolveAllAgents(config: PragentsConfig): ResolvedAgent[] {
     }
   }
 
-  // Project agents
   for (const [projectId, projectCfg] of Object.entries(config.projects)) {
     for (const [type, agentCfg] of Object.entries(projectCfg.agents)) {
       if (agentCfg) {
