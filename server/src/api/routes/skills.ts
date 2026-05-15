@@ -9,6 +9,8 @@ import {
   type PragentsSkillFrontmatter as SkillFM,
   type PragentsSkillFrontmatterInput,
 } from '../../skills/schema.js';
+import { SkillOperations, SkillNotFoundError } from '../../skills/operations.js';
+import { EtagMismatchError } from '../../config/yaml-rw.js';
 
 /** In-memory cache for the full skills list with usage stats. TTL: 60 s. */
 interface SkillListCache {
@@ -131,14 +133,154 @@ export function createSkillsRoute(
     return c.json(result);
   });
 
-  // Get a specific skill (frontmatter + body)
+  const ops = new SkillOperations({ skillsRoot: registry.skillsDir });
+
+  // ----- Quarantine read + mutation API (config-UI Slice 1) ---------------
+  //
+  // Quarantined skills (`<skillsRoot>/_quarantine/<name>/SKILL.md`) are
+  // intentionally hidden from the registry's in-memory map so they never
+  // leak into prompt assembly. The endpoints below give the config-UI a
+  // dedicated read+edit surface without changing that boundary.
+
+  r.get('/quarantine', (c) => {
+    try {
+      const list = ops.listQuarantined().map((s) => ({
+        name: s.name,
+        frontmatter: s.frontmatter,
+        etag: s.etag,
+      }));
+      return c.json(list);
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  });
+
+  r.get('/quarantine/:name', (c) => {
+    try {
+      const skill = ops.getQuarantined(c.req.param('name'));
+      c.header('ETag', skill.etag);
+      return c.json({
+        name: skill.name,
+        frontmatter: skill.frontmatter,
+        body: skill.body,
+        etag: skill.etag,
+      });
+    } catch (err) {
+      if (err instanceof SkillNotFoundError) return c.json({ error: err.message }, 404);
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
+    }
+  });
+
+  r.put('/quarantine/:name', async (c) => {
+    const ifMatch = c.req.header('If-Match');
+    const body = await c.req.json().catch(() => null);
+    if (!body || typeof body !== 'object') {
+      return c.json({ error: 'Body must be { frontmatter, body }' }, 400);
+    }
+    try {
+      const result = ops.updateSkill(
+        c.req.param('name'),
+        'quarantine',
+        { frontmatter: body.frontmatter, body: body.body ?? '' },
+        { ifMatch },
+      );
+      c.header('ETag', result.etag);
+      return c.json({ name: result.name, etag: result.etag });
+    } catch (err) {
+      if (err instanceof SkillNotFoundError) return c.json({ error: err.message }, 404);
+      if (err instanceof EtagMismatchError) {
+        return c.json({ error: err.message, expected: err.expected, actual: err.actual }, 412);
+      }
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
+    }
+  });
+
+  r.post('/quarantine/:name/approve', async (c) => {
+    const ifMatch = c.req.header('If-Match');
+    const name = c.req.param('name');
+    try {
+      const result = ops.approveQuarantined(
+        name,
+        (n) => registry.promoteFromQuarantine(n),
+        { ifMatch },
+      );
+      eventBuffer?.push('company', undefined, 'skill.approved', { name });
+      c.header('ETag', result.etag);
+      return c.json({ approved: name, status: 'active', etag: result.etag });
+    } catch (err) {
+      if (err instanceof SkillNotFoundError) return c.json({ error: err.message }, 404);
+      if (err instanceof EtagMismatchError) {
+        return c.json({ error: err.message, expected: err.expected, actual: err.actual }, 412);
+      }
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  });
+
+  r.post('/quarantine/:name/reject', async (c) => {
+    const ifMatch = c.req.header('If-Match');
+    const name = c.req.param('name');
+    try {
+      const result = ops.rejectQuarantined(name, { ifMatch });
+      eventBuffer?.push('company', undefined, 'skill.rejected', { name, source: 'quarantine' });
+      c.header('ETag', result.etag);
+      return c.json({ rejected: name, status: 'rejected', etag: result.etag });
+    } catch (err) {
+      if (err instanceof SkillNotFoundError) return c.json({ error: err.message }, 404);
+      if (err instanceof EtagMismatchError) {
+        return c.json({ error: err.message, expected: err.expected, actual: err.actual }, 412);
+      }
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  });
+
+  // PUT for active skills (inline-edit of frontmatter+body) — bypasses the
+  // registry's `save()` so we can attach ETag/If-Match semantics.
+  r.put('/:name', async (c) => {
+    const ifMatch = c.req.header('If-Match');
+    const body = await c.req.json().catch(() => null);
+    if (!body || typeof body !== 'object') {
+      return c.json({ error: 'Body must be { frontmatter, body }' }, 400);
+    }
+    try {
+      const result = ops.updateSkill(
+        c.req.param('name'),
+        'active',
+        { frontmatter: body.frontmatter, body: body.body ?? '' },
+        { ifMatch },
+      );
+      c.header('ETag', result.etag);
+      return c.json({ name: result.name, etag: result.etag });
+    } catch (err) {
+      if (err instanceof SkillNotFoundError) return c.json({ error: err.message }, 404);
+      if (err instanceof EtagMismatchError) {
+        return c.json({ error: err.message, expected: err.expected, actual: err.actual }, 412);
+      }
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
+    }
+  });
+
+  // Get a specific skill (frontmatter + body) — emits ETag header so
+  // useEtagFetch on the web side can drive conflict detection.
   r.get('/:name', (c) => {
-    const full = registry.getFullSkill(c.req.param('name'));
-    if (!full) return c.json({ error: 'Skill not found' }, 404);
-    return c.json({
-      frontmatter: full.frontmatter,
-      body: full.body,
-    });
+    const name = c.req.param('name');
+    try {
+      const fileResult = ops.getActive(name);
+      c.header('ETag', fileResult.etag);
+      return c.json({
+        frontmatter: fileResult.frontmatter,
+        body: fileResult.body,
+        etag: fileResult.etag,
+      });
+    } catch (err) {
+      if (err instanceof SkillNotFoundError) {
+        // Fall back to the registry-based path for skills that bypass the
+        // _quarantine flow (manually-saved skills, legacy entries).
+        const full = registry.getFullSkill(name);
+        if (!full) return c.json({ error: 'Skill not found' }, 404);
+        return c.json({ frontmatter: full.frontmatter, body: full.body });
+      }
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
+    }
   });
 
   // Create a skill manually
