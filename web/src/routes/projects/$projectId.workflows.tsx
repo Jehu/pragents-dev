@@ -37,6 +37,9 @@ function WorkflowsListPage() {
   const [newName, setNewName] = useState('');
   const [busy, setBusy] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+  // Styled delete-confirm replaces window.confirm so the dialog respects
+  // R22 a11y (focus trap, Esc-dismiss, return-focus-on-close).
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
 
   async function createWorkflow() {
     if (!NAME_RE.test(newName)) {
@@ -70,13 +73,13 @@ function WorkflowsListPage() {
   }
 
   async function deleteWorkflow(name: string) {
-    if (!confirm(`Delete workflow "${name}"? This removes the YAML file from disk.`)) {
-      return;
-    }
     const res = await fetch(`${listUrl}/${encodeURIComponent(name)}`, {
       method: 'DELETE',
     });
-    if (res.ok) await refetch();
+    if (res.ok) {
+      setDeleteTarget(null);
+      await refetch();
+    }
   }
 
   return (
@@ -145,7 +148,7 @@ function WorkflowsListPage() {
               </div>
               <button
                 type="button"
-                onClick={() => deleteWorkflow(w.name)}
+                onClick={() => setDeleteTarget(w.name)}
                 className="text-[11px] px-2 py-1 rounded bg-zinc-800 hover:bg-red-900 text-zinc-400 hover:text-red-200 flex-shrink-0"
               >
                 Delete
@@ -201,6 +204,38 @@ function WorkflowsListPage() {
               className="text-xs px-3 py-1.5 rounded-lg bg-indigo-700 hover:bg-indigo-600 text-zinc-100 font-medium disabled:opacity-40"
             >
               {busy ? 'Creating…' : 'Create + open editor'}
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {deleteTarget && (
+        <Modal
+          open
+          onClose={() => setDeleteTarget(null)}
+          ariaLabel={`Delete workflow ${deleteTarget}`}
+        >
+          <div className="px-5 py-4 border-b border-zinc-800">
+            <h3 className="text-sm font-semibold text-zinc-100">Delete workflow</h3>
+          </div>
+          <div className="p-5 text-sm text-zinc-300">
+            Delete <span className="font-mono">{deleteTarget}</span>? The YAML
+            file on disk is removed; this cannot be undone from the UI.
+          </div>
+          <div className="border-t border-zinc-800 px-5 py-3 flex gap-2 justify-end">
+            <button
+              type="button"
+              onClick={() => setDeleteTarget(null)}
+              className="text-xs px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => deleteWorkflow(deleteTarget)}
+              className="text-xs px-3 py-1.5 rounded-lg bg-red-700 hover:bg-red-600 text-white font-medium"
+            >
+              Delete workflow
             </button>
           </div>
         </Modal>

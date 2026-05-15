@@ -2,11 +2,11 @@ import React, { useEffect, useRef, useState } from 'react';
 import Editor, { type OnMount, type OnChange } from '@monaco-editor/react';
 import { configureMonacoYaml } from 'monaco-yaml';
 import { zodToJsonSchema } from 'zod-to-json-schema';
+import type * as Monaco from 'monaco-editor';
 import * as YAML from 'yaml';
 import { WorkflowDef } from '@pragents/schema/workflow';
 import { WORKFLOW_SNIPPETS } from './workflow-snippets.js';
-import { computeAgentMarkers, type AgentMarker } from './workflow-markers.js';
-export { computeAgentMarkers };
+import { computeAgentMarkers } from './workflow-markers.js';
 
 /**
  * Monaco-backed YAML editor for project workflows (Slice 4 / U12).
@@ -43,12 +43,13 @@ export interface WorkflowEditorProps {
   height?: string;
 }
 
-function workflowJsonSchema() {
-  // zod-to-json-schema returns a Draft-07 object compatible with
-  // monaco-yaml. Cast to `any` to avoid the cross-library schema-type
-  // mismatch — the value is opaque to us.
-  return zodToJsonSchema(WorkflowDef as any, 'WorkflowDef') as any;
-}
+// Compute the JSON schema once at module load — `WorkflowDef` is immutable
+// at runtime, and the previous per-mount recomputation only happened to
+// apply on the first mount (because of the `monacoYamlConfigured` guard).
+const WORKFLOW_JSON_SCHEMA = zodToJsonSchema(
+  WorkflowDef as any,
+  'WorkflowDef',
+) as any;
 
 export function WorkflowEditor({
   value,
@@ -76,7 +77,7 @@ export function WorkflowEditor({
           {
             uri: WORKFLOW_SCHEMA_URI,
             fileMatch: [WORKFLOW_MODEL_URI],
-            schema: workflowJsonSchema(),
+            schema: WORKFLOW_JSON_SCHEMA,
           },
         ],
       });
@@ -85,7 +86,10 @@ export function WorkflowEditor({
 
     monaco.languages.registerCompletionItemProvider('yaml', {
       triggerCharacters: [' ', '\n', '-'],
-      provideCompletionItems: (_model: any, position: any) => {
+      provideCompletionItems: (
+        _model: Monaco.editor.ITextModel,
+        position: Monaco.Position,
+      ) => {
         const range = {
           startLineNumber: position.lineNumber,
           startColumn: position.column,
