@@ -501,6 +501,19 @@ export class AgentSessionManager {
     return Array.from(this.sessions.keys());
   }
 
+  /**
+   * Return the agent IDs of all active sessions that belong to a given
+   * project. Agent IDs follow the `<type>@<projectId>` convention
+   * established by `resolveAllAgents` (see `config/schema.ts`).
+   *
+   * Used by the project-DELETE endpoint (R6 / AE8) to block destructive
+   * config edits while sessions are still running for that project.
+   */
+  getActiveSessionsForProject(projectId: string): string[] {
+    const suffix = `@${projectId}`;
+    return Array.from(this.sessions.keys()).filter((id) => id.endsWith(suffix));
+  }
+
   getAgentStatus(agentId: string): 'busy' | 'idle' | 'offline' {
     const handle = this.sessions.get(agentId);
     if (!handle) return 'offline';

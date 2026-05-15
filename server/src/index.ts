@@ -265,7 +265,8 @@ export async function startServer() {
   if (wsInject) logger.info('WebSocket endpoint ready');
 
   app.route('/api/v1', createHealthRoute(memory));
-  app.route('/api/v1/projects', createProjectsRoute(config));
+  const configPath = process.env.PRAGENTS_CONFIG_PATH || join(homedir(), '.pragents', 'pragents.yaml');
+  app.route('/api/v1/projects', createProjectsRoute({ configPath, sessionMgr }));
   const agentsRouter = createAgentsRoute(agents, sessionMgr);
   agentsRouter.route('/', createAgentDetailRoute(agents, sessionMgr, eventBuffer, tracker));
   app.route('/api/v1/agents', agentsRouter);
@@ -286,10 +287,7 @@ export async function startServer() {
   app.route(
     '/api/v1/files',
     createFilesRoute({
-      allowedRoots: [
-        process.env.PRAGENTS_CONFIG_PATH || join(homedir(), '.pragents', 'pragents.yaml'),
-        skillsDir,
-      ],
+      allowedRoots: [configPath, skillsDir],
     }),
   );
   app.route('/api/v1/events', createEventsRoute(eventBuffer));
