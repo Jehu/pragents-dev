@@ -111,8 +111,8 @@ export const InterfacesConfig = z.object({
 });
 
 export const CostRate = z.object({
-  in: z.number(),
-  out: z.number(),
+  in: z.number().nonnegative('in rate must be ≥ 0'),
+  out: z.number().nonnegative('out rate must be ≥ 0'),
 });
 
 export const PoolConfig = z.object({
