@@ -18,7 +18,13 @@ export interface DeleteProjectModalProps {
   /** Caller supplies the actual DELETE — usually wrapped by useYamlSave. */
   onDelete: () => Promise<DeleteResult>;
   onClose: () => void;
-  onSuccess?: () => void;
+  /**
+   * Awaited after a successful DELETE — typically a React-Query cache
+   * invalidation + a navigate. Awaiting matters because callers chain
+   * async work that should complete before the modal unmounts (else a
+   * stale list flashes between close and route change).
+   */
+  onSuccess?: () => void | Promise<void>;
 }
 
 export interface DeleteResult {
@@ -49,8 +55,12 @@ export function DeleteProjectModal({
     try {
       const res = await onDelete();
       if (res.ok) {
+        // Await the caller's success hook so cache invalidation +
+        // navigation finishes before the modal unmounts — without the
+        // await, the underlying list briefly re-renders with the just-
+        // deleted project still present before the new route takes over.
+        await onSuccess?.();
         setState('idle');
-        onSuccess?.();
         return;
       }
       if (res.status === 409 && res.activeAgents && res.activeAgents.length > 0) {

@@ -13,6 +13,11 @@ export const Route = createFileRoute(
   component: WorkflowEditorPage,
 });
 
+// Hoisted so it isn't re-allocated on every keystroke. CRLF
+// normalisation lets Windows operators edit in Monaco without seeing
+// Save light up before they make a semantic change.
+const normalizeEol = (s: string) => s.replace(/\r\n/g, '\n');
+
 // Lazy-loaded so the Monaco bundle (~161 KB minified) stays out of the
 // main chunk. ErrorBoundary below catches chunk-load failures (offline
 // during deploy / stale hash) and renders a reload affordance.
@@ -89,11 +94,8 @@ function WorkflowEditorPage() {
 
   const liveContent = draft ?? data?.content ?? '';
   const baseline = data?.content ?? '';
-  // Normalize CRLF before comparing — Windows operators editing in Monaco
-  // can otherwise see Save light up on every keystroke even though no
-  // semantically meaningful change happened.
-  const normalize = (s: string) => s.replace(/\r\n/g, '\n');
-  const dirty = draft !== null && normalize(draft) !== normalize(baseline);
+  const dirty =
+    draft !== null && normalizeEol(draft) !== normalizeEol(baseline);
 
   const openSavePreview = useCallback(() => {
     if (!dirty) return;
