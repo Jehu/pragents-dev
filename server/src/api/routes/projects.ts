@@ -43,6 +43,44 @@ interface ProjectsRouteOptions {
 }
 
 /**
+ * Thrown by `requireProjectNode` / `requireAgentNode` when the requested
+ * block is missing. `mapWriteError` translates it to a 404 at the route
+ * boundary so handlers don't have to repeat the existence check.
+ */
+class NotFoundError extends Error {
+  constructor(public readonly entity: 'Project' | 'Agent') {
+    super(`${entity} not found`);
+    this.name = 'NotFoundError';
+  }
+}
+
+function getProjectsNode(doc: YAML.Document): YAML.YAMLMap | null {
+  const node = doc.get('projects') as YAML.YAMLMap | undefined;
+  return node && YAML.isMap(node) ? node : null;
+}
+
+/** Return the YAML node for a project; throw NotFoundError('Project') if missing. */
+function requireProjectNode(doc: YAML.Document, projectId: string): YAML.YAMLMap {
+  const projects = getProjectsNode(doc);
+  if (!projects || !projects.has(projectId)) throw new NotFoundError('Project');
+  return projects.get(projectId) as YAML.YAMLMap;
+}
+
+/** Return the YAML node for a project agent; throw NotFoundError if project or agent slot is missing. */
+function requireAgentNode(
+  doc: YAML.Document,
+  projectId: string,
+  agentType: string,
+): YAML.YAMLMap {
+  const project = requireProjectNode(doc, projectId);
+  const agents = project.get('agents') as YAML.YAMLMap | undefined;
+  if (!agents || !YAML.isMap(agents) || !agents.has(agentType)) {
+    throw new NotFoundError('Agent');
+  }
+  return agents.get(agentType) as YAML.YAMLMap;
+}
+
+/**
  * Map a Zod failure to a `400` response with the issue list. Returned in
  * the same shape used by the skills route so the web client can drive a
  * consistent error-display path.
@@ -58,6 +96,9 @@ function zodError(c: any, parseResult: z.SafeParseError<unknown>, message: strin
 }
 
 function mapWriteError(c: any, err: unknown) {
+  if (err instanceof NotFoundError) {
+    return c.json({ error: `${err.entity} not found` }, 404);
+  }
   if (err instanceof EtagMismatchError) {
     return c.json(
       { error: err.message, expected: err.expected, actual: err.actual },
@@ -67,21 +108,6 @@ function mapWriteError(c: any, err: unknown) {
   const message = err instanceof Error ? err.message : String(err);
   logger.error({ err: message }, 'projects route write failed');
   return c.json({ error: message }, 500);
-}
-
-/**
- * Read `pragents.yaml` and return a typed view of a single project block.
- * Throws when the project is missing — callers map to 404.
- */
-function readProjectBlock(configPath: string, projectId: string) {
-  const { doc, etag, raw } = readYamlDoc(configPath);
-  const projects = doc.get('projects') as YAML.YAMLMap | undefined;
-  if (!projects || !YAML.isMap(projects) || !projects.has(projectId)) {
-    return { found: false as const, etag, raw, doc };
-  }
-  const node = projects.get(projectId) as YAML.YAMLMap | undefined;
-  const json = node?.toJSON ? node.toJSON() : node;
-  return { found: true as const, etag, raw, doc, json };
 }
 
 export function createProjectsRoute(opts: ProjectsRouteOptions) {
@@ -94,9 +120,9 @@ export function createProjectsRoute(opts: ProjectsRouteOptions) {
   r.get('/', (c) => {
     try {
       const { doc, etag } = readYamlDoc(configPath);
-      const projectsNode = doc.get('projects') as YAML.YAMLMap | undefined;
+      const projectsNode = getProjectsNode(doc);
       const projects: Array<{ id: string; name: string; directory: string }> = [];
-      if (projectsNode && YAML.isMap(projectsNode)) {
+      if (projectsNode) {
         for (const item of projectsNode.items) {
           const id = String(item.key);
           const value = (item.value as YAML.YAMLMap | null)?.toJSON?.() ?? {};
@@ -121,10 +147,14 @@ export function createProjectsRoute(opts: ProjectsRouteOptions) {
       return c.json({ error: 'Invalid projectId' }, 400);
     }
     try {
-      const result = readProjectBlock(configPath, projectId);
-      if (!result.found) return c.json({ error: 'Project not found' }, 404);
-      c.header('ETag', result.etag);
-      const value = result.json as Partial<{ name: string; directory: string; agents: Record<string, unknown> }>;
+      const { doc, etag } = readYamlDoc(configPath);
+      const projectNode = requireProjectNode(doc, projectId);
+      const value = (projectNode.toJSON?.() ?? {}) as Partial<{
+        name: string;
+        directory: string;
+        agents: Record<string, unknown>;
+      }>;
+      c.header('ETag', etag);
       return c.json({
         id: projectId,
         name: value.name ?? '',
@@ -162,19 +192,17 @@ export function createProjectsRoute(opts: ProjectsRouteOptions) {
     }
     try {
       const { doc } = readYamlDoc(configPath);
-      const projectsNode = doc.get('projects') as YAML.YAMLMap | undefined;
-      if (projectsNode && YAML.isMap(projectsNode) && projectsNode.has(id)) {
+      const existingProjects = getProjectsNode(doc);
+      if (existingProjects && existingProjects.has(id)) {
         return c.json({ error: `Project "${id}" already exists` }, 409);
       }
       applyMutation(doc, (d) => {
-        const existing = d.get('projects') as YAML.YAMLMap | undefined;
-        const block = d.createNode(projectShape.data);
-        if (!existing || !YAML.isMap(existing)) {
-          // Replace/insert a fresh `projects` map preserving the
-          // document's section ordering.
+        const existing = getProjectsNode(d);
+        if (!existing) {
+          // No `projects:` section yet — create one preserving section order.
           d.set('projects', d.createNode({ [id]: projectShape.data }));
         } else {
-          existing.set(id, block);
+          existing.set(id, d.createNode(projectShape.data));
         }
       });
       const { etag } = writeYamlDoc(configPath, doc, { ifMatch });
@@ -202,12 +230,8 @@ export function createProjectsRoute(opts: ProjectsRouteOptions) {
     }
     try {
       const { doc } = readYamlDoc(configPath);
-      const projectsNode = doc.get('projects') as YAML.YAMLMap | undefined;
-      if (!projectsNode || !YAML.isMap(projectsNode) || !projectsNode.has(projectId)) {
-        return c.json({ error: 'Project not found' }, 404);
-      }
-      const existingNode = projectsNode.get(projectId) as YAML.YAMLMap | undefined;
-      const existing = (existingNode?.toJSON?.() ?? {}) as Partial<{
+      const projectNode = requireProjectNode(doc, projectId);
+      const existing = (projectNode.toJSON?.() ?? {}) as Partial<{
         agents: Record<string, unknown>;
       }>;
       const hasAgentsInBody = Object.prototype.hasOwnProperty.call(body, 'agents');
@@ -224,8 +248,7 @@ export function createProjectsRoute(opts: ProjectsRouteOptions) {
       // pair's `commentBefore` (e.g. `# alpha-specific note` attached to
       // `name:`) survives the round-trip (AE2).
       applyMutation(doc, (d) => {
-        const projects = d.get('projects') as YAML.YAMLMap;
-        const project = projects.get(projectId) as YAML.YAMLMap;
+        const project = requireProjectNode(d, projectId);
         project.set('name', projectShape.data.name);
         project.set('directory', projectShape.data.directory);
         if (hasAgentsInBody) {
@@ -253,10 +276,7 @@ export function createProjectsRoute(opts: ProjectsRouteOptions) {
     const ifMatch = c.req.header('If-Match');
     try {
       const { doc } = readYamlDoc(configPath);
-      const projectsNode = doc.get('projects') as YAML.YAMLMap | undefined;
-      if (!projectsNode || !YAML.isMap(projectsNode) || !projectsNode.has(projectId)) {
-        return c.json({ error: 'Project not found' }, 404);
-      }
+      requireProjectNode(doc, projectId);
       const active = sessionMgr.getActiveSessionsForProject(projectId);
       if (active.length > 0) {
         return c.json(
@@ -268,8 +288,9 @@ export function createProjectsRoute(opts: ProjectsRouteOptions) {
         );
       }
       applyMutation(doc, (d) => {
-        const projects = d.get('projects') as YAML.YAMLMap;
-        projects.delete(projectId);
+        const projects = getProjectsNode(d);
+        // requireProjectNode above already confirmed the block exists.
+        projects!.delete(projectId);
       });
       const { etag } = writeYamlDoc(configPath, doc, { ifMatch });
       c.header('ETag', etag);
@@ -306,12 +327,8 @@ export function createProjectsRoute(opts: ProjectsRouteOptions) {
     }
     try {
       const { doc } = readYamlDoc(configPath);
-      const projectsNode = doc.get('projects') as YAML.YAMLMap | undefined;
-      if (!projectsNode || !YAML.isMap(projectsNode) || !projectsNode.has(projectId)) {
-        return c.json({ error: 'Project not found' }, 404);
-      }
-      const projectNode = projectsNode.get(projectId) as YAML.YAMLMap;
-      let agentsNode = projectNode.get('agents') as YAML.YAMLMap | undefined;
+      const projectNode = requireProjectNode(doc, projectId);
+      const agentsNode = projectNode.get('agents') as YAML.YAMLMap | undefined;
       if (agentsNode && YAML.isMap(agentsNode) && agentsNode.has(type)) {
         return c.json(
           { error: `Agent "${type}" already exists in project "${projectId}"` },
@@ -319,9 +336,8 @@ export function createProjectsRoute(opts: ProjectsRouteOptions) {
         );
       }
       applyMutation(doc, (d) => {
-        const projects = d.get('projects') as YAML.YAMLMap;
-        const project = projects.get(projectId) as YAML.YAMLMap;
-        let agents = project.get('agents') as YAML.YAMLMap | undefined;
+        const project = requireProjectNode(d, projectId);
+        const agents = project.get('agents') as YAML.YAMLMap | undefined;
         if (!agents || !YAML.isMap(agents)) {
           project.set('agents', d.createNode({ [type]: agentShape.data }));
         } else {
@@ -356,18 +372,9 @@ export function createProjectsRoute(opts: ProjectsRouteOptions) {
     }
     try {
       const { doc } = readYamlDoc(configPath);
-      const projectsNode = doc.get('projects') as YAML.YAMLMap | undefined;
-      if (!projectsNode || !YAML.isMap(projectsNode) || !projectsNode.has(projectId)) {
-        return c.json({ error: 'Project not found' }, 404);
-      }
-      const projectNode = projectsNode.get(projectId) as YAML.YAMLMap;
-      const agentsNode = projectNode.get('agents') as YAML.YAMLMap | undefined;
-      if (!agentsNode || !YAML.isMap(agentsNode) || !agentsNode.has(agentType)) {
-        return c.json({ error: 'Agent not found' }, 404);
-      }
+      requireAgentNode(doc, projectId, agentType);
       applyMutation(doc, (d) => {
-        const projects = d.get('projects') as YAML.YAMLMap;
-        const project = projects.get(projectId) as YAML.YAMLMap;
+        const project = requireProjectNode(d, projectId);
         const agents = project.get('agents') as YAML.YAMLMap;
         agents.set(agentType, d.createNode(agentShape.data));
       });
@@ -391,18 +398,9 @@ export function createProjectsRoute(opts: ProjectsRouteOptions) {
     const ifMatch = c.req.header('If-Match');
     try {
       const { doc } = readYamlDoc(configPath);
-      const projectsNode = doc.get('projects') as YAML.YAMLMap | undefined;
-      if (!projectsNode || !YAML.isMap(projectsNode) || !projectsNode.has(projectId)) {
-        return c.json({ error: 'Project not found' }, 404);
-      }
-      const projectNode = projectsNode.get(projectId) as YAML.YAMLMap;
-      const agentsNode = projectNode.get('agents') as YAML.YAMLMap | undefined;
-      if (!agentsNode || !YAML.isMap(agentsNode) || !agentsNode.has(agentType)) {
-        return c.json({ error: 'Agent not found' }, 404);
-      }
+      requireAgentNode(doc, projectId, agentType);
       applyMutation(doc, (d) => {
-        const projects = d.get('projects') as YAML.YAMLMap;
-        const project = projects.get(projectId) as YAML.YAMLMap;
+        const project = requireProjectNode(d, projectId);
         const agents = project.get('agents') as YAML.YAMLMap;
         agents.delete(agentType);
       });
