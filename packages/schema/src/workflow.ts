@@ -3,7 +3,7 @@ import { z } from 'zod';
 const StepAgent = z.union([
   z.string(),
   z.object({
-    route_by: z.literal('skills'),
+    route_by: z.literal('capabilities'),
     prefer: z.array(z.string()).optional(),
   }),
 ]);
@@ -36,8 +36,9 @@ const WorkflowStep = z.lazy(() =>
      *  abort (default): throw immediately, entire run fails.
      *  continue: collect all results (ok + error), pass as JSON to next step via outputs.
      *  resume-later: persist partial results and pause for human gate (stub — behaves like continue, see TODO).
+     *  Default `'abort'` is applied at the engine level (engine.ts: `step.onStepFailure ?? def.onStepFailure ?? 'abort'`).
      */
-    onStepFailure: z.enum(['abort', 'continue', 'resume-later']).default('abort'),
+    onStepFailure: z.enum(['abort', 'continue', 'resume-later']).optional(),
   }),
 );
 
@@ -57,8 +58,8 @@ export const WorkflowDef = z.object({
   description: z.string().optional(),
   trigger: TriggerConfig.optional(),
   steps: z.array(WorkflowStep),
-  /** Workflow-level default for onStepFailure; individual steps override this. */
-  onStepFailure: z.enum(['abort', 'continue', 'resume-later']).default('abort'),
+  /** Workflow-level default for onStepFailure; individual steps override this. Engine falls back to `'abort'` if neither level sets it. */
+  onStepFailure: z.enum(['abort', 'continue', 'resume-later']).optional(),
 });
 
 // Zod schema + inferred type: import type { WorkflowStep } for the type, { WorkflowStepSchema } for the schema

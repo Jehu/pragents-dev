@@ -10,8 +10,8 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
-function agent(id: string, type: AgentType, skills: string[], projectId = 'test-project'): ResolvedAgent {
-  return { id, projectId, type, model: 'test/model', personality: '', memory: {}, skills, projectDir: '/tmp/test-project', tokenBudget: 40000, keepWarm: false };
+function agent(id: string, type: AgentType, capabilities: string[], projectId = 'test-project'): ResolvedAgent {
+  return { id, projectId, type, model: 'test/model', personality: '', memory: {}, capabilities, projectDir: '/tmp/test-project', tokenBudget: 40000, keepWarm: false };
 }
 
 const agents = [
@@ -402,7 +402,7 @@ describe('WorkflowEngine', () => {
 
   // ---- I3 regression: bookkeeping failure must not flip a successful run to FAILED ----
   it('executeAsync: completeRun failure leaves successful steps in non-failed state', async () => {
-    const okMgr = { dispatch: vi.fn().mockResolvedValue('done') };
+    const okMgr = { dispatch: vi.fn().mockResolvedValue('done') } as any;
     const engine = new WorkflowEngine(tracker, router, okMgr, agents, eventBuffer, 'test-project');
     // Replace completeRun on the *engine's* tracker to throw — simulates a DB
     // lock or transient error after the workflow steps already finished.
