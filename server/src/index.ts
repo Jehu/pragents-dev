@@ -44,7 +44,15 @@ import { authMiddleware, getOrCreateApiToken } from './api/middleware/auth.js';
 import { ConversationManager } from './chat/manager.js';
 import { IntentClassifier, shutdownClassifierSessions } from './chat/intent-classifier.js';
 import { shutdownDecomposerSessions } from './nl/decomposer.js';
-import { createAgentSession, DefaultResourceLoader, SessionManager } from '@mariozechner/pi-coding-agent';
+import {
+  createAgentSession,
+  DefaultResourceLoader,
+  SessionManager,
+  AuthStorage,
+  ModelRegistry,
+} from '@mariozechner/pi-coding-agent';
+import { createModelsRoute } from './api/routes/models.js';
+import { setModelRegistry } from './agents/model-resolver.js';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { expandHome } from './util/paths.js';
@@ -114,6 +122,17 @@ export async function startServer() {
     broadcastSSE(evt);
     goalScheduler?.onEvent(evt);
   });
+
+  // pi model + auth registries. Shared between the Web UI (/api/v1/models)
+  // and the agent-session creation path (model-resolver) so the dropdown
+  // and the runtime can't disagree about which models exist.
+  const piAuthStorage = AuthStorage.create();
+  const piModelRegistry = ModelRegistry.create(piAuthStorage);
+  setModelRegistry(piModelRegistry);
+  const modelLoadError = piModelRegistry.getError();
+  if (modelLoadError) {
+    logger.warn({ error: modelLoadError }, 'pi ModelRegistry reported load errors');
+  }
 
   // Workflow system. The registry loads from two kinds of roots:
   //   1) the repo-level `<repo>/workflows/` directory (projectId = null)
@@ -319,6 +338,7 @@ export async function startServer() {
   app.route('/api/v1/agents', agentsRouter);
   app.route('/api/v1/tasks', createTasksRoute(tracker, agents, sessionMgr, eventBuffer));
   app.route('/api/v1/workflows', createWorkflowsRoute(wfRegistry, wfEngine, wfTracker));
+  app.route('/api/v1/models', createModelsRoute(piModelRegistry));
   app.route('/api/v1/nl', createNLRoutes(decomposer, agents, planStore, planExecutor));
   app.route('/api/v1/plans', createPlansRoute(planStore, planExecutor));
   app.route('/api/v1/cost', createCostRoute(costTracker));

@@ -14,6 +14,27 @@ vi.mock('@tanstack/react-router', () => ({
   useNavigate: () => vi.fn(),
 }));
 
+// AgentForm pulls in ModelSelect, which would call TanStack Query without
+// the wiring this test stubs. Replace it with a controlled text input —
+// the selector has its own test.
+vi.mock('../../../components/ModelSelect.js', () => ({
+  ModelSelect: ({
+    value,
+    onChange,
+    ariaLabel,
+  }: {
+    value: string;
+    onChange: (v: string) => void;
+    ariaLabel?: string;
+  }) =>
+    React.createElement('input', {
+      type: 'text',
+      value,
+      'aria-label': ariaLabel ?? 'Model',
+      onChange: (e: React.ChangeEvent<HTMLInputElement>) => onChange(e.target.value),
+    }),
+}));
+
 const SAMPLE_PROJECT = {
   id: 'alpha',
   name: 'Alpha',

@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { CompanyAgentConfig } from '@pragents/schema/config';
 import type { MemoryLevel } from './AgentForm.js';
+import { ModelSelect } from './ModelSelect.js';
 
 /**
  * Company-scope agent form (office / pm). Re-uses the same memory-access
@@ -26,7 +27,6 @@ export interface CompanyAgentFormProps {
   agentType: CompanyAgentType;
   initial: Partial<CompanyAgentFormValues> | null;
   busy?: boolean;
-  modelSuggestions?: string[];
   onChange: (values: CompanyAgentFormValues, valid: boolean, payload: Record<string, unknown>) => void;
 }
 
@@ -69,7 +69,6 @@ export function CompanyAgentForm({
   agentType,
   initial,
   busy,
-  modelSuggestions = [],
   onChange,
 }: CompanyAgentFormProps) {
   const [values, setValues] = useState<CompanyAgentFormValues>(() => ({
@@ -148,23 +147,13 @@ export function CompanyAgentForm({
     <div className="space-y-4">
       <label className="block">
         <span className="block text-xs font-medium text-zinc-300 mb-1">Model</span>
-        <input
-          type="text"
-          list={`company-model-${agentType}`}
+        <ModelSelect
           value={values.model ?? ''}
-          onChange={(e) => update('model', e.target.value)}
+          onChange={(next) => update('model', next)}
           disabled={busy}
-          aria-label={`${agentType} model`}
-          className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-zinc-500 font-mono"
-          placeholder="provider/model-id"
+          id={`company-model-${agentType}`}
+          ariaLabel={`${agentType} model`}
         />
-        {modelSuggestions.length > 0 && (
-          <datalist id={`company-model-${agentType}`}>
-            {modelSuggestions.map((m) => (
-              <option key={m} value={m} />
-            ))}
-          </datalist>
-        )}
       </label>
 
       <label className="block">

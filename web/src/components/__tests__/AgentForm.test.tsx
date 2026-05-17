@@ -1,6 +1,29 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import React from 'react';
+
+// ModelSelect uses TanStack Query, which these AgentForm tests don't wrap.
+// The selector has its own test; here we replace it with a controlled text
+// input that mirrors the value/onChange contract so callers can still drive
+// model edits.
+vi.mock('../ModelSelect.js', () => ({
+  ModelSelect: ({
+    value,
+    onChange,
+    ariaLabel,
+  }: {
+    value: string;
+    onChange: (v: string) => void;
+    ariaLabel?: string;
+  }) =>
+    React.createElement('input', {
+      type: 'text',
+      value,
+      'aria-label': ariaLabel ?? 'Model',
+      onChange: (e: React.ChangeEvent<HTMLInputElement>) => onChange(e.target.value),
+    }),
+}));
+
 import { AgentForm, buildAgentPayload } from '../AgentForm.js';
 
 afterEach(() => {

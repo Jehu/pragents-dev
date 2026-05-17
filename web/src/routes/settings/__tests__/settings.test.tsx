@@ -11,6 +11,27 @@ vi.mock('@tanstack/react-router', () => ({
   useNavigate: () => vi.fn(),
 }));
 
+// CompanyAgentForm pulls in ModelSelect (TanStack Query). These section
+// tests don't exercise the model picker — stub it with a controlled text
+// input so they keep working without a QueryClientProvider.
+vi.mock('../../../components/ModelSelect.js', () => ({
+  ModelSelect: ({
+    value,
+    onChange,
+    ariaLabel,
+  }: {
+    value: string;
+    onChange: (v: string) => void;
+    ariaLabel?: string;
+  }) =>
+    React.createElement('input', {
+      type: 'text',
+      value,
+      'aria-label': ariaLabel ?? 'Model',
+      onChange: (e: React.ChangeEvent<HTMLInputElement>) => onChange(e.target.value),
+    }),
+}));
+
 // ─── Tiny ETag-fetch double the route uses to hydrate sections ──────────────
 
 const useEtagFetch = vi.fn();

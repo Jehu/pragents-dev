@@ -4,6 +4,7 @@ import {
   PROJECT_AGENT_TYPES as AGENT_TYPES,
   type ProjectAgentType,
 } from '@pragents/schema/config';
+import { ModelSelect } from './ModelSelect.js';
 
 // Re-export so existing consumers (`new.tsx`, `$projectId.tsx`) keep their
 // import path stable while the single source of truth lives in
@@ -48,8 +49,6 @@ export interface AgentFormProps {
   takenTypes?: ProjectAgentType[];
   /** Default agent type when adding into an empty slot. */
   defaultType?: ProjectAgentType;
-  /** Optional model suggestions (e.g. keys from `costs:` map). */
-  modelSuggestions?: string[];
   onCancel?: () => void;
   onSubmit: (values: AgentFormValues) => void;
   submitLabel?: string;
@@ -90,7 +89,6 @@ export function AgentForm({
   editMode = false,
   takenTypes = [],
   defaultType,
-  modelSuggestions = [],
   onCancel,
   onSubmit,
   submitLabel = 'Save',
@@ -200,23 +198,13 @@ export function AgentForm({
 
       <label className="block">
         <span className="block text-xs font-medium text-zinc-300 mb-1">Model</span>
-        <input
-          type="text"
-          list="model-suggestions"
+        <ModelSelect
           value={values.model ?? ''}
-          onChange={(e) => update('model', e.target.value)}
+          onChange={(next) => update('model', next)}
           disabled={busy}
-          aria-label="Model"
-          className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-zinc-500 font-mono"
-          placeholder="anthropic/claude-sonnet-4-5"
+          ariaLabel="Model"
+          id={`agent-model-${values.type}`}
         />
-        {modelSuggestions.length > 0 && (
-          <datalist id="model-suggestions">
-            {modelSuggestions.map((m) => (
-              <option key={m} value={m} />
-            ))}
-          </datalist>
-        )}
       </label>
 
       <label className="block">

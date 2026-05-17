@@ -24,6 +24,27 @@ vi.mock('@tanstack/react-query', () => ({
   useQueryClient: () => ({ invalidateQueries: mockInvalidate }),
 }));
 
+// AgentForm pulls in ModelSelect, which would call the real useQuery without
+// the wiring this test stubs. Replace it with a plain text input mirroring
+// the value/onChange contract — the model selector has its own test.
+vi.mock('../../../components/ModelSelect.js', () => ({
+  ModelSelect: ({
+    value,
+    onChange,
+    ariaLabel,
+  }: {
+    value: string;
+    onChange: (v: string) => void;
+    ariaLabel?: string;
+  }) =>
+    React.createElement('input', {
+      type: 'text',
+      value,
+      'aria-label': ariaLabel ?? 'Model',
+      onChange: (e: React.ChangeEvent<HTMLInputElement>) => onChange(e.target.value),
+    }),
+}));
+
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();

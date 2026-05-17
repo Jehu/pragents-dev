@@ -100,11 +100,6 @@ function SettingsPage() {
     SETTINGS_URL,
   );
 
-  const modelSuggestions = useMemo(() => {
-    if (!data?.costs) return [];
-    return Object.keys(data.costs);
-  }, [data?.costs]);
-
   if (loading && !data) {
     return <div className="p-6 text-xs text-zinc-500">Loading settings…</div>;
   }
@@ -134,14 +129,12 @@ function SettingsPage() {
         agentType="office"
         data={data}
         etag={etag}
-        modelSuggestions={modelSuggestions}
         onRefresh={refetch}
       />
       <CompanyAgentBlock
         agentType="pm"
         data={data}
         etag={etag}
-        modelSuggestions={modelSuggestions}
         onRefresh={refetch}
       />
       <SkillApprovalSectionBlock data={data} etag={etag} onRefresh={refetch} />
@@ -242,11 +235,9 @@ function CompanyAgentBlock({
   agentType,
   data,
   etag,
-  modelSuggestions,
   onRefresh,
 }: SectionBlockProps & {
   agentType: CompanyAgentType;
-  modelSuggestions: string[];
 }) {
   const raw = data.company.agents[agentType];
   // Both `initial` (form hydration) and `initialPayload` (dirty-comparison
@@ -312,7 +303,6 @@ function CompanyAgentBlock({
           agentType={agentType}
           initial={initial}
           busy={save.busy}
-          modelSuggestions={modelSuggestions}
           onChange={(_v, isValid, p) => {
             setPayload(p);
             setValid(isValid);
