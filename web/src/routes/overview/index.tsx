@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { createFileRoute, Link } from '@tanstack/react-router';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { StatusPill, ApprovalCard, EmptyState, ErrorState, LoadingState, PageHeader, Panel } from '../../components/ui/index.js';
@@ -31,9 +31,25 @@ export interface Gate {
   label: string;
   status: string;
   workflowName?: string;
+  workflowRunId?: string;
   stepId?: string;
   description?: string;
   createdAt: string;
+}
+
+interface GateRow {
+  id: string;
+  label: string;
+  status: string;
+  workflowName?: string;
+  workflow_name?: string;
+  workflowRunId?: string;
+  workflow_run_id?: string;
+  stepId?: string;
+  step_id?: string;
+  description?: string;
+  createdAt?: string;
+  created_at?: string;
 }
 
 export interface Plan {
@@ -82,8 +98,37 @@ interface GoalRunSummary {
   triggeredAt: string;
 }
 
-interface MonthlyCost {
-  totalCost?: number;
+interface CostRow {
+  cost?: number;
+}
+
+export interface LiveWorkflowActivity {
+  agentId: string;
+  workflow?: string;
+  runId?: string;
+  stepId?: string;
+  startedAt: number;
+  updatedAt: number;
+  expiresAt: number;
+  state: 'active' | 'recent';
+}
+
+type LiveWorkflowActivityMap = Record<string, LiveWorkflowActivity>;
+
+export const LIVE_WORKFLOW_MIN_VISIBLE_MS = 2_500;
+export const LIVE_WORKFLOW_STALE_MS = 2 * 60_000;
+export const AGENT_ACTIVITY_EVENT_TYPES = [
+  'agent_start',
+  'agent_end',
+  'turn_start',
+  'turn_end',
+  'workflow.step_started',
+  'workflow.step_completed',
+  'workflow.step_failed',
+];
+
+export function shouldInvalidateAgentsForEvent(type: string): boolean {
+  return AGENT_ACTIVITY_EVENT_TYPES.includes(type);
 }
 
 // ─── Event helpers ────────────────────────────────────────────────────────────
@@ -130,6 +175,104 @@ function labelFor(type: string): string {
   return EVENT_LABELS[type] ?? type;
 }
 
+function eventDataObject(event: { data?: unknown }): Record<string, any> {
+  return event.data && typeof event.data === 'object' ? event.data as Record<string, any> : {};
+}
+
+function workflowPayload(event: { data?: unknown }): Record<string, any> {
+  const raw = eventDataObject(event);
+  return raw.data && typeof raw.data === 'object' ? raw.data as Record<string, any> : raw;
+}
+
+function eventAgentId(event: { agentId?: string; data?: unknown }): string | undefined {
+  const raw = eventDataObject(event);
+  const payload = workflowPayload(event);
+  return event.agentId ?? raw.agentId ?? raw.agent_id ?? payload.agentId ?? payload.agent_id;
+}
+
+function eventTimestamp(event: { ts?: number }, fallback: number): number {
+  return typeof event.ts === 'number' ? event.ts : fallback;
+}
+
+function sameWorkflowActivity(activity: LiveWorkflowActivity | undefined, payload: Record<string, any>): boolean {
+  if (!activity) return false;
+  const runId = payload.runId ?? payload.run_id;
+  const stepId = payload.stepId ?? payload.step_id;
+  if (runId && activity.runId && runId !== activity.runId) return false;
+  if (stepId && activity.stepId && stepId !== activity.stepId) return false;
+  return true;
+}
+
+export function pruneLiveWorkflowActivities(
+  activities: LiveWorkflowActivityMap,
+  now: number = Date.now(),
+): LiveWorkflowActivityMap {
+  const next: LiveWorkflowActivityMap = {};
+  for (const [agentId, activity] of Object.entries(activities)) {
+    if (activity.expiresAt > now) next[agentId] = activity;
+  }
+  return next;
+}
+
+export function reduceLiveWorkflowActivities(
+  activities: LiveWorkflowActivityMap,
+  event: { type: string; agentId?: string; ts?: number; data?: unknown },
+  now: number = Date.now(),
+): LiveWorkflowActivityMap {
+  const pruned = pruneLiveWorkflowActivities(activities, now);
+  const payload = workflowPayload(event);
+  const agentId = eventAgentId(event);
+  if (!agentId) return pruned;
+
+  if (event.type === 'workflow.step_started') {
+    const startedAt = eventTimestamp(event, now);
+    return {
+      ...pruned,
+      [agentId]: {
+        agentId,
+        workflow: payload.workflow,
+        runId: payload.runId ?? payload.run_id,
+        stepId: payload.stepId ?? payload.step_id,
+        startedAt,
+        updatedAt: now,
+        expiresAt: now + LIVE_WORKFLOW_STALE_MS,
+        state: 'active',
+      },
+    };
+  }
+
+  if (event.type === 'workflow.step_completed' || event.type === 'workflow.step_failed' || event.type === 'agent_end') {
+    const activity = pruned[agentId];
+    if (!sameWorkflowActivity(activity, payload)) return pruned;
+
+    const minVisibleUntil = Math.max(activity.startedAt + LIVE_WORKFLOW_MIN_VISIBLE_MS, now);
+    return {
+      ...pruned,
+      [agentId]: {
+        ...activity,
+        updatedAt: now,
+        expiresAt: minVisibleUntil,
+        state: 'recent',
+      },
+    };
+  }
+
+  return pruned;
+}
+
+function normalizeGate(g: GateRow): Gate {
+  return {
+    id: g.id,
+    label: g.label,
+    status: g.status,
+    workflowName: g.workflowName ?? g.workflow_name,
+    workflowRunId: g.workflowRunId ?? g.workflow_run_id,
+    stepId: g.stepId ?? g.step_id,
+    description: g.description,
+    createdAt: g.createdAt ?? g.created_at ?? new Date(0).toISOString(),
+  };
+}
+
 export function relativeTime(ts: number): string {
   const diff = Math.floor((Date.now() - ts) / 1000);
   if (diff < 60) return `${diff}s ago`;
@@ -142,12 +285,12 @@ export function relativeTime(ts: number): string {
 
 export async function fetchInboxItems(): Promise<InboxItem[]> {
   const [gatesData, plansData, skillsData] = await Promise.all([
-    fetchJson<{ gates?: Gate[] } | Gate[]>(`${API}/api/v1/gates?status=pending`),
+    fetchJson<{ gates?: GateRow[] } | GateRow[]>(`${API}/api/v1/gates/pending`),
     fetchJson<{ plans?: Plan[] } | Plan[]>(`${API}/api/v1/plans?status=draft`),
     fetchJson<{ skills?: Skill[] } | Skill[]>(`${API}/api/v1/skills?status=proposed`),
   ]);
 
-  const gateItems = Array.isArray(gatesData) ? gatesData : gatesData.gates ?? [];
+  const gateItems = (Array.isArray(gatesData) ? gatesData : gatesData.gates ?? []).map(normalizeGate);
   const planItems = Array.isArray(plansData) ? plansData : plansData.plans ?? [];
   const skillItems = Array.isArray(skillsData) ? skillsData : skillsData.skills ?? [];
 
@@ -196,22 +339,30 @@ export async function rejectItem(item: InboxItem): Promise<void> {
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-function AgentCard({ agent }: { agent: Agent }) {
-  const status = (agent.status ?? 'idle') as StatusType;
+function AgentCard({ agent, activity }: { agent: Agent; activity?: LiveWorkflowActivity }) {
+  const status = (activity?.state === 'active' ? 'busy' : (agent.status ?? 'idle')) as StatusType;
   const skillCount = agent.capabilities?.length ?? 0;
   const displayName = agent.name ?? agent.id;
+  const activityLabel = activity?.workflow || activity?.stepId
+    ? [activity.workflow, activity.stepId ? `step ${activity.stepId}` : undefined].filter(Boolean).join(' · ')
+    : undefined;
 
   return (
     <Link
       to="/agents/$agentId"
       params={{ agentId: agent.id }}
-      className="flex-shrink-0 w-52 bg-zinc-900 border border-zinc-800 hover:border-zinc-700 rounded-lg p-3 flex flex-col gap-1.5 cursor-pointer transition-colors"
+      className="flex-shrink-0 w-52 min-h-[6.75rem] bg-zinc-900 border border-zinc-800 hover:border-zinc-700 rounded-lg p-3 flex flex-col gap-1.5 cursor-pointer transition-colors"
     >
       <div className="flex items-center justify-between gap-2">
         <span className="text-sm font-medium text-zinc-100 truncate">{displayName}</span>
         <StatusPill status={status} />
       </div>
       <div className="text-[11px] text-zinc-400 truncate">{agent.model ?? 'unknown model'}</div>
+      {activityLabel && (
+        <div className="text-[11px] text-amber-300 truncate" title={activityLabel}>
+          {activityLabel}
+        </div>
+      )}
       <div className="flex items-center gap-2">
         {agent.projectId && (
           <span className="text-[11px] bg-indigo-500/15 text-indigo-300 px-1.5 py-0.5 rounded truncate max-w-[7rem]">
@@ -267,7 +418,7 @@ export function inboxItemBody(item: InboxItem): React.ReactNode {
     const g = item.item as Gate;
     return (
       <span>
-        {g.workflowName && <>{g.workflowName} · </>}
+        {(g.workflowName ?? g.workflowRunId) && <>{g.workflowName ?? g.workflowRunId} · </>}
         {g.stepId && <>step {g.stepId}{g.description ? ' · ' : ''}</>}
         {g.description}
       </span>
@@ -299,6 +450,7 @@ export function inboxItemBody(item: InboxItem): React.ReactNode {
 
 function OverviewPage() {
   const queryClient = useQueryClient();
+  const [liveActivities, setLiveActivities] = useState<LiveWorkflowActivityMap>({});
 
   const { data: agentsData, error: agentsError, isLoading: agentsLoading, refetch: refetchAgents } = useQuery<{ agents?: Agent[] } | Agent[]>({
     queryKey: ['agents'],
@@ -334,13 +486,13 @@ function OverviewPage() {
     staleTime: 15_000,
   });
 
-  const { data: costData } = useQuery<MonthlyCost>({
+  const { data: costData } = useQuery<CostRow[]>({
     queryKey: ['cost-monthly'],
-    queryFn: () => fetchJson('/api/v1/cost/monthly'),
+    queryFn: () => fetchJson('/api/v1/cost/summary'),
     staleTime: 300_000,
   });
 
-  // SSE: invalidate inbox on relevant events
+  // SSE: invalidate queries and update live agent workflow activity.
   const events = useEventBusStore((s) => s.events);
   useEffect(() => {
     const last = events[events.length - 1];
@@ -353,10 +505,25 @@ function OverviewPage() {
     if (relevant.includes(last.type)) {
       void queryClient.invalidateQueries({ queryKey: ['overview-inbox'] });
     }
+    if (shouldInvalidateAgentsForEvent(last.type)) {
+      void queryClient.invalidateQueries({ queryKey: ['agents'] });
+    }
+    if (last.type === 'workflow.step_started' || last.type === 'workflow.step_completed' || last.type === 'workflow.step_failed' || last.type === 'agent_end') {
+      setLiveActivities((current) => reduceLiveWorkflowActivities(current, last));
+    } else {
+      setLiveActivities((current) => pruneLiveWorkflowActivities(current));
+    }
     if (last.type.startsWith('task.')) void queryClient.invalidateQueries({ queryKey: ['overview-tasks'] });
     if (last.type.startsWith('workflow.')) void queryClient.invalidateQueries({ queryKey: ['overview-workflow-runs'] });
     if (last.type.startsWith('goal.')) void queryClient.invalidateQueries({ queryKey: ['overview-goal-runs'] });
   }, [events, queryClient]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setLiveActivities((current) => pruneLiveWorkflowActivities(current));
+    }, 1_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   // Recent events (last 6 from store, no API call, live)
   const recentEvents = useEventBusStore(useShallow((s) => s.events.slice(-6).reverse()));
@@ -378,6 +545,7 @@ function OverviewPage() {
   const failedTasks = tasks.filter((task) => task.status === 'failed');
   const runningWorkflows = workflowRuns.filter((run) => run.status === 'running');
   const escalatedGoals = goalRuns.filter((run) => run.status === 'failed' || run.status === 'escalated');
+  const monthlyCost = (costData ?? []).reduce((sum, row) => sum + (row.cost ?? 0), 0);
   const loadError = inboxError ?? tasksError;
 
   return (
@@ -415,7 +583,7 @@ function OverviewPage() {
           <PriorityCard label="goal escalations" value={escalatedGoals.length} tone={escalatedGoals.length > 0 ? 'red' : 'emerald'} to="/goals" />
         </div>
         <div className="mt-3 text-xs text-zinc-500">
-          Month cost: <span className="font-mono text-zinc-300">€{(costData?.totalCost ?? 0).toFixed(2)}</span>
+          Month cost: <span className="font-mono text-zinc-300">€{monthlyCost.toFixed(2)}</span>
         </div>
       </section>
 
@@ -442,7 +610,7 @@ function OverviewPage() {
         ) : (
           <div className="flex gap-3 overflow-x-auto pb-1">
             {agents.map((agent) => (
-              <AgentCard key={agent.id} agent={agent} />
+              <AgentCard key={agent.id} agent={agent} activity={liveActivities[agent.id]} />
             ))}
           </div>
         )}

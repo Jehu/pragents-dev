@@ -7,6 +7,11 @@ import {
   relativeTime,
   inboxItemTitle,
   inboxItemBody,
+  pruneLiveWorkflowActivities,
+  reduceLiveWorkflowActivities,
+  shouldInvalidateAgentsForEvent,
+  LIVE_WORKFLOW_MIN_VISIBLE_MS,
+  LIVE_WORKFLOW_STALE_MS,
   type InboxItem,
   type Gate,
   type Plan,
@@ -281,5 +286,91 @@ describe('rejectItem', () => {
       expect.stringContaining('/api/v1/skills/my-skill/reject'),
       { method: 'POST' },
     );
+  });
+});
+
+// ─── live workflow activity ──────────────────────────────────────────────────
+
+describe('live workflow activity', () => {
+  it('marks an agent active from workflow.step_started', () => {
+    const activities = reduceLiveWorkflowActivities({}, {
+      type: 'workflow.step_started',
+      agentId: 'dev@karpathy-wiki',
+      ts: 1_000,
+      data: {
+        data: {
+          workflow: 'publish',
+          runId: 'run-1',
+          stepId: 'draft',
+        },
+      },
+    }, 1_000);
+
+    expect(activities['dev@karpathy-wiki']).toMatchObject({
+      agentId: 'dev@karpathy-wiki',
+      workflow: 'publish',
+      runId: 'run-1',
+      stepId: 'draft',
+      state: 'active',
+    });
+    expect(activities['dev@karpathy-wiki'].expiresAt).toBe(1_000 + LIVE_WORKFLOW_STALE_MS);
+  });
+
+  it('keeps completed activity until the minimum visible window expires', () => {
+    const started = reduceLiveWorkflowActivities({}, {
+      type: 'workflow.step_started',
+      agentId: 'dev@karpathy-wiki',
+      ts: 1_000,
+      data: { data: { workflow: 'publish', runId: 'run-1', stepId: 'draft' } },
+    }, 1_000);
+
+    const completed = reduceLiveWorkflowActivities(started, {
+      type: 'workflow.step_completed',
+      agentId: 'dev@karpathy-wiki',
+      data: { data: { runId: 'run-1', stepId: 'draft' } },
+    }, 1_500);
+
+    expect(completed['dev@karpathy-wiki']).toMatchObject({
+      state: 'recent',
+      runId: 'run-1',
+      stepId: 'draft',
+    });
+    expect(completed['dev@karpathy-wiki'].expiresAt).toBe(1_000 + LIVE_WORKFLOW_MIN_VISIBLE_MS);
+    expect(pruneLiveWorkflowActivities(completed, 1_000 + LIVE_WORKFLOW_MIN_VISIBLE_MS + 1)).toEqual({});
+  });
+
+  it('does not clear a newer activity with an older completion event', () => {
+    const started = reduceLiveWorkflowActivities({}, {
+      type: 'workflow.step_started',
+      agentId: 'dev@karpathy-wiki',
+      data: { data: { workflow: 'publish', runId: 'run-new', stepId: 'write' } },
+    }, 2_000);
+
+    const unchanged = reduceLiveWorkflowActivities(started, {
+      type: 'workflow.step_completed',
+      agentId: 'dev@karpathy-wiki',
+      data: { data: { runId: 'run-old', stepId: 'research' } },
+    }, 2_100);
+
+    expect(unchanged['dev@karpathy-wiki']).toMatchObject({
+      state: 'active',
+      runId: 'run-new',
+      stepId: 'write',
+    });
+  });
+
+  it('ignores workflow activity without an agent id', () => {
+    const activities = reduceLiveWorkflowActivities({}, {
+      type: 'workflow.step_started',
+      data: { data: { workflow: 'publish', runId: 'run-1', stepId: 'draft' } },
+    }, 1_000);
+
+    expect(activities).toEqual({});
+  });
+
+  it('identifies event types that should refresh agents', () => {
+    expect(shouldInvalidateAgentsForEvent('workflow.step_started')).toBe(true);
+    expect(shouldInvalidateAgentsForEvent('agent_start')).toBe(true);
+    expect(shouldInvalidateAgentsForEvent('task.running')).toBe(false);
   });
 });

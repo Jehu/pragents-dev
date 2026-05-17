@@ -125,10 +125,76 @@ describe('WorkflowEngine', () => {
     const buf = new EventBuffer(100);
     const engine = new WorkflowEngine(tracker, router, sessionMgr, agents, buf, 'test-project');
     await engine.execute(simpleWf);
-    const events = buf.getSince(0);
+    const events = buf.getRecent(100);
     expect(events.length).toBeGreaterThan(0);
     const started = events.find((e: any) => e.type === 'workflow.step_started');
     expect(started).toBeDefined();
+  });
+
+  it('emits agent context on single-step workflow lifecycle events', async () => {
+    const buf = new EventBuffer(100);
+    const engine = new WorkflowEngine(tracker, router, sessionMgr, agents, buf, 'test-project');
+
+    await engine.execute(simpleWf);
+
+    const started = buf.getRecent(100).find((e) => e.type === 'workflow.step_started' && e.data.stepId === 'step1');
+    const completed = buf.getRecent(100).find((e) => e.type === 'workflow.step_completed' && e.data.stepId === 'step1');
+
+    expect(started).toMatchObject({
+      agentId: 'dev@test-project',
+      projectId: 'test-project',
+    });
+    expect(started?.data).toMatchObject({
+      agentId: 'dev@test-project',
+      projectId: 'test-project',
+      workflow: 'simple-test',
+      stepId: 'step1',
+    });
+    expect(completed).toMatchObject({
+      agentId: 'dev@test-project',
+      projectId: 'test-project',
+    });
+    expect(completed?.data).toMatchObject({
+      agentId: 'dev@test-project',
+      projectId: 'test-project',
+      workflow: 'simple-test',
+      stepId: 'step1',
+    });
+  });
+
+  it('emits agent context on failed workflow step events', async () => {
+    const buf = new EventBuffer(100);
+    const failing = {
+      dispatch: vi.fn().mockRejectedValue(new Error('Boom')),
+    } as any;
+    const engine = new WorkflowEngine(tracker, router, failing, agents, buf, 'test-project');
+
+    await expect(engine.execute(simpleWf)).rejects.toThrow('Boom');
+
+    const failed = buf.getRecent(100).find((e) => e.type === 'workflow.step_failed' && e.data.stepId === 'step1');
+    expect(failed).toMatchObject({
+      agentId: 'dev@test-project',
+      projectId: 'test-project',
+    });
+    expect(failed?.data).toMatchObject({
+      agentId: 'dev@test-project',
+      projectId: 'test-project',
+      workflow: 'simple-test',
+      stepId: 'step1',
+      error: 'Boom',
+    });
+  });
+
+  it('emits agent context for each parallel workflow step', async () => {
+    const buf = new EventBuffer(100);
+    const engine = new WorkflowEngine(tracker, router, sessionMgr, agents, buf, 'test-project');
+
+    await engine.execute(parallelWf);
+
+    const started = buf.getRecent(100).filter((e) => e.type === 'workflow.step_started' && e.data.workflow === 'parallel-test' && e.data.stepId);
+    expect(started).toHaveLength(2);
+    expect(started.map((e) => e.agentId).sort()).toEqual(['dev@test-project', 'seo@test-project']);
+    expect(started.map((e) => e.data.stepId).sort()).toEqual(['p1', 'p2']);
   });
 
   it('recoverStaleRuns works', () => {

@@ -122,14 +122,15 @@ function HealthDot() {
 }
 
 function CostBadge() {
-  const { data } = useQuery<{ totalCost?: number; currency?: string }>({
+  const { data } = useQuery<{ cost?: number }[]>({
     queryKey: ['cost-monthly'],
-    queryFn: () => fetchJson('/api/v1/cost/monthly'),
+    queryFn: () => fetchJson('/api/v1/cost/summary'),
     staleTime: 300_000,
   });
 
-  const cost = data?.totalCost != null
-    ? `€${data.totalCost.toFixed(2)}`
+  const totalCost = (data ?? []).reduce((sum, row) => sum + (row.cost ?? 0), 0);
+  const cost = data
+    ? `€${totalCost.toFixed(2)}`
     : '—';
 
   return (

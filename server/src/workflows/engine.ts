@@ -100,17 +100,31 @@ export class WorkflowEngine {
         const failurePolicy = step.onStepFailure ?? def.onStepFailure ?? 'abort';
 
         const stepRows = step.parallel.map((s) => this.tracker.createStep(runId, s.id));
+        const stepContexts: Array<{ agentId?: string; projectId?: string }> = [];
         const results = await Promise.allSettled(step.parallel.map(async (s, i) => {
           this.tracker.startStep(stepRows[i].id);
-          this.emit('workflow.step_started', { runId, stepId: s.id });
           const agentId = await this.resolveAgent(s);
           const agent = this.agents.find((a) => a.id === agentId);
           if (!agent) throw new Error(`Agent "${agentId}" not found`);
+          stepContexts[i] = { agentId: agent.id, projectId: agent.projectId };
+          this.emit('workflow.step_started', {
+            runId,
+            stepId: s.id,
+            workflow: def.name,
+            agentId: agent.id,
+            projectId: agent.projectId,
+          });
           const prompt = this.buildPrompt(s, outputs);
           const result = await this.sessionMgr.dispatch(agent, prompt);
           this.tracker.completeStep(stepRows[i].id, result);
           if (s.output) outputs[s.output] = result;
-          this.emit('workflow.step_completed', { runId, stepId: s.id });
+          this.emit('workflow.step_completed', {
+            runId,
+            stepId: s.id,
+            workflow: def.name,
+            agentId: agent.id,
+            projectId: agent.projectId,
+          });
           return { stepId: s.id, value: result };
         }));
 
@@ -121,7 +135,14 @@ export class WorkflowEngine {
           if (results[i].status === 'rejected') {
             const err = (results[i] as PromiseRejectedResult).reason;
             this.tracker.failStep(stepRows[i].id, err?.message || String(err));
-            this.emit('workflow.step_failed', { runId, stepId: step.parallel[i].id, error: err?.message });
+            this.emit('workflow.step_failed', {
+              runId,
+              stepId: step.parallel[i].id,
+              workflow: def.name,
+              agentId: stepContexts[i]?.agentId,
+              projectId: stepContexts[i]?.projectId,
+              error: err?.message,
+            });
           }
         }
 
@@ -253,21 +274,42 @@ export class WorkflowEngine {
 
       if (!step.prompt) continue;
       const stepRow = this.tracker.createStep(runId, step.id);
+      let stepAgent: ResolvedAgent | undefined;
       try {
         this.tracker.startStep(stepRow.id);
-        this.emit('workflow.step_started', { runId, stepId: step.id });
         const agentId = await this.resolveAgent(step);
         const agent = this.agents.find((a) => a.id === agentId);
         if (!agent) throw new Error(`Agent "${agentId}" not found`);
+        stepAgent = agent;
+        this.emit('workflow.step_started', {
+          runId,
+          stepId: step.id,
+          workflow: def.name,
+          agentId: agent.id,
+          projectId: agent.projectId,
+        });
 
         const prompt = this.buildPrompt(step, outputs);
         const result = await this.sessionMgr.dispatch(agent, prompt);
         this.tracker.completeStep(stepRow.id, result);
         if (step.output) outputs[step.output] = result;
-        this.emit('workflow.step_completed', { runId, stepId: step.id });
+        this.emit('workflow.step_completed', {
+          runId,
+          stepId: step.id,
+          workflow: def.name,
+          agentId: agent.id,
+          projectId: agent.projectId,
+        });
       } catch (err: any) {
         this.tracker.failStep(stepRow.id, err.message);
-        this.emit('workflow.step_failed', { runId, stepId: step.id, error: err.message });
+        this.emit('workflow.step_failed', {
+          runId,
+          stepId: step.id,
+          workflow: def.name,
+          agentId: stepAgent?.id,
+          projectId: stepAgent?.projectId,
+          error: err.message,
+        });
         throw err;
       }
     }

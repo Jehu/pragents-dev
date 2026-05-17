@@ -19,9 +19,25 @@ interface Gate {
   label: string;
   status: string;
   workflowName?: string;
+  workflowRunId?: string;
   stepId?: string;
   description?: string;
   createdAt: string;
+}
+
+interface GateRow {
+  id: string;
+  label: string;
+  status: string;
+  workflowName?: string;
+  workflow_name?: string;
+  workflowRunId?: string;
+  workflow_run_id?: string;
+  stepId?: string;
+  step_id?: string;
+  description?: string;
+  createdAt?: string;
+  created_at?: string;
 }
 
 interface Plan {
@@ -54,8 +70,9 @@ export interface InboxEntry {
 // ─── API helpers ──────────────────────────────────────────────────────────────
 
 async function fetchGates(): Promise<Gate[]> {
-  const data = await fetchJson<{ gates?: Gate[] } | Gate[]>(`${API}/api/v1/gates?status=pending`);
-  return Array.isArray(data) ? data : data.gates ?? [];
+  const data = await fetchJson<{ gates?: GateRow[] } | GateRow[]>(`${API}/api/v1/gates/pending`);
+  const rows = Array.isArray(data) ? data : data.gates ?? [];
+  return rows.map(normalizeGate);
 }
 
 async function fetchPlans(): Promise<Plan[]> {
@@ -73,11 +90,24 @@ async function fetchSkills(): Promise<Skill[]> {
 function gateBody(g: Gate): React.ReactNode {
   return (
     <span>
-      {g.workflowName && <>{g.workflowName} · </>}
+      {(g.workflowName ?? g.workflowRunId) && <>{g.workflowName ?? g.workflowRunId} · </>}
       {g.stepId && <>step {g.stepId}{g.description ? ' · ' : ''}</>}
       {g.description}
     </span>
   );
+}
+
+function normalizeGate(g: GateRow): Gate {
+  return {
+    id: g.id,
+    label: g.label,
+    status: g.status,
+    workflowName: g.workflowName ?? g.workflow_name,
+    workflowRunId: g.workflowRunId ?? g.workflow_run_id,
+    stepId: g.stepId ?? g.step_id,
+    description: g.description,
+    createdAt: g.createdAt ?? g.created_at ?? new Date(0).toISOString(),
+  };
 }
 
 function planBody(p: Plan): React.ReactNode {
