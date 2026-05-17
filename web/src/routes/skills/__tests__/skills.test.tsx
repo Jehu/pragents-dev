@@ -214,11 +214,11 @@ describe('SkillsPage reject modal', () => {
       return { data: { skills: [proposedSkill] }, isLoading: false };
     });
 
-    const { getByText, getAllByText, container } = renderSkills();
+    const { getByText, getAllByText } = renderSkills();
     fireEvent.click(getByText(/Proposed/));
     fireEvent.click(getByText('View body'));
     // pre element should contain the body content
-    const pre = container.querySelector('pre');
+    const pre = document.body.querySelector('pre');
     expect(pre?.textContent).toContain('# Skill body');
     // Skill name appears in both card and modal header
     expect(getAllByText('bad-skill').length).toBeGreaterThanOrEqual(2);

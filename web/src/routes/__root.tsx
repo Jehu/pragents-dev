@@ -7,6 +7,7 @@ import { useCommandPaletteStore } from '../stores/commandPalette.js';
 import { connectSSE, disconnectSSE, isSSEAvailable } from '../hooks/useSSE.js';
 import { KbdHint, Sparkline } from '../components/ui/index.js';
 import { CommandPalette } from '../components/CommandPalette.js';
+import { fetchJson } from '../lib/api.js';
 
 // ---------------------------------------------------------------------------
 // Sidebar navigation structure
@@ -15,6 +16,7 @@ import { CommandPalette } from '../components/CommandPalette.js';
 type NavItem = {
   label: string;
   to: string;
+  short: string;
 };
 
 type NavGroup = {
@@ -26,41 +28,41 @@ const NAV: NavGroup[] = [
   {
     group: 'Workspace',
     items: [
-      { label: 'Overview', to: '/overview' },
-      { label: 'Inbox', to: '/inbox' },
-      { label: 'Projects', to: '/projects' },
-      { label: 'Settings', to: '/settings' },
+      { label: 'Overview', to: '/overview', short: 'Ov' },
+      { label: 'Inbox', to: '/inbox', short: 'In' },
+      { label: 'Projects', to: '/projects', short: 'Pr' },
+      { label: 'Settings', to: '/settings', short: 'Se' },
     ],
   },
   {
     group: 'Run',
     items: [
-      { label: 'Agents', to: '/agents' },
-      { label: 'Tasks', to: '/tasks' },
-      { label: 'Plans', to: '/plans' },
-      { label: 'Workflows', to: '/workflows' },
-      { label: 'Goals', to: '/goals' },
+      { label: 'Agents', to: '/agents', short: 'Ag' },
+      { label: 'Tasks', to: '/tasks', short: 'Ta' },
+      { label: 'Plans', to: '/plans', short: 'Pl' },
+      { label: 'Workflows', to: '/workflows', short: 'Wf' },
+      { label: 'Goals', to: '/goals', short: 'Go' },
     ],
   },
   {
     group: 'Knowledge',
     items: [
-      { label: 'Skills', to: '/skills' },
-      { label: 'Memory', to: '/memory' },
+      { label: 'Skills', to: '/skills', short: 'Sk' },
+      { label: 'Memory', to: '/memory', short: 'Me' },
     ],
   },
   {
     group: 'Observe',
     items: [
-      { label: 'Metrics', to: '/metrics' },
-      { label: 'Costs', to: '/costs' },
-      { label: 'Health', to: '/health' },
-      { label: 'Traces', to: '/traces' },
+      { label: 'Metrics', to: '/metrics', short: 'Mt' },
+      { label: 'Costs', to: '/costs', short: 'Co' },
+      { label: 'Health', to: '/health', short: 'He' },
+      { label: 'Traces', to: '/traces', short: 'Tr' },
     ],
   },
   {
     group: 'Talk',
-    items: [{ label: 'Chat', to: '/chat' }],
+    items: [{ label: 'Chat', to: '/chat', short: 'Ch' }],
   },
 ];
 
@@ -72,7 +74,7 @@ function ProjectPicker() {
   const { selectedProject, setProject } = useScopeStore();
   const { data } = useQuery<{ id: string; name: string }[]>({
     queryKey: ['projects'],
-    queryFn: () => fetch('/api/v1/projects').then((r) => r.json()),
+    queryFn: () => fetchJson('/api/v1/projects'),
     staleTime: 60_000,
   });
 
@@ -100,7 +102,7 @@ function ProjectPicker() {
 function HealthDot() {
   const { data } = useQuery<{ status?: string }>({
     queryKey: ['health'],
-    queryFn: () => fetch('/api/v1/health').then((r) => r.json()),
+    queryFn: () => fetchJson('/api/v1/health'),
     refetchInterval: 30_000,
     staleTime: 20_000,
   });
@@ -122,7 +124,7 @@ function HealthDot() {
 function CostBadge() {
   const { data } = useQuery<{ totalCost?: number; currency?: string }>({
     queryKey: ['cost-monthly'],
-    queryFn: () => fetch('/api/v1/cost/monthly').then((r) => r.json()),
+    queryFn: () => fetchJson('/api/v1/cost/monthly'),
     staleTime: 300_000,
   });
 
@@ -141,7 +143,7 @@ function CostBadge() {
 function InboxBadge() {
   const { data } = useQuery<{ total?: number }>({
     queryKey: ['inbox-count'],
-    queryFn: () => fetch('/api/v1/tasks?status=needs_review&limit=1').then((r) => r.json()),
+    queryFn: () => fetchJson('/api/v1/tasks?status=needs_review&limit=1'),
     refetchInterval: 30_000,
     staleTime: 15_000,
   });
@@ -167,7 +169,7 @@ function InboxBadge() {
 // Sidebar
 // ---------------------------------------------------------------------------
 
-function Sidebar({ collapsed }: { collapsed: boolean }) {
+function Sidebar({ collapsed, mobile = false, onNavigate }: { collapsed: boolean; mobile?: boolean; onNavigate?: () => void }) {
   const routerState = useRouterState();
   const pathname = routerState.location.pathname;
 
@@ -178,12 +180,33 @@ function Sidebar({ collapsed }: { collapsed: boolean }) {
 
   if (collapsed) {
     return (
-      <aside className="w-10 bg-zinc-900/50 border-r border-zinc-800 flex-shrink-0 overflow-y-auto" />
+      <aside className="hidden md:block w-14 bg-zinc-900/50 border-r border-zinc-800 flex-shrink-0 overflow-y-auto">
+        <nav aria-label="Primary navigation" className="py-2">
+          {NAV.flatMap((group) => group.items).map((item) => {
+            const active = isActive(item.to);
+            return (
+              <Link
+                key={item.to}
+                to={item.to}
+                title={item.label}
+                aria-label={item.label}
+                className={`mx-2 mb-1 flex h-8 items-center justify-center rounded text-[11px] font-semibold ${
+                  active
+                    ? 'bg-indigo-500/20 text-indigo-200'
+                    : 'text-zinc-500 hover:bg-zinc-800/60 hover:text-zinc-200'
+                }`}
+              >
+                {item.short}
+              </Link>
+            );
+          })}
+        </nav>
+      </aside>
     );
   }
 
   return (
-    <aside className="w-48 bg-zinc-900/50 border-r border-zinc-800 flex-shrink-0 overflow-y-auto">
+    <aside className={`${mobile ? 'w-64' : 'hidden md:block w-48'} bg-zinc-900/50 border-r border-zinc-800 flex-shrink-0 overflow-y-auto`}>
       <nav aria-label="Primary navigation" className="py-3">
         {NAV.map((group) => (
           <div key={group.group} className="mb-3">
@@ -196,6 +219,7 @@ function Sidebar({ collapsed }: { collapsed: boolean }) {
                 <Link
                   key={item.to}
                   to={item.to}
+                  onClick={onNavigate}
                   className={`flex items-center gap-2 px-3 py-1.5 text-xs border-l-2 cursor-pointer transition-colors ${
                     active
                       ? 'border-indigo-400 bg-indigo-500/20 text-indigo-200'
@@ -246,11 +270,13 @@ function LiveStrip() {
       : 'bg-red-400';
 
   return (
-    <footer className="h-6 bg-zinc-950 border-t border-zinc-800 px-4 flex items-center gap-3 text-[11px] text-zinc-500 flex-shrink-0">
+    <footer className="h-6 bg-zinc-950 border-t border-zinc-800 px-3 sm:px-4 flex items-center gap-2 sm:gap-3 text-[11px] text-zinc-500 flex-shrink-0">
       <span className={`w-1.5 h-1.5 rounded-full ${statusColor}`} />
       <span>{connectionStatus}</span>
       <span className="text-zinc-600">·</span>
-      <Sparkline data={sparkData} color="#6366f1" />
+      <span className="hidden sm:inline-flex">
+        <Sparkline data={sparkData} color="#6366f1" />
+      </span>
       <span>{eventRate.toFixed(1)} ev/s</span>
     </footer>
   );
@@ -262,6 +288,7 @@ function LiveStrip() {
 
 function RootLayout() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const { setOpen: setPaletteOpen } = useCommandPaletteStore();
 
   // Start SSE connection on mount
@@ -288,25 +315,44 @@ function RootLayout() {
     return () => document.removeEventListener('keydown', handler);
   }, [setPaletteOpen]);
 
+  useEffect(() => {
+    if (!mobileNavOpen) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMobileNavOpen(false);
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [mobileNavOpen]);
+
   return (
     <div className="h-screen flex flex-col bg-zinc-950 text-zinc-200 font-sans overflow-hidden">
       {/* Command Palette overlay */}
       <CommandPalette />
 
       {/* Header */}
-      <header role="banner" className="h-12 bg-zinc-900 border-b border-zinc-800 px-4 flex items-center justify-between flex-shrink-0">
-        <div className="flex items-center gap-4">
+      <header role="banner" className="min-h-12 bg-zinc-900 border-b border-zinc-800 px-3 sm:px-4 py-2 flex flex-wrap items-center justify-between gap-2 flex-shrink-0">
+        <div className="flex min-w-0 items-center gap-2 sm:gap-4">
+          <button
+            type="button"
+            onClick={() => setMobileNavOpen(true)}
+            className="md:hidden rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300"
+            aria-label="Open navigation"
+          >
+            Menu
+          </button>
           {/* Logo + sidebar toggle */}
           <button
             onClick={() => setSidebarCollapsed((v) => !v)}
-            className="flex items-center gap-2 hover:opacity-80 transition-opacity"
+            className="hidden md:flex items-center gap-2 hover:opacity-80 transition-opacity"
             title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           >
             <div className="w-5 h-5 rounded bg-gradient-to-br from-indigo-400 to-purple-500" />
             <span className="font-semibold tracking-tight text-sm">pragents</span>
           </button>
 
-          <ProjectPicker />
+          <div className="hidden sm:block">
+            <ProjectPicker />
+          </div>
 
           {/* ⌘K search hint */}
           <button
@@ -314,17 +360,39 @@ function RootLayout() {
             className="flex items-center gap-1.5 px-2 py-1 rounded bg-zinc-800 text-xs text-zinc-500 cursor-pointer hover:bg-zinc-700 transition-colors"
             aria-label="Open command palette (⌘K)"
           >
-            <span>Search…</span>
+            <span className="hidden sm:inline">Search…</span>
             <KbdHint keys={['⌘', 'K']} />
           </button>
         </div>
 
-        <div className="flex items-center gap-4 text-xs">
+        <div className="flex items-center gap-2 sm:gap-4 text-xs">
           <HealthDot />
-          <CostBadge />
+          <div className="hidden md:block">
+            <CostBadge />
+          </div>
           <InboxBadge />
         </div>
       </header>
+
+      {mobileNavOpen && (
+        <div className="fixed inset-0 z-40 md:hidden">
+          <button
+            type="button"
+            aria-label="Close navigation"
+            className="absolute inset-0 bg-black/60"
+            onClick={() => setMobileNavOpen(false)}
+          />
+          <div className="relative h-full w-64 bg-zinc-950 shadow-2xl">
+            <div className="flex h-12 items-center justify-between border-b border-zinc-800 px-3">
+              <span className="font-semibold tracking-tight text-sm">pragents</span>
+              <button className="rounded px-2 py-1 text-xs text-zinc-400 hover:text-zinc-100" onClick={() => setMobileNavOpen(false)}>
+                Close
+              </button>
+            </div>
+            <Sidebar collapsed={false} mobile onNavigate={() => setMobileNavOpen(false)} />
+          </div>
+        </div>
+      )}
 
       {/* Body: sidebar + main outlet */}
       <div className="flex-1 flex overflow-hidden min-h-0">

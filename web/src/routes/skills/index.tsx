@@ -1,8 +1,10 @@
 import { createFileRoute, Link } from '@tanstack/react-router';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { useState, useEffect } from 'react';
-import { EmptyState } from '../../components/ui/index.js';
+import { Button, EmptyState, ErrorState, LoadingState, PageHeader, Tabs } from '../../components/ui/index.js';
+import { Modal } from '../../components/Modal.js';
 import { useEventBusStore } from '../../stores/eventBus.js';
+import { fetchJson, postJson } from '../../lib/api.js';
 
 export const Route = createFileRoute('/skills/')({
   validateSearch: (search: Record<string, unknown>) => ({
@@ -78,9 +80,7 @@ function RejectModal({ skillName, onClose, onConfirm, isLoading }: RejectModalPr
   const [reason, setReason] = useState('');
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/60" onClick={onClose} />
-      <div className="relative bg-zinc-900 border border-zinc-700 rounded-xl p-5 w-full max-w-sm mx-4 shadow-2xl">
+    <Modal open onClose={onClose} ariaLabel="Reject skill" containerClassName="w-full max-w-sm bg-zinc-900 border border-zinc-700 rounded-lg p-5 mx-4 shadow-2xl">
         <h3 className="text-sm font-semibold text-zinc-100 mb-1">Reject skill</h3>
         <p className="text-xs text-zinc-500 mb-3 font-mono">{skillName}</p>
         <textarea
@@ -91,22 +91,18 @@ function RejectModal({ skillName, onClose, onConfirm, isLoading }: RejectModalPr
           className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 placeholder-zinc-600 resize-none focus:outline-none focus:border-zinc-500"
         />
         <div className="flex gap-2 mt-3 justify-end">
-          <button
-            onClick={onClose}
-            className="text-xs px-3 py-1.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300"
-          >
+          <Button variant="secondary" onClick={onClose}>
             Cancel
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="danger"
             onClick={() => onConfirm(reason)}
-            disabled={isLoading}
-            className="text-xs px-3 py-1.5 rounded bg-red-600 hover:bg-red-700 text-white font-medium disabled:opacity-40"
+            loading={isLoading}
           >
-            {isLoading ? 'Rejecting…' : 'Reject'}
-          </button>
+            Reject
+          </Button>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -120,29 +116,26 @@ interface BodyModalProps {
 function BodyModal({ skillName, onClose }: BodyModalProps) {
   const { data, isLoading } = useQuery({
     queryKey: ['skill-body', skillName],
-    queryFn: () => fetch(`/api/v1/skills/${encodeURIComponent(skillName)}`).then((r) => r.json()),
+    queryFn: () => fetchJson<{ body?: string; content?: string }>(`/api/v1/skills/${encodeURIComponent(skillName)}`),
     staleTime: 60_000,
   });
 
   const body: string = data?.body ?? data?.content ?? '';
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/60" onClick={onClose} />
-      <div className="relative bg-zinc-900 border border-zinc-700 rounded-xl p-5 w-full max-w-2xl mx-4 shadow-2xl max-h-[80vh] flex flex-col">
+    <Modal open onClose={onClose} ariaLabel={`Skill body ${skillName}`} containerClassName="w-full max-w-2xl bg-zinc-900 border border-zinc-700 rounded-lg p-5 mx-4 shadow-2xl max-h-[80vh] flex flex-col">
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-sm font-semibold text-zinc-100 font-mono">{skillName}</h3>
           <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300 text-lg leading-none">×</button>
         </div>
         <div className="overflow-y-auto flex-1">
           {isLoading ? (
-            <div className="text-xs text-zinc-500 py-4 text-center">Loading…</div>
+            <LoadingState label="Loading skill body" />
           ) : (
             <pre className="text-sm whitespace-pre-wrap text-zinc-300 font-mono">{body || '(empty)'}</pre>
           )}
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -306,13 +299,13 @@ function SkillsPage() {
     }
   }, [busEvents, queryClient]);
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['skills'],
-    queryFn: () => fetch('/api/v1/skills').then((r) => r.json()),
+    queryFn: () => fetchJson<{ skills?: Skill[] } | Skill[]>('/api/v1/skills'),
     staleTime: 15_000,
   });
 
-  const rawSkills: Skill[] = Array.isArray(data?.skills)
+  const rawSkills: Skill[] = !Array.isArray(data) && Array.isArray(data?.skills)
     ? data.skills
     : Array.isArray(data)
     ? data
@@ -323,7 +316,7 @@ function SkillsPage() {
 
   const approveMutation = useMutation({
     mutationFn: (name: string) =>
-      fetch(`/api/v1/skills/${encodeURIComponent(name)}/approve`, { method: 'POST' }),
+      postJson(`/api/v1/skills/${encodeURIComponent(name)}/approve`),
     onMutate: (name) => {
       setOptimisticApproved((prev) => new Set([...prev, name]));
     },
@@ -341,8 +334,7 @@ function SkillsPage() {
 
   const rejectMutation = useMutation({
     mutationFn: ({ name, reason }: { name: string; reason?: string }) =>
-      fetch(`/api/v1/skills/${encodeURIComponent(name)}/reject`, {
-        method: 'POST',
+      postJson(`/api/v1/skills/${encodeURIComponent(name)}/reject`, {
         headers: reason ? { 'Content-Type': 'application/json' } : {},
         body: reason ? JSON.stringify({ reason }) : undefined,
       }),
@@ -382,44 +374,38 @@ function SkillsPage() {
   return (
     <div className="p-6 max-w-4xl mx-auto">
       <div className="mb-6">
-        <h1 className="text-xl font-semibold tracking-tight text-zinc-100">Skills</h1>
-        <p className="text-sm text-zinc-500 mt-1">Skill library and proposal review.</p>
+        <PageHeader title="Skills" description="Skill library and proposal review." />
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 mb-6 border-b border-zinc-800 pb-0">
-        {tabs.map((tab) => (
-          <button
-            key={tab}
-            onClick={() => setActiveTab(tab)}
-            className={`px-3 py-2 text-sm font-medium rounded-t border-b-2 -mb-px transition-colors ${
-              activeTab === tab
-                ? 'border-zinc-300 text-zinc-100'
-                : 'border-transparent text-zinc-500 hover:text-zinc-300'
-            }`}
-          >
-            {tab.charAt(0).toUpperCase() + tab.slice(1)}
-            <span className={`ml-1.5 text-[11px] ${activeTab === tab ? 'text-zinc-400' : 'text-zinc-600'}`}>
-              {tabCounts[tab]}
-            </span>
-          </button>
-        ))}
+      <div className="mb-6">
+        <Tabs
+          value={activeTab}
+          onChange={setActiveTab}
+          tabs={tabs.map((tab) => ({
+            value: tab,
+            label: tab.charAt(0).toUpperCase() + tab.slice(1),
+            count: tabCounts[tab],
+          }))}
+        />
       </div>
 
-      {isLoading ? (
-        <div className="text-xs text-zinc-500 py-12 text-center">Loading…</div>
+      {error ? (
+        <ErrorState title="Skills failed to load" error={error} onRetry={() => void refetch()} />
+      ) : isLoading ? (
+        <LoadingState label="Loading skills" />
       ) : (
         <div className="space-y-2">
           {filtered.length === 0 ? (
             activeTab === 'proposed' ? (
               <EmptyState
-                icon="🔬"
+                icon="Skills"
                 title="No proposed skills"
                 description="No proposed skills — auto-extraction runs when agents complete tasks."
               />
             ) : (
               <EmptyState
-                icon="📚"
+                icon="Skills"
                 title={`No ${activeTab} skills`}
                 description={`No ${activeTab} skills found.`}
               />

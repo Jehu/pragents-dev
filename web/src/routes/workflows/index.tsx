@@ -3,9 +3,10 @@ import { useQuery, useQueries, useQueryClient, useMutation } from '@tanstack/rea
 import { useState, useEffect } from 'react';
 import * as YAML from 'yaml';
 import { Modal } from '../../components/Modal.js';
-import { StatusPill, EmptyState } from '../../components/ui/index.js';
+import { Button, StatusPill, EmptyState, ErrorState, LoadingState, PageHeader, Panel } from '../../components/ui/index.js';
 import type { StatusType } from '../../components/ui/index.js';
 import { useEventBusStore } from '../../stores/eventBus.js';
+import { fetchJson, postJson } from '../../lib/api.js';
 
 export const Route = createFileRoute('/workflows/')({
   component: WorkflowsPage,
@@ -111,13 +112,9 @@ interface ProjectWorkflowFile {
 }
 
 function ProjectWorkflowsSection() {
-  const { data: projects, isLoading } = useQuery<ProjectSummary[]>({
+  const { data: projects, isLoading, error, refetch } = useQuery<ProjectSummary[]>({
     queryKey: ['projects'],
-    queryFn: async () => {
-      const res = await fetch('/api/v1/projects');
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return (await res.json()) as ProjectSummary[];
-    },
+    queryFn: () => fetchJson<ProjectSummary[]>('/api/v1/projects'),
     staleTime: 30_000,
   });
 
@@ -125,23 +122,24 @@ function ProjectWorkflowsSection() {
     queries: (projects ?? []).map((p) => ({
       queryKey: ['workflows', p.id],
       queryFn: async () => {
-        const res = await fetch(
+        return fetchJson<ProjectWorkflowFile[]>(
           `/api/v1/projects/${encodeURIComponent(p.id)}/workflows`,
         );
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return (await res.json()) as ProjectWorkflowFile[];
       },
       staleTime: 15_000,
     })),
   });
 
   if (isLoading) {
-    return <div className="text-xs text-zinc-500 py-6 text-center">Loading…</div>;
+    return <LoadingState label="Loading project workflows" />;
+  }
+  if (error) {
+    return <ErrorState title="Project workflows failed to load" error={error} onRetry={() => void refetch()} />;
   }
   if (!projects || projects.length === 0) {
     return (
       <EmptyState
-        icon="📁"
+        icon="Projects"
         title="No projects"
         description="Create a project to author project-scoped workflows."
       />
@@ -158,7 +156,7 @@ function ProjectWorkflowsSection() {
             key={p.id}
             to="/projects/$projectId/workflows"
             params={{ projectId: p.id }}
-            className="bg-zinc-900 border border-zinc-800 hover:border-zinc-700 rounded-lg p-3.5 no-underline block"
+            className="block rounded-lg border border-zinc-800 bg-zinc-900 p-3.5 no-underline hover:border-zinc-700"
           >
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
@@ -170,7 +168,9 @@ function ProjectWorkflowsSection() {
                 </p>
               </div>
               <span className="text-[11px] text-zinc-500 flex-shrink-0">
-                {q?.isLoading
+                {q?.error
+                  ? 'load failed'
+                  : q?.isLoading
                   ? '…'
                   : files.length === 0
                   ? 'no files'
@@ -187,7 +187,7 @@ function ProjectWorkflowsSection() {
 
 // ─── Workflow Def Cards ───────────────────────────────────────────────────────
 
-function WorkflowDefCard({ wf, latestRun }: { wf: WorkflowDef; latestRun?: WorkflowRun }) {
+function WorkflowDefCard({ wf, latestRun, selected, onSelect }: { wf: WorkflowDef; latestRun?: WorkflowRun; selected: boolean; onSelect: () => void }) {
   const stepCount = wf.stepCount ?? (Array.isArray(wf.steps) ? wf.steps.length : 0);
   const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
@@ -199,23 +199,16 @@ function WorkflowDefCard({ wf, latestRun }: { wf: WorkflowDef; latestRun?: Workf
   const viewQuery = useQuery({
     queryKey: ['workflow-def', wf.name],
     enabled: viewing,
-    queryFn: async () => {
-      const res = await fetch(`/api/v1/workflows/${encodeURIComponent(wf.name)}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return res.json();
-    },
+    queryFn: () => fetchJson(`/api/v1/workflows/${encodeURIComponent(wf.name)}`),
     staleTime: 60_000,
   });
 
   const runMutation = useMutation({
     mutationFn: async () => {
-      const res = await fetch(`/api/v1/workflows/${encodeURIComponent(wf.name)}/run`, {
-        method: 'POST',
+      return postJson(`/api/v1/workflows/${encodeURIComponent(wf.name)}/run`, {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({}),
       });
-      if (!res.ok) throw new Error((await res.text()) || `HTTP ${res.status}`);
-      return res.json();
     },
     onSuccess: () => {
       setError(null);
@@ -229,7 +222,7 @@ function WorkflowDefCard({ wf, latestRun }: { wf: WorkflowDef; latestRun?: Workf
     : null;
 
   return (
-    <div className="bg-zinc-900 border border-zinc-800 hover:border-zinc-700 rounded-lg p-3.5">
+    <Panel className={`p-3.5 hover:border-zinc-700 ${selected ? 'border-indigo-500/60' : ''}`}>
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
@@ -280,22 +273,25 @@ function WorkflowDefCard({ wf, latestRun }: { wf: WorkflowDef; latestRun?: Workf
           )}
         </div>
         <div className="flex flex-col gap-1.5 flex-shrink-0">
-          <button
+          <Button
+            variant="primary"
             type="button"
             onClick={() => runMutation.mutate()}
-            disabled={runMutation.isPending}
-            className="text-xs px-2.5 py-1 rounded bg-indigo-500/20 text-indigo-300 hover:bg-indigo-500/30 disabled:opacity-50 disabled:cursor-not-allowed border border-indigo-500/30"
+            loading={runMutation.isPending}
           >
-            {runMutation.isPending ? 'Starting…' : '▶ Run'}
-          </button>
+            Run
+          </Button>
+          <Button variant="ghost" type="button" onClick={onSelect}>
+            {selected ? 'Selected' : 'Runs'}
+          </Button>
           {!editorHref && (
-            <button
+            <Button
+              variant="secondary"
               type="button"
               onClick={() => setViewing(true)}
-              className="text-xs px-2.5 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700"
             >
               View YAML
-            </button>
+            </Button>
           )}
         </div>
       </div>
@@ -329,17 +325,17 @@ function WorkflowDefCard({ wf, latestRun }: { wf: WorkflowDef; latestRun?: Workf
             )}
           </div>
           <div className="border-t border-zinc-800 px-5 py-3 flex justify-end">
-            <button
+            <Button
+              variant="secondary"
               type="button"
               onClick={() => setViewing(false)}
-              className="text-xs px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300"
             >
               Close
-            </button>
+            </Button>
           </div>
         </Modal>
       )}
-    </div>
+    </Panel>
   );
 }
 
@@ -479,6 +475,7 @@ function RunRow({ run }: { run: WorkflowRun }) {
 
 export function WorkflowsPage() {
   const queryClient = useQueryClient();
+  const [selectedWorkflow, setSelectedWorkflow] = useState<string | null>(null);
 
   const busEvents = useEventBusStore((s) => s.events);
   useEffect(() => {
@@ -488,26 +485,26 @@ export function WorkflowsPage() {
     }
   }, [busEvents, queryClient]);
 
-  const { data: wfData, isLoading: wfLoading } = useQuery({
+  const { data: wfData, isLoading: wfLoading, error: wfError, refetch: refetchWorkflows } = useQuery({
     queryKey: ['workflows'],
-    queryFn: () => fetch('/api/v1/workflows').then((r) => r.json()),
+    queryFn: () => fetchJson<{ workflows?: WorkflowDef[] } | WorkflowDef[]>('/api/v1/workflows'),
     staleTime: 30_000,
   });
 
-  const { data: runsData, isLoading: runsLoading } = useQuery({
+  const { data: runsData, isLoading: runsLoading, error: runsError, refetch: refetchRuns } = useQuery({
     queryKey: ['workflow-runs'],
-    queryFn: () => fetch('/api/v1/workflows/runs?includeSteps=true').then((r) => r.json()),
+    queryFn: () => fetchJson<{ runs?: WorkflowRun[] } | WorkflowRun[]>('/api/v1/workflows/runs?includeSteps=true'),
     staleTime: 10_000,
     refetchInterval: 15_000,
   });
 
-  const workflows: WorkflowDef[] = Array.isArray(wfData?.workflows)
+  const workflows: WorkflowDef[] = !Array.isArray(wfData) && Array.isArray(wfData?.workflows)
     ? wfData.workflows
     : Array.isArray(wfData)
     ? wfData
     : [];
 
-  const runs: WorkflowRun[] = Array.isArray(runsData?.runs)
+  const runs: WorkflowRun[] = !Array.isArray(runsData) && Array.isArray(runsData?.runs)
     ? runsData.runs
     : Array.isArray(runsData)
     ? runsData
@@ -521,17 +518,19 @@ export function WorkflowsPage() {
     return acc;
   }, {});
 
+  const shownRuns = selectedWorkflow ? runs.filter((run) => run.workflowName === selectedWorkflow) : runs;
+
   return (
     <div className="p-6 max-w-4xl mx-auto space-y-8">
-      <div>
-        <h1 className="text-xl font-semibold tracking-tight text-zinc-100">Workflows</h1>
-        <p className="text-sm text-zinc-500 mt-1">Configured workflows and run history.</p>
-      </div>
+      <PageHeader
+        title="Workflows"
+        description="Project workflow files are editable from projects; repo workflow registry entries are read-only here."
+      />
 
       {/* Project-scoped workflows: discovery entry into per-project CRUD/editor */}
       <section>
         <h2 className="text-sm font-semibold text-zinc-400 uppercase tracking-wider mb-3">
-          Workflows by Project
+          Project workflow files
         </h2>
         <ProjectWorkflowsSection />
       </section>
@@ -539,15 +538,17 @@ export function WorkflowsPage() {
       {/* Workflow definitions */}
       <section>
         <h2 className="text-sm font-semibold text-zinc-400 uppercase tracking-wider mb-3">
-          Available Workflows
+          Repo workflow registry
         </h2>
-        {wfLoading ? (
-          <div className="text-xs text-zinc-500 py-6 text-center">Loading…</div>
+        {wfError ? (
+          <ErrorState title="Workflows failed to load" error={wfError} onRetry={() => void refetchWorkflows()} />
+        ) : wfLoading ? (
+          <LoadingState label="Loading workflows" />
         ) : workflows.length === 0 ? (
           <EmptyState
-            icon="⚙️"
+            icon="Workflows"
             title="No workflows"
-            description="No workflows configured. Add workflows to pragents.yaml."
+            description="No repo workflows found. Add workflow YAML files under workflows/."
           />
         ) : (
           <div className="grid gap-2 grid-cols-1 sm:grid-cols-2">
@@ -556,6 +557,8 @@ export function WorkflowsPage() {
                 key={wf.name}
                 wf={wf}
                 latestRun={latestRunByName[wf.name]}
+                selected={selectedWorkflow === wf.name}
+                onSelect={() => setSelectedWorkflow((current) => current === wf.name ? null : wf.name)}
               />
             ))}
           </div>
@@ -566,23 +569,36 @@ export function WorkflowsPage() {
       <section>
         <h2 className="text-sm font-semibold text-zinc-400 uppercase tracking-wider mb-3">
           Recent Runs
-          <span className="ml-2 text-zinc-600 font-normal normal-case">({runs.length})</span>
+          <span className="ml-2 text-zinc-600 font-normal normal-case">
+            ({shownRuns.length}{selectedWorkflow ? ` for ${selectedWorkflow}` : ''})
+          </span>
+          {selectedWorkflow && (
+            <button
+              type="button"
+              onClick={() => setSelectedWorkflow(null)}
+              className="ml-3 text-xs normal-case text-zinc-500 hover:text-zinc-300"
+            >
+              Clear filter
+            </button>
+          )}
         </h2>
 
-        {runsLoading ? (
-          <div className="text-xs text-zinc-500 py-6 text-center">Loading…</div>
-        ) : runs.length === 0 ? (
+        {runsError ? (
+          <ErrorState title="Workflow runs failed to load" error={runsError} onRetry={() => void refetchRuns()} />
+        ) : runsLoading ? (
+          <LoadingState label="Loading workflow runs" />
+        ) : shownRuns.length === 0 ? (
           <EmptyState
-            icon="▶️"
+            icon="Runs"
             title="No runs yet"
-            description="Run a workflow to see history here."
+            description={selectedWorkflow ? 'No runs recorded for the selected workflow.' : 'Run a workflow to see history here.'}
           />
         ) : (
-          <div className="space-y-2">
-            {runs.map((run) => (
+          <Panel className="space-y-2 border-0 bg-transparent">
+            {shownRuns.map((run) => (
               <RunRow key={run.id} run={run} />
             ))}
-          </div>
+          </Panel>
         )}
       </section>
     </div>

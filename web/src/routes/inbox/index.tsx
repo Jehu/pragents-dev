@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createFileRoute } from '@tanstack/react-router';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
-import { ApprovalCard, EmptyState, KbdHint } from '../../components/ui/index.js';
+import { Modal } from '../../components/Modal.js';
+import { ApprovalCard, Button, EmptyState, ErrorState, KbdHint, LoadingState } from '../../components/ui/index.js';
 import { useEventBusStore } from '../../stores/eventBus.js';
+import { fetchJson, postJson } from '../../lib/api.js';
 
 export const Route = createFileRoute('/inbox/')({
   component: InboxPage,
@@ -52,24 +54,18 @@ export interface InboxEntry {
 // ─── API helpers ──────────────────────────────────────────────────────────────
 
 async function fetchGates(): Promise<Gate[]> {
-  const res = await fetch(`${API}/api/v1/gates?status=pending`);
-  if (!res.ok) return [];
-  const data = await res.json();
-  return data.gates ?? data ?? [];
+  const data = await fetchJson<{ gates?: Gate[] } | Gate[]>(`${API}/api/v1/gates?status=pending`);
+  return Array.isArray(data) ? data : data.gates ?? [];
 }
 
 async function fetchPlans(): Promise<Plan[]> {
-  const res = await fetch(`${API}/api/v1/plans?status=draft`);
-  if (!res.ok) return [];
-  const data = await res.json();
-  return data.plans ?? data ?? [];
+  const data = await fetchJson<{ plans?: Plan[] } | Plan[]>(`${API}/api/v1/plans?status=draft`);
+  return Array.isArray(data) ? data : data.plans ?? [];
 }
 
 async function fetchSkills(): Promise<Skill[]> {
-  const res = await fetch(`${API}/api/v1/skills?status=proposed`);
-  if (!res.ok) return [];
-  const data = await res.json();
-  return data.skills ?? data ?? [];
+  const data = await fetchJson<{ skills?: Skill[] } | Skill[]>(`${API}/api/v1/skills?status=proposed`);
+  return Array.isArray(data) ? data : data.skills ?? [];
 }
 
 // ─── Body renderers ───────────────────────────────────────────────────────────
@@ -119,12 +115,10 @@ function RevisionModal({ gateId, onClose }: RevisionModalProps) {
 
   const mutation = useMutation({
     mutationFn: async (text: string) => {
-      const res = await fetch(`${API}/api/v1/gates/${gateId}/revision`, {
-        method: 'POST',
+      await postJson(`${API}/api/v1/gates/${gateId}/revision`, {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ feedback: text }),
       });
-      if (!res.ok) throw new Error('Revision failed');
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['inbox'] });
@@ -133,12 +127,13 @@ function RevisionModal({ gateId, onClose }: RevisionModalProps) {
   });
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
-      data-testid="revision-modal"
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    <Modal
+      open
+      onClose={onClose}
+      ariaLabel="Request revision"
+      containerClassName="w-full max-w-md bg-zinc-900 border border-zinc-700 rounded-lg shadow-2xl overflow-hidden mx-4"
     >
-      <div className="bg-zinc-900 border border-zinc-700 rounded-lg p-5 w-full max-w-md shadow-2xl">
+      <div className="p-5" data-testid="revision-modal">
         <h3 className="text-sm font-semibold text-zinc-100 mb-3">Request revision</h3>
         <textarea
           className="w-full bg-zinc-800 border border-zinc-700 rounded text-xs text-zinc-200 p-2.5 resize-none focus:outline-none focus:border-indigo-400"
@@ -149,24 +144,27 @@ function RevisionModal({ gateId, onClose }: RevisionModalProps) {
           data-testid="revision-textarea"
           autoFocus
         />
+        {mutation.error && (
+          <p className="mt-2 text-xs text-red-400" role="alert">
+            {mutation.error instanceof Error ? mutation.error.message : 'Revision failed'}
+          </p>
+        )}
         <div className="flex justify-end gap-2 mt-3">
-          <button
-            className="text-xs px-3 py-1.5 rounded bg-zinc-800 hover:bg-zinc-700"
-            onClick={onClose}
-          >
+          <Button variant="secondary" onClick={onClose}>
             Cancel
-          </button>
-          <button
-            className="btn-approve text-xs px-3 py-1.5 rounded font-medium disabled:opacity-40"
-            disabled={!feedback.trim() || mutation.isPending}
+          </Button>
+          <Button
+            variant="approve"
+            disabled={!feedback.trim()}
+            loading={mutation.isPending}
             onClick={() => mutation.mutate(feedback.trim())}
             data-testid="revision-send"
           >
             Send
-          </button>
+          </Button>
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -174,12 +172,13 @@ function RevisionModal({ gateId, onClose }: RevisionModalProps) {
 
 function HelpModal({ onClose }: { onClose: () => void }) {
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
-      data-testid="help-modal"
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    <Modal
+      open
+      onClose={onClose}
+      ariaLabel="Keyboard shortcuts"
+      containerClassName="w-full max-w-sm bg-zinc-900 border border-zinc-700 rounded-lg shadow-2xl overflow-hidden mx-4"
     >
-      <div className="bg-zinc-900 border border-zinc-700 rounded-lg p-5 w-full max-w-sm shadow-2xl">
+      <div className="p-5" data-testid="help-modal">
         <h3 className="text-sm font-semibold text-zinc-100 mb-4">Keyboard shortcuts</h3>
         <table className="w-full text-xs text-zinc-300 border-separate border-spacing-y-1.5">
           <tbody>
@@ -206,15 +205,12 @@ function HelpModal({ onClose }: { onClose: () => void }) {
           </tbody>
         </table>
         <div className="mt-4 flex justify-end">
-          <button
-            className="text-xs px-3 py-1.5 rounded bg-zinc-800 hover:bg-zinc-700"
-            onClick={onClose}
-          >
+          <Button variant="secondary" onClick={onClose}>
             Close
-          </button>
+          </Button>
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -223,23 +219,34 @@ function HelpModal({ onClose }: { onClose: () => void }) {
 function InboxPage() {
   const queryClient = useQueryClient();
 
-  const { data: gates = [] } = useQuery<Gate[]>({
+  const gatesQuery = useQuery<Gate[]>({
     queryKey: ['inbox-gates'],
     queryFn: fetchGates,
     staleTime: 15_000,
   });
 
-  const { data: plans = [] } = useQuery<Plan[]>({
+  const plansQuery = useQuery<Plan[]>({
     queryKey: ['inbox-plans'],
     queryFn: fetchPlans,
     staleTime: 15_000,
   });
 
-  const { data: skills = [] } = useQuery<Skill[]>({
+  const skillsQuery = useQuery<Skill[]>({
     queryKey: ['inbox-skills'],
     queryFn: fetchSkills,
     staleTime: 15_000,
   });
+
+  const gates = gatesQuery.data ?? [];
+  const plans = plansQuery.data ?? [];
+  const skills = skillsQuery.data ?? [];
+  const loadError = gatesQuery.error ?? plansQuery.error ?? skillsQuery.error;
+  const isLoading = gatesQuery.isLoading || plansQuery.isLoading || skillsQuery.isLoading;
+  const retry = () => {
+    void gatesQuery.refetch();
+    void plansQuery.refetch();
+    void skillsQuery.refetch();
+  };
 
   // SSE: invalidate on relevant events
   const events = useEventBusStore((s) => s.events);
@@ -304,6 +311,7 @@ function InboxPage() {
   // Optimistic state: track removed keys
   const [removedKeys, setRemovedKeys] = useState<Set<string>>(new Set());
   const [savedForRollback, setSavedForRollback] = useState<Map<string, InboxEntry>>(new Map());
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const visibleEntries = tabEntries.filter((e) => !removedKeys.has(e.key));
 
@@ -313,25 +321,27 @@ function InboxPage() {
     mutationFn: async (entry: InboxEntry) => {
       if (entry._kind === 'gate') {
         const g = entry.raw as Gate;
-        await fetch(`${API}/api/v1/gates/${g.id}/approve`, { method: 'POST' });
+        await postJson(`${API}/api/v1/gates/${g.id}/approve`);
       } else if (entry._kind === 'plan') {
         const p = entry.raw as Plan;
-        await fetch(`${API}/api/v1/plans/${p.id}/approve`, { method: 'POST' });
+        await postJson(`${API}/api/v1/plans/${p.id}/approve`);
       } else {
         const s = entry.raw as Skill;
-        await fetch(`${API}/api/v1/skills/${s.name}/approve`, { method: 'POST' });
+        await postJson(`${API}/api/v1/skills/${s.name}/approve`);
       }
     },
     onMutate: (entry) => {
+      setActionError(null);
       setRemovedKeys((prev) => new Set([...prev, entry.key]));
       setSavedForRollback((prev) => new Map([...prev, [entry.key, entry]]));
     },
-    onError: (_err, entry) => {
+    onError: (err, entry) => {
       setRemovedKeys((prev) => {
         const next = new Set(prev);
         next.delete(entry.key);
         return next;
       });
+      setActionError(err instanceof Error ? err.message : 'Approval failed');
     },
     onSuccess: (_data, _entry) => {
       void queryClient.invalidateQueries({ queryKey: ['inbox-gates'] });
@@ -344,25 +354,27 @@ function InboxPage() {
     mutationFn: async (entry: InboxEntry) => {
       if (entry._kind === 'gate') {
         const g = entry.raw as Gate;
-        await fetch(`${API}/api/v1/gates/${g.id}/reject`, { method: 'POST' });
+        await postJson(`${API}/api/v1/gates/${g.id}/reject`);
       } else if (entry._kind === 'plan') {
         const p = entry.raw as Plan;
-        await fetch(`${API}/api/v1/plans/${p.id}/cancel`, { method: 'POST' });
+        await postJson(`${API}/api/v1/plans/${p.id}/cancel`);
       } else {
         const s = entry.raw as Skill;
-        await fetch(`${API}/api/v1/skills/${s.name}/reject`, { method: 'POST' });
+        await postJson(`${API}/api/v1/skills/${s.name}/reject`);
       }
     },
     onMutate: (entry) => {
+      setActionError(null);
       setRemovedKeys((prev) => new Set([...prev, entry.key]));
       setSavedForRollback((prev) => new Map([...prev, [entry.key, entry]]));
     },
-    onError: (_err, entry) => {
+    onError: (err, entry) => {
       setRemovedKeys((prev) => {
         const next = new Set(prev);
         next.delete(entry.key);
         return next;
       });
+      setActionError(err instanceof Error ? err.message : 'Rejection failed');
     },
     onSuccess: (_data, _entry) => {
       void queryClient.invalidateQueries({ queryKey: ['inbox-gates'] });
@@ -472,9 +484,20 @@ function InboxPage() {
       </div>
 
       {/* List */}
+      {loadError ? (
+        <ErrorState title="Inbox failed to load" error={loadError} onRetry={retry} />
+      ) : isLoading ? (
+        <LoadingState label="Loading inbox" />
+      ) : (
+        <>
+      {actionError && (
+        <div className="mb-3">
+          <ErrorState title="Action failed" error={actionError} />
+        </div>
+      )}
       {visibleEntries.length === 0 ? (
         <EmptyState
-          icon="✓"
+          icon="Clear"
           title="All clear"
           description="No pending gates, draft plans, or proposed skills."
         />
@@ -507,6 +530,8 @@ function InboxPage() {
             );
           })}
         </div>
+      )}
+        </>
       )}
 
       {/* Modals */}

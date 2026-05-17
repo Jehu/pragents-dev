@@ -167,12 +167,11 @@ describe('fetchInboxItems', () => {
     expect(items.length).toBe(3);
   });
 
-  it('returns empty array when all fetches fail', async () => {
+  it('throws when inbox fetches fail instead of hiding failure as empty', async () => {
     vi.stubGlobal('fetch', vi.fn(() =>
-      Promise.resolve({ ok: false, json: () => Promise.resolve({}) }),
+      Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({ error: 'boom' }) }),
     ));
-    const items = await fetchInboxItems();
-    expect(items).toHaveLength(0);
+    await expect(fetchInboxItems()).rejects.toThrow('boom');
   });
 
   it('handles response without wrapper key (array response)', async () => {
