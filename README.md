@@ -154,6 +154,67 @@ server: {
 },
 ```
 
+## Goals
+
+Goals define recurring managed outcomes, not just cron jobs. A goal says what result should exist on a cadence, which workflow pursues it, how success is evaluated, and when a PM escalation is needed.
+
+Goal files live in `goals/*.yaml` and are hot-reloaded alongside workflows:
+
+```yaml
+id: weekly-article
+description: "1 well-researched blog article per week"
+cadence: "0 8 * * 1"      # trigger every Monday at 08:00
+deadline: "0 16 * * 5"    # expected done by Friday at 16:00
+workflow: content-pipeline
+acceptance:
+  - article is published
+  - min 1500 words
+  - at least 3 cited sources
+  - matches customer styleguide
+  - SEO keyword integrated
+human_gates:
+  - step: after_draft
+    label: Review article draft
+    timeout: 4h
+  - step: before_publish
+    label: Final approval
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `id` | yes | Stable goal identifier. |
+| `description` | yes | Human-readable outcome description. |
+| `cadence` | yes | Cron expression for when the goal cycle starts. |
+| `deadline` | no | Cron expression used to compute when a run should be complete. |
+| `workflow` | yes | Workflow name from `workflows/*.yaml` that executes the goal. |
+| `acceptance` | no | Checklist describing what counts as done. Exposed to agents, API, and UI. |
+| `human_gates` | no | Expected review checkpoints for the outcome. The workflow still owns the executable gate steps. |
+
+Lifecycle:
+
+1. The scheduler triggers the goal on `cadence` and creates a `goal_runs` row.
+2. The linked workflow starts asynchronously and the goal run becomes `running`.
+3. Workflow completion/failure events mark the goal run `complete` or `failed`.
+4. The PM monitor checks active runs every 5 minutes and escalates overdue runs to the PM agent.
+
+This is the key distinction:
+
+- **Cron** answers "when should something start?"
+- **Workflow** answers "which steps execute the work?"
+- **Goal** answers "what recurring outcome are we responsible for, what counts as done, and what happens if it stalls?"
+
+Use the API to inspect goals and history:
+
+```bash
+curl -H "Authorization: Bearer $PRAGENTS_API_TOKEN" \
+  http://localhost:3000/api/v1/goals
+
+curl -H "Authorization: Bearer $PRAGENTS_API_TOKEN" \
+  http://localhost:3000/api/v1/goals/runs
+```
+
+The web dashboard's Goals view shows each goal's cadence, next trigger, deadline, acceptance criteria, human gates, and recent run history.
+
 ## Skills
 
 PrAgents uses the [Agent Skills standard](https://agentskills.io/specification) — the same format pi and other coding agents understand. Each skill is a directory with a `SKILL.md` file at its root.
@@ -398,4 +459,3 @@ Returns four objective KPIs aggregated from `events`, `tasks`, `goal_runs`, and 
 | `tokensPerCompletedTask` | Average `tokens_in + tokens_out` per completed task |
 
 Metrics that can't be computed (missing data, no linkable events) return `null` and a reason string in the `notes` object — never zero, so dashboards can distinguish "no data" from "actually zero."
-
