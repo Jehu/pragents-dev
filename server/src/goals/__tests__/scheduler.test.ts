@@ -392,7 +392,7 @@ describe('GoalScheduler runGoalById', () => {
     const { scheduler } = mkScheduler();
     const { goalRunId, workflowRunId } = await scheduler.runGoalById('g1');
 
-    scheduler.onEvent({ type: 'workflow.completed', runId: workflowRunId });
+    scheduler.onEvent({ type: 'workflow.completed', data: { runId: workflowRunId } });
 
     const row = getDb().prepare('SELECT status, completed_at FROM goal_runs WHERE id = ?').get(goalRunId) as {
       status: string;
@@ -407,7 +407,7 @@ describe('GoalScheduler runGoalById', () => {
     const { scheduler } = mkScheduler();
     const { goalRunId, workflowRunId } = await scheduler.runGoalById('g1');
 
-    scheduler.onEvent({ type: 'workflow.failed', runId: workflowRunId });
+    scheduler.onEvent({ type: 'workflow.failed', data: { runId: workflowRunId } });
 
     const row = getDb().prepare('SELECT status, completed_at FROM goal_runs WHERE id = ?').get(goalRunId) as {
       status: string;

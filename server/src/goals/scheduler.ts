@@ -69,8 +69,11 @@ export class GoalScheduler {
 
   /** Called by the orchestrator on every event — used to clean up completed goal runs. */
   onEvent(evt: any): void {
-    if ((evt.type === 'workflow.completed' || evt.type === 'workflow.failed') && evt.runId) {
-      const info = this.activeGoalRuns.get(evt.runId);
+    if (evt.type === 'workflow.completed' || evt.type === 'workflow.failed') {
+      const runId = evt.data?.runId ?? evt.runId;
+      if (!runId) return;
+
+      const info = this.activeGoalRuns.get(runId);
       if (info) {
         const status = evt.type === 'workflow.completed' ? 'complete' : 'failed';
         getDb().prepare('UPDATE goal_runs SET status = ?, completed_at = ? WHERE id = ?')
@@ -78,10 +81,10 @@ export class GoalScheduler {
         this.emitGoalEvent(status === 'complete' ? 'goal.completed' : 'goal.failed', {
           goalId: info.goalId,
           goalRunId: info.goalRunId,
-          workflowRunId: evt.runId,
+          workflowRunId: runId,
         });
       }
-      this.activeGoalRuns.delete(evt.runId);
+      this.activeGoalRuns.delete(runId);
     }
   }
 
