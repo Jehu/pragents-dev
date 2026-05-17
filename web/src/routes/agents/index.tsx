@@ -1,8 +1,9 @@
 import { createFileRoute, useNavigate, Link } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
 import { useEffect } from 'react';
-import { MasterDetail, StatusPill, EmptyState } from '../../components/ui/index.js';
+import { MasterDetail, StatusPill, EmptyState, ErrorState, LoadingState } from '../../components/ui/index.js';
 import type { StatusType } from '../../components/ui/index.js';
+import { fetchJson } from '../../lib/api.js';
 
 export const Route = createFileRoute('/agents/')({
   component: AgentsPage,
@@ -41,7 +42,7 @@ function AgentSidebar({ agents }: { agents: AgentSummary[] }) {
   if (agents.length === 0) {
     return (
       <EmptyState
-        icon="🤖"
+        icon="Agents"
         title="No agents"
         description="No agents are configured."
       />
@@ -86,9 +87,9 @@ function AgentSidebar({ agents }: { agents: AgentSummary[] }) {
 function AgentsPage() {
   const navigate = useNavigate();
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['agents'],
-    queryFn: () => fetch('/api/v1/agents').then((r) => r.json()),
+    queryFn: () => fetchJson<AgentSummary[]>('/api/v1/agents'),
     refetchInterval: 30_000,
   });
 
@@ -107,15 +108,19 @@ function AgentsPage() {
   return (
     <MasterDetail
       sidebar={
-        isLoading ? (
-          <div className="p-4 text-xs text-zinc-500">Loading…</div>
+        error ? (
+          <div className="p-3">
+            <ErrorState title="Agents failed to load" error={error} onRetry={() => void refetch()} />
+          </div>
+        ) : isLoading ? (
+          <LoadingState label="Loading agents" />
         ) : (
           <AgentSidebar agents={agents} />
         )
       }
     >
       <EmptyState
-        icon="🤖"
+        icon="Agents"
         title="Select an agent"
         description="Choose an agent from the list to see its details."
       />

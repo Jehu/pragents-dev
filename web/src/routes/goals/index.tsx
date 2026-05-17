@@ -1,9 +1,10 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
-import { useState, useEffect } from 'react';
-import { StatusPill, EmptyState } from '../../components/ui/index.js';
+import { Fragment, useState, useEffect } from 'react';
+import { Button, StatusPill, EmptyState, ErrorState, LoadingState, PageHeader, Panel, Table, TableWrap } from '../../components/ui/index.js';
 import type { StatusType } from '../../components/ui/index.js';
 import { useEventBusStore } from '../../stores/eventBus.js';
+import { fetchJson, postJson } from '../../lib/api.js';
 
 export const Route = createFileRoute('/goals/')({
   component: GoalsPage,
@@ -138,18 +139,14 @@ function toStatusPill(s: string): StatusType {
 
 // ─── Goal Table ───────────────────────────────────────────────────────────────
 
-function GoalTable({ goals }: { goals: Goal[] }) {
+function GoalTable({ goals, runs }: { goals: Goal[]; runs: GoalRun[] }) {
   const queryClient = useQueryClient();
   const [runError, setRunError] = useState<Record<string, string>>({});
+  const [expandedGoal, setExpandedGoal] = useState<string | null>(null);
 
   const runMutation = useMutation({
     mutationFn: async (id: string) => {
-      const res = await fetch(`/api/v1/goals/${encodeURIComponent(id)}/run`, { method: 'POST' });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.error ?? `HTTP ${res.status}`);
-      }
-      return res.json();
+      return postJson(`/api/v1/goals/${encodeURIComponent(id)}/run`);
     },
     onSuccess: (_data, id) => {
       setRunError((prev) => {
@@ -171,16 +168,16 @@ function GoalTable({ goals }: { goals: Goal[] }) {
   if (goals.length === 0) {
     return (
       <EmptyState
-        icon="🎯"
+        icon="Goals"
         title="No goals"
-        description="No scheduled goals found. Add goals to pragents.yaml."
+        description="No scheduled goals found. Add YAML files under goals/*.yaml."
       />
     );
   }
 
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm text-left">
+    <TableWrap>
+      <Table>
         <thead>
           <tr className="border-b border-zinc-800 text-[11px] uppercase tracking-wider text-zinc-500">
             <th className="py-2 pr-4 font-medium">Goal</th>
@@ -194,10 +191,17 @@ function GoalTable({ goals }: { goals: Goal[] }) {
         <tbody>
           {goals.map((g) => {
             const isPending = runMutation.isPending && runMutation.variables === g.id;
+            const goalRuns = runs.filter((run) => run.goalId === g.id);
+            const activeRun = goalRuns.find((run) => run.status === 'running' || run.status === 'triggered' || run.status === 'pending');
+            const latestRun = goalRuns[0];
             return (
+              <Fragment key={g.id}>
               <tr key={g.id} className="border-b border-zinc-800/50 hover:bg-zinc-900/50">
                 <td className="py-2.5 pr-4 align-top">
                   <span className="font-mono text-xs text-zinc-400">{g.id}</span>
+                  <div className="mt-1">
+                    <StatusPill status={activeRun ? 'running' : latestRun ? toStatusPill(latestRun.status) : 'idle'} />
+                  </div>
                 </td>
                 <td className="py-2.5 pr-4 align-top">
                   <span className="text-zinc-200">{g.description}</span>
@@ -234,6 +238,9 @@ function GoalTable({ goals }: { goals: Goal[] }) {
                   <span className="text-xs text-zinc-400">
                     {g.targetAgentId ?? g.targetWorkflowId ?? g.workflow ?? '—'}
                   </span>
+                  {(g.targetWorkflowId ?? g.workflow) && (
+                    <div className="mt-1 text-[11px] text-indigo-400">workflow linked</div>
+                  )}
                 </td>
                 <td className="py-2.5 pr-4 align-top">
                   <span className="text-xs text-zinc-400">
@@ -251,24 +258,93 @@ function GoalTable({ goals }: { goals: Goal[] }) {
                   )}
                 </td>
                 <td className="py-2.5 pr-4 align-top text-right">
-                  <button
-                    type="button"
-                    onClick={() => runMutation.mutate(g.id)}
-                    disabled={isPending}
-                    className="text-xs px-2.5 py-1 rounded bg-indigo-500/20 text-indigo-300 hover:bg-indigo-500/30 disabled:opacity-50 disabled:cursor-not-allowed border border-indigo-500/30"
-                  >
-                    {isPending ? 'Starting…' : '▶ Run now'}
-                  </button>
+                  <div className="flex flex-col items-end gap-1.5">
+                    <Button
+                      variant="primary"
+                      type="button"
+                      onClick={() => runMutation.mutate(g.id)}
+                      disabled={Boolean(activeRun)}
+                      loading={isPending}
+                      title={activeRun ? 'This goal already has an active run' : undefined}
+                    >
+                      {activeRun ? 'Running' : 'Run now'}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      type="button"
+                      onClick={() => setExpandedGoal((current) => current === g.id ? null : g.id)}
+                    >
+                      Details
+                    </Button>
+                  </div>
                   {runError[g.id] && (
                     <p className="text-[11px] text-red-400 mt-1">{runError[g.id]}</p>
                   )}
                 </td>
               </tr>
+              {expandedGoal === g.id && (
+                <tr key={`${g.id}-details`} className="border-b border-zinc-800/50">
+                  <td colSpan={6} className="py-3 pr-4">
+                    <Panel className="p-3 bg-zinc-950">
+                      <div className="grid gap-4 md:grid-cols-3">
+                        <div>
+                          <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500">Acceptance</h3>
+                          {g.acceptance && g.acceptance.length > 0 ? (
+                            <ul className="mt-2 space-y-1 text-xs text-zinc-300">
+                              {g.acceptance.map((item) => <li key={item}>{item}</li>)}
+                            </ul>
+                          ) : (
+                            <p className="mt-2 text-xs text-zinc-600">No acceptance criteria recorded.</p>
+                          )}
+                        </div>
+                        <div>
+                          <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500">Gates</h3>
+                          {g.humanGates && g.humanGates.length > 0 ? (
+                            <div className="mt-2 flex flex-wrap gap-1.5">
+                              {g.humanGates.map((gate) => (
+                                <span key={`${gate.step}:${gate.label}`} className="rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[11px] text-amber-200">
+                                  {gate.label}{gate.timeout ? ` · ${gate.timeout}` : ''}
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="mt-2 text-xs text-zinc-600">No human gates configured.</p>
+                          )}
+                        </div>
+                        <div>
+                          <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500">Management</h3>
+                          <p className="mt-2 text-xs text-zinc-400">
+                            Edit the source YAML in <span className="font-mono text-zinc-300">goals/{g.id}.yaml</span>. A safe in-app goal editor is not available yet.
+                          </p>
+                        </div>
+                      </div>
+                      <div className="mt-4">
+                        <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500">Recent runs for this goal</h3>
+                        {goalRuns.length === 0 ? (
+                          <p className="mt-2 text-xs text-zinc-600">No runs recorded.</p>
+                        ) : (
+                          <div className="mt-2 space-y-1">
+                            {goalRuns.slice(0, 5).map((run) => (
+                              <div key={run.id} className="flex flex-wrap items-center gap-2 text-xs text-zinc-400">
+                                <span className="font-mono text-zinc-300">{run.id}</span>
+                                <StatusPill status={toStatusPill(run.status)} />
+                                <span>{relativeTimeMs(new Date(run.triggeredAt).getTime())}</span>
+                                {run.workflowRunId && <span className="font-mono text-zinc-600">{run.workflowRunId}</span>}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </Panel>
+                  </td>
+                </tr>
+              )}
+              </Fragment>
             );
           })}
         </tbody>
-      </table>
-    </div>
+      </Table>
+    </TableWrap>
   );
 }
 
@@ -280,7 +356,7 @@ function GoalRunList({ runs }: { runs: GoalRun[] }) {
   if (runs.length === 0) {
     return (
       <EmptyState
-        icon="📋"
+        icon="Runs"
         title="No runs yet"
         description="Goal run history will appear here."
       />
@@ -348,24 +424,24 @@ function GoalsPage() {
     }
   }, [busEvents, queryClient]);
 
-  const { data: goalsData, isLoading: goalsLoading } = useQuery({
+  const { data: goalsData, isLoading: goalsLoading, error: goalsError, refetch: refetchGoals } = useQuery({
     queryKey: ['goals'],
-    queryFn: () => fetch('/api/v1/goals').then((r) => r.json()),
+    queryFn: () => fetchJson<{ goals?: Goal[] } | Goal[]>('/api/v1/goals'),
     staleTime: 15_000,
   });
 
-  const { data: runsData, isLoading: runsLoading } = useQuery({
+  const { data: runsData, isLoading: runsLoading, error: runsError, refetch: refetchRuns } = useQuery({
     queryKey: ['goal-runs'],
-    queryFn: () => fetch('/api/v1/goals/runs').then((r) => r.json()),
+    queryFn: () => fetchJson<{ runs?: GoalRun[] } | GoalRun[]>('/api/v1/goals/runs'),
     staleTime: 15_000,
   });
 
-  const goals: Goal[] = Array.isArray(goalsData?.goals)
+  const goals: Goal[] = !Array.isArray(goalsData) && Array.isArray(goalsData?.goals)
     ? goalsData.goals
     : Array.isArray(goalsData)
     ? goalsData
     : [];
-  const runs: GoalRun[] = Array.isArray(runsData?.runs)
+  const runs: GoalRun[] = !Array.isArray(runsData) && Array.isArray(runsData?.runs)
     ? runsData.runs
     : Array.isArray(runsData)
     ? runsData
@@ -373,19 +449,21 @@ function GoalsPage() {
 
   return (
     <div className="p-6 max-w-5xl mx-auto space-y-8">
-      <div>
-        <h1 className="text-xl font-semibold tracking-tight text-zinc-100">Goals</h1>
-        <p className="text-sm text-zinc-500 mt-1">Scheduled goals and run history.</p>
-      </div>
+      <PageHeader
+        title="Goals"
+        description="Managed outcomes, active status, and run history from goals/*.yaml."
+      />
 
       <section>
         <h2 className="text-sm font-semibold text-zinc-400 uppercase tracking-wider mb-3">
           Scheduled Goals
         </h2>
-        {goalsLoading ? (
-          <div className="text-xs text-zinc-500 py-8 text-center">Loading…</div>
+        {goalsError ? (
+          <ErrorState title="Goals failed to load" error={goalsError} onRetry={() => void refetchGoals()} />
+        ) : goalsLoading ? (
+          <LoadingState label="Loading goals" />
         ) : (
-          <GoalTable goals={goals} />
+          <GoalTable goals={goals} runs={runs} />
         )}
       </section>
 
@@ -394,8 +472,10 @@ function GoalsPage() {
           Recent Runs
           <span className="ml-2 text-zinc-600 font-normal normal-case">({runs.length})</span>
         </h2>
-        {runsLoading ? (
-          <div className="text-xs text-zinc-500 py-8 text-center">Loading…</div>
+        {runsError ? (
+          <ErrorState title="Goal runs failed to load" error={runsError} onRetry={() => void refetchRuns()} />
+        ) : runsLoading ? (
+          <LoadingState label="Loading goal runs" />
         ) : (
           <GoalRunList runs={runs} />
         )}

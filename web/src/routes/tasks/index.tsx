@@ -1,8 +1,9 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState, useEffect } from 'react';
-import { EmptyState } from '../../components/ui/index.js';
+import { EmptyState, ErrorState, LoadingState, PageHeader, Tabs } from '../../components/ui/index.js';
 import { useEventBusStore } from '../../stores/eventBus.js';
+import { fetchJson } from '../../lib/api.js';
 
 export const Route = createFileRoute('/tasks/')({
   component: TasksList,
@@ -96,9 +97,9 @@ function TasksList() {
     }
   }, [busEvents, queryClient]);
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['tasks'],
-    queryFn: () => fetch('/api/v1/tasks?limit=100').then((r) => r.json()),
+    queryFn: () => fetchJson<{ tasks?: Task[] }>('/api/v1/tasks?limit=100'),
     staleTime: 5_000,
   });
 
@@ -110,7 +111,7 @@ function TasksList() {
     <div className="flex flex-col h-full">
       {/* Toolbar */}
       <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800 flex-shrink-0">
-        <h1 className="text-xl font-semibold tracking-tight text-zinc-100">Tasks</h1>
+        <PageHeader title="Tasks" />
         {agentIds.length > 0 && (
           <select
             value={agentFilter}
@@ -127,36 +128,27 @@ function TasksList() {
 
       {/* Status tabs */}
       <div className="flex items-center gap-1 px-6 py-2 border-b border-zinc-800 flex-shrink-0">
-        {STATUS_TABS.map((tab) => {
-          const count = countByStatus(allTasks, tab.value);
-          return (
-            <button
-              key={tab.value}
-              onClick={() => setActiveTab(tab.value)}
-              className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
-                activeTab === tab.value
-                  ? 'bg-indigo-600 text-white'
-                  : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'
-              }`}
-            >
-              {tab.label}
-              {count > 0 && (
-                <span className={`ml-1.5 ${activeTab === tab.value ? 'text-indigo-200' : 'text-zinc-500'}`}>
-                  {count}
-                </span>
-              )}
-            </button>
-          );
-        })}
+        <Tabs
+          value={activeTab}
+          onChange={setActiveTab}
+          tabs={STATUS_TABS.map((tab) => ({
+            ...tab,
+            count: countByStatus(allTasks, tab.value),
+          }))}
+        />
       </div>
 
       {/* Table */}
       <div className="flex-1 overflow-auto">
-        {isLoading ? (
-          <div className="flex items-center justify-center h-32 text-zinc-500 text-sm">Loading…</div>
+        {error ? (
+          <div className="p-6">
+            <ErrorState title="Tasks failed to load" error={error} onRetry={() => void refetch()} />
+          </div>
+        ) : isLoading ? (
+          <LoadingState label="Loading tasks" />
         ) : filtered.length === 0 ? (
           <EmptyState
-            icon="📋"
+            icon="Tasks"
             title="No tasks"
             description={activeTab === 'all' ? 'No tasks have been created yet.' : `No ${activeTab} tasks.`}
           />

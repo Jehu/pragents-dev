@@ -122,7 +122,7 @@ export function Modal({
 
   return createPortal(
     <div
-      className="fixed inset-0 bg-black/50 z-50 flex items-start justify-center pt-[20vh]"
+      className="fixed inset-0 bg-black/50 z-50 flex items-start justify-center overflow-y-auto px-3 py-8 sm:pt-[12vh]"
       onClick={() => {
         if (!mustConfirm) onClose();
       }}
@@ -138,7 +138,7 @@ export function Modal({
         onClick={(e) => e.stopPropagation()}
         className={
           containerClassName ??
-          'w-[600px] max-w-[90vw] bg-zinc-900 rounded-xl shadow-2xl border border-zinc-700 overflow-hidden'
+          'w-[600px] max-w-[90vw] max-h-[calc(100vh-4rem)] bg-zinc-900 rounded-lg shadow-2xl border border-zinc-700 overflow-hidden'
         }
       >
         {children}

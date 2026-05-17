@@ -1,11 +1,12 @@
 import React, { useEffect } from 'react';
 import { createFileRoute, Link } from '@tanstack/react-router';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
-import { StatusPill, ApprovalCard, EmptyState } from '../../components/ui/index.js';
+import { StatusPill, ApprovalCard, EmptyState, ErrorState, LoadingState, PageHeader, Panel } from '../../components/ui/index.js';
 import { useEventBusStore } from '../../stores/eventBus.js';
 import { useCommandPaletteStore } from '../../stores/commandPalette.js';
 import { useShallow } from 'zustand/react/shallow';
 import type { StatusType } from '../../components/ui/StatusPill.js';
+import { fetchJson, postJson } from '../../lib/api.js';
 
 export const Route = createFileRoute('/overview/')({
   component: OverviewPage,
@@ -58,6 +59,32 @@ export type InboxItem =
   | { _kind: 'gate'; item: Gate; createdAt: string }
   | { _kind: 'plan'; item: Plan; createdAt: string }
   | { _kind: 'skill'; item: Skill; createdAt: string };
+
+interface TaskSummary {
+  id: string;
+  status: string;
+  description: string;
+  agentId?: string;
+  createdAt: string;
+}
+
+interface WorkflowRunSummary {
+  id: string;
+  workflowName: string;
+  status: string;
+  startedAt: string;
+}
+
+interface GoalRunSummary {
+  id: string;
+  goalId: string;
+  status: string;
+  triggeredAt: string;
+}
+
+interface MonthlyCost {
+  totalCost?: number;
+}
 
 // ─── Event helpers ────────────────────────────────────────────────────────────
 
@@ -114,29 +141,27 @@ export function relativeTime(ts: number): string {
 // ─── Loader (exported for testing) ───────────────────────────────────────────
 
 export async function fetchInboxItems(): Promise<InboxItem[]> {
-  const [gatesRes, plansRes, skillsRes] = await Promise.all([
-    fetch(`${API}/api/v1/gates?status=pending`),
-    fetch(`${API}/api/v1/plans?status=draft`),
-    fetch(`${API}/api/v1/skills?status=proposed`),
-  ]);
-
   const [gatesData, plansData, skillsData] = await Promise.all([
-    gatesRes.ok ? gatesRes.json() : { gates: [] },
-    plansRes.ok ? plansRes.json() : { plans: [] },
-    skillsRes.ok ? skillsRes.json() : { skills: [] },
+    fetchJson<{ gates?: Gate[] } | Gate[]>(`${API}/api/v1/gates?status=pending`),
+    fetchJson<{ plans?: Plan[] } | Plan[]>(`${API}/api/v1/plans?status=draft`),
+    fetchJson<{ skills?: Skill[] } | Skill[]>(`${API}/api/v1/skills?status=proposed`),
   ]);
 
-  const gates: InboxItem[] = ((gatesData.gates ?? gatesData) as Gate[]).map((g) => ({
+  const gateItems = Array.isArray(gatesData) ? gatesData : gatesData.gates ?? [];
+  const planItems = Array.isArray(plansData) ? plansData : plansData.plans ?? [];
+  const skillItems = Array.isArray(skillsData) ? skillsData : skillsData.skills ?? [];
+
+  const gates: InboxItem[] = gateItems.map((g) => ({
     _kind: 'gate' as const,
     item: g,
     createdAt: g.createdAt,
   }));
-  const plans: InboxItem[] = ((plansData.plans ?? plansData) as Plan[]).map((p) => ({
+  const plans: InboxItem[] = planItems.map((p) => ({
     _kind: 'plan' as const,
     item: p,
     createdAt: p.createdAt,
   }));
-  const skills: InboxItem[] = ((skillsData.skills ?? skillsData) as Skill[]).map((s) => ({
+  const skills: InboxItem[] = skillItems.map((s) => ({
     _kind: 'skill' as const,
     item: s,
     createdAt: s.createdAt,
@@ -151,21 +176,21 @@ export async function fetchInboxItems(): Promise<InboxItem[]> {
 
 export async function approveItem(item: InboxItem): Promise<void> {
   if (item._kind === 'gate') {
-    await fetch(`${API}/api/v1/gates/${item.item.id}/approve`, { method: 'POST' });
+    await postJson(`${API}/api/v1/gates/${item.item.id}/approve`);
   } else if (item._kind === 'plan') {
-    await fetch(`${API}/api/v1/plans/${item.item.id}/approve`, { method: 'POST' });
+    await postJson(`${API}/api/v1/plans/${item.item.id}/approve`);
   } else {
-    await fetch(`${API}/api/v1/skills/${(item.item as Skill).name}/approve`, { method: 'POST' });
+    await postJson(`${API}/api/v1/skills/${(item.item as Skill).name}/approve`);
   }
 }
 
 export async function rejectItem(item: InboxItem): Promise<void> {
   if (item._kind === 'gate') {
-    await fetch(`${API}/api/v1/gates/${item.item.id}/reject`, { method: 'POST' });
+    await postJson(`${API}/api/v1/gates/${item.item.id}/reject`);
   } else if (item._kind === 'plan') {
-    await fetch(`${API}/api/v1/plans/${item.item.id}/cancel`, { method: 'POST' });
+    await postJson(`${API}/api/v1/plans/${item.item.id}/cancel`);
   } else {
-    await fetch(`${API}/api/v1/skills/${(item.item as Skill).name}/reject`, { method: 'POST' });
+    await postJson(`${API}/api/v1/skills/${(item.item as Skill).name}/reject`);
   }
 }
 
@@ -197,6 +222,33 @@ function AgentCard({ agent }: { agent: Agent }) {
           {skillCount} skill{skillCount !== 1 ? 's' : ''}
         </span>
       </div>
+    </Link>
+  );
+}
+
+function PriorityCard({
+  label,
+  value,
+  tone,
+  to,
+}: {
+  label: string;
+  value: string | number;
+  tone: 'amber' | 'sky' | 'red' | 'emerald' | 'zinc';
+  to: string;
+}) {
+  const tones = {
+    amber: 'border-amber-500/30 bg-amber-500/10 text-amber-200',
+    sky: 'border-sky-500/30 bg-sky-500/10 text-sky-200',
+    red: 'border-red-500/30 bg-red-500/10 text-red-200',
+    emerald: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200',
+    zinc: 'border-zinc-800 bg-zinc-900 text-zinc-200',
+  };
+
+  return (
+    <Link to={to} className={`rounded-lg border px-4 py-3 no-underline ${tones[tone]}`}>
+      <div className="text-2xl font-semibold tracking-tight">{value}</div>
+      <div className="mt-1 text-xs opacity-80">{label}</div>
     </Link>
   );
 }
@@ -248,9 +300,9 @@ export function inboxItemBody(item: InboxItem): React.ReactNode {
 function OverviewPage() {
   const queryClient = useQueryClient();
 
-  const { data: agentsData } = useQuery<{ agents?: Agent[] } | Agent[]>({
+  const { data: agentsData, error: agentsError, isLoading: agentsLoading, refetch: refetchAgents } = useQuery<{ agents?: Agent[] } | Agent[]>({
     queryKey: ['agents'],
-    queryFn: () => fetch(`${API}/api/v1/agents`).then((r) => r.json()),
+    queryFn: () => fetchJson(`${API}/api/v1/agents`),
     staleTime: 30_000,
   });
 
@@ -258,10 +310,34 @@ function OverviewPage() {
     ? agentsData
     : ((agentsData as { agents?: Agent[] })?.agents ?? []);
 
-  const { data: inboxItems = [] } = useQuery<InboxItem[]>({
+  const { data: inboxItems = [], error: inboxError, isLoading: inboxLoading, refetch: refetchInbox } = useQuery<InboxItem[]>({
     queryKey: ['overview-inbox'],
     queryFn: fetchInboxItems,
     staleTime: 15_000,
+  });
+
+  const { data: tasksData, error: tasksError } = useQuery<{ tasks?: TaskSummary[] } | TaskSummary[]>({
+    queryKey: ['overview-tasks'],
+    queryFn: () => fetchJson('/api/v1/tasks?limit=50'),
+    staleTime: 10_000,
+  });
+
+  const { data: workflowRunsData } = useQuery<{ runs?: WorkflowRunSummary[] } | WorkflowRunSummary[]>({
+    queryKey: ['overview-workflow-runs'],
+    queryFn: () => fetchJson('/api/v1/workflows/runs?includeSteps=false'),
+    staleTime: 10_000,
+  });
+
+  const { data: goalRunsData } = useQuery<{ runs?: GoalRunSummary[] } | GoalRunSummary[]>({
+    queryKey: ['overview-goal-runs'],
+    queryFn: () => fetchJson('/api/v1/goals/runs'),
+    staleTime: 15_000,
+  });
+
+  const { data: costData } = useQuery<MonthlyCost>({
+    queryKey: ['cost-monthly'],
+    queryFn: () => fetchJson('/api/v1/cost/monthly'),
+    staleTime: 300_000,
   });
 
   // SSE: invalidate inbox on relevant events
@@ -277,6 +353,9 @@ function OverviewPage() {
     if (relevant.includes(last.type)) {
       void queryClient.invalidateQueries({ queryKey: ['overview-inbox'] });
     }
+    if (last.type.startsWith('task.')) void queryClient.invalidateQueries({ queryKey: ['overview-tasks'] });
+    if (last.type.startsWith('workflow.')) void queryClient.invalidateQueries({ queryKey: ['overview-workflow-runs'] });
+    if (last.type.startsWith('goal.')) void queryClient.invalidateQueries({ queryKey: ['overview-goal-runs'] });
   }, [events, queryClient]);
 
   // Recent events (last 6 from store, no API call, live)
@@ -292,18 +371,53 @@ function OverviewPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['overview-inbox'] }),
   });
 
+  const tasks = Array.isArray(tasksData) ? tasksData : tasksData?.tasks ?? [];
+  const workflowRuns = Array.isArray(workflowRunsData) ? workflowRunsData : workflowRunsData?.runs ?? [];
+  const goalRuns = Array.isArray(goalRunsData) ? goalRunsData : goalRunsData?.runs ?? [];
+  const runningTasks = tasks.filter((task) => task.status === 'running' || task.status === 'pending');
+  const failedTasks = tasks.filter((task) => task.status === 'failed');
+  const runningWorkflows = workflowRuns.filter((run) => run.status === 'running');
+  const escalatedGoals = goalRuns.filter((run) => run.status === 'failed' || run.status === 'escalated');
+  const loadError = inboxError ?? tasksError;
+
   return (
     <div className="p-6 space-y-8 min-w-0">
-      {/* Header row */}
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold tracking-tight text-zinc-100">Overview</h1>
+      <PageHeader
+        title="Overview"
+        description="Operator priorities across work, decisions, failures, and spend."
+        actions={
         <button
           className="btn-approve text-xs px-3 py-1.5 rounded font-medium"
           onClick={() => useCommandPaletteStore.getState().openDispatch()}
         >
           + New task
         </button>
-      </div>
+        }
+      />
+
+      {loadError && (
+        <ErrorState
+          title="Overview failed to load"
+          error={loadError}
+          onRetry={() => {
+            void refetchInbox();
+            void queryClient.invalidateQueries({ queryKey: ['overview-tasks'] });
+          }}
+        />
+      )}
+
+      <section>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          <PriorityCard label="pending approvals" value={inboxItems.length} tone={inboxItems.length > 0 ? 'amber' : 'emerald'} to="/inbox" />
+          <PriorityCard label="running tasks" value={runningTasks.length} tone={runningTasks.length > 0 ? 'sky' : 'zinc'} to="/tasks" />
+          <PriorityCard label="running workflows" value={runningWorkflows.length} tone={runningWorkflows.length > 0 ? 'sky' : 'zinc'} to="/workflows" />
+          <PriorityCard label="failed tasks" value={failedTasks.length} tone={failedTasks.length > 0 ? 'red' : 'emerald'} to="/tasks" />
+          <PriorityCard label="goal escalations" value={escalatedGoals.length} tone={escalatedGoals.length > 0 ? 'red' : 'emerald'} to="/goals" />
+        </div>
+        <div className="mt-3 text-xs text-zinc-500">
+          Month cost: <span className="font-mono text-zinc-300">€{(costData?.totalCost ?? 0).toFixed(2)}</span>
+        </div>
+      </section>
 
       {/* ── Agents strip ── */}
       <section>
@@ -315,9 +429,13 @@ function OverviewPage() {
             View all →
           </Link>
         </div>
-        {agents.length === 0 ? (
+        {agentsError ? (
+          <ErrorState title="Agents failed to load" error={agentsError} onRetry={() => void refetchAgents()} />
+        ) : agentsLoading ? (
+          <LoadingState label="Loading agents" />
+        ) : agents.length === 0 ? (
           <EmptyState
-            icon="🤖"
+            icon="Agents"
             title="No agents configured"
             description="Add agents to pragents.yaml to see them here."
           />
@@ -340,9 +458,13 @@ function OverviewPage() {
             View all →
           </Link>
         </div>
-        {inboxItems.length === 0 ? (
+        {inboxError ? (
+          <ErrorState title="Attention items failed to load" error={inboxError} onRetry={() => void refetchInbox()} />
+        ) : inboxLoading ? (
+          <LoadingState label="Loading attention items" />
+        ) : inboxItems.length === 0 ? (
           <EmptyState
-            icon="✓"
+            icon="Clear"
             title="All clear"
             description="Nothing needs your attention right now."
           />
@@ -378,16 +500,16 @@ function OverviewPage() {
         </div>
         {recentEvents.length === 0 ? (
           <EmptyState
-            icon="📡"
+            icon="Events"
             title="No events yet"
             description="Events will appear here as agents run tasks."
           />
         ) : (
-          <div className="space-y-1">
+          <Panel className="divide-y divide-zinc-800 overflow-hidden">
             {recentEvents.map((evt, idx) => (
               <div
                 key={evt.id ?? idx}
-                className="flex items-center gap-3 px-3 py-1.5 rounded bg-zinc-900 border border-zinc-800 text-xs"
+                className="flex items-center gap-3 px-3 py-1.5 text-xs"
               >
                 <span className="text-zinc-400 w-4 text-center flex-shrink-0">
                   {iconFor(evt.type)}
@@ -399,7 +521,7 @@ function OverviewPage() {
                 <span className="text-zinc-600 flex-shrink-0">{relativeTime(evt.ts)}</span>
               </div>
             ))}
-          </div>
+          </Panel>
         )}
       </section>
     </div>
