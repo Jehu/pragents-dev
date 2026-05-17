@@ -46,7 +46,15 @@ function makeDeps(overrides: Record<string, any> = {}) {
       { id: 'seo@proj-a', type: 'seo', projectId: 'proj-a', capabilities: ['keyword-research'] },
     ],
     goalRegistry: {
-      list: vi.fn().mockReturnValue([{ id: 'weekly-article', cadence: '0 8 * * 1', workflow: 'content-pipeline' }]),
+      list: vi.fn().mockReturnValue([{
+        id: 'weekly-article',
+        description: 'Publish one article per week',
+        cadence: '0 8 * * 1',
+        deadline: '0 16 * * 5',
+        workflow: 'content-pipeline',
+        acceptance: ['article is published'],
+        human_gates: [{ step: 'after_draft', label: 'Review draft', timeout: '4h' }],
+      }]),
     },
     eventBuffer: {
       getRecent: vi.fn().mockReturnValue([{ id: 1, type: 'task.started' }]),
@@ -223,6 +231,9 @@ describe('ToolExecutor', () => {
     expect(deps.goalRegistry.list).toHaveBeenCalled();
     const parsed = JSON.parse(result);
     expect(parsed[0].id).toBe('weekly-article');
+    expect(parsed[0].description).toBe('Publish one article per week');
+    expect(parsed[0].acceptance).toEqual(['article is published']);
+    expect(parsed[0].humanGates).toEqual([{ step: 'after_draft', label: 'Review draft', timeout: '4h' }]);
   });
 
   it('executes get_workflow_runs', async () => {

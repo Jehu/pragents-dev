@@ -142,7 +142,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   },
   {
     name: 'list_goals',
-    description: 'List all configured goals with their cadence, workflow, and deadline settings.',
+    description: 'List all configured goals with outcome criteria, human gates, cadence, workflow, and deadline settings.',
     parameters: { type: 'object', properties: {} },
   },
   {

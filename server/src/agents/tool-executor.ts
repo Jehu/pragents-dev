@@ -149,13 +149,28 @@ export class ToolExecutor {
         }
         case 'list_goals': {
           const goals = this.deps.goalRegistry.list();
-          return JSON.stringify(goals.map((g: any) => ({ id: g.id, cadence: g.cadence, workflow: g.workflow, deadline: g.deadline })));
+          return JSON.stringify(goals.map((g: any) => ({
+            id: g.id,
+            description: g.description,
+            cadence: g.cadence,
+            workflow: g.workflow,
+            deadline: g.deadline,
+            acceptance: g.acceptance ?? [],
+            humanGates: g.human_gates ?? [],
+          })));
         }
         case 'get_goal_runs': {
           const { limit } = args as { limit?: number };
           const db = getDb();
-          const runs = db.prepare('SELECT id, goal_id, workflow_run_id, status, triggered_at FROM goal_runs ORDER BY triggered_at DESC LIMIT ?').all(limit || 20);
-          return JSON.stringify(runs);
+          const runs = db.prepare('SELECT id, goal_id, workflow_run_id, status, triggered_at, completed_at FROM goal_runs ORDER BY triggered_at DESC LIMIT ?').all(limit || 20) as any[];
+          return JSON.stringify(runs.map((r) => ({
+            id: r.id,
+            goalId: r.goal_id,
+            workflowRunId: r.workflow_run_id,
+            status: r.status,
+            triggeredAt: r.triggered_at,
+            completedAt: r.completed_at,
+          })));
         }
         case 'list_pending_gates': {
           const db = getDb();

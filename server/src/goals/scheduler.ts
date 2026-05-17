@@ -69,8 +69,22 @@ export class GoalScheduler {
 
   /** Called by the orchestrator on every event — used to clean up completed goal runs. */
   onEvent(evt: any): void {
-    if ((evt.type === 'workflow.completed' || evt.type === 'workflow.failed') && evt.runId) {
-      this.activeGoalRuns.delete(evt.runId);
+    if (evt.type === 'workflow.completed' || evt.type === 'workflow.failed') {
+      const runId = evt.data?.runId ?? evt.runId;
+      if (!runId) return;
+
+      const info = this.activeGoalRuns.get(runId);
+      if (info) {
+        const status = evt.type === 'workflow.completed' ? 'complete' : 'failed';
+        getDb().prepare('UPDATE goal_runs SET status = ?, completed_at = ? WHERE id = ?')
+          .run(status, new Date().toISOString(), info.goalRunId);
+        this.emitGoalEvent(status === 'complete' ? 'goal.completed' : 'goal.failed', {
+          goalId: info.goalId,
+          goalRunId: info.goalRunId,
+          workflowRunId: runId,
+        });
+      }
+      this.activeGoalRuns.delete(runId);
     }
   }
 
@@ -117,6 +131,7 @@ export class GoalScheduler {
         deadline: goal.deadline ? this.nextDeadline(goal.deadline) : new Date(Date.now() + 86400000),
         goalId: id,
       });
+      this.emitGoalEvent('goal.started', { goalId: id, goalRunId, workflowRunId, manual: true });
       return { goalRunId, workflowRunId };
     } catch (err: any) {
       try {
@@ -144,15 +159,17 @@ export class GoalScheduler {
     db.prepare('INSERT INTO goal_runs (id, goal_id, status) VALUES (?, ?, ?)').run(goalRunId, goal.id, 'triggered');
 
     try {
-      const runId = await this.wfEngine.execute(wfDef, { goalId: goal.id, goalRunId }, goalRunId);
+      const runId = this.wfEngine.executeAsync(wfDef, { goalId: goal.id, goalRunId }, goalRunId);
       db.prepare('UPDATE goal_runs SET workflow_run_id = ?, status = ? WHERE id = ?').run(runId, 'running', goalRunId);
       this.activeGoalRuns.set(runId, {
         goalRunId,
         deadline: goal.deadline ? this.nextDeadline(goal.deadline) : new Date(Date.now() + 86400000),
         goalId: goal.id,
       });
+      this.emitGoalEvent('goal.started', { goalId: goal.id, goalRunId, workflowRunId: runId, manual: false });
     } catch (err: any) {
       db.prepare('UPDATE goal_runs SET status = ? WHERE id = ?').run('failed', goalRunId);
+      this.emitGoalEvent('goal.failed', { goalId: goal.id, goalRunId, error: err?.message ?? 'Unknown error' });
     }
   }
 
@@ -167,6 +184,7 @@ export class GoalScheduler {
         if (this.pmAgent) {
           const db = getDb();
           db.prepare("UPDATE goal_runs SET status = 'escalated' WHERE id = ?").run(info.goalRunId);
+          this.emitGoalEvent('goal.escalated', { goalId: goal.id, goalRunId: info.goalRunId, workflowRunId: wfRunId });
 
           const escalationMsg = `Goal "${goal.id}" has passed its deadline. Workflow run ${wfRunId} may need attention. Check and take appropriate action.`;
           const task = tracker.create({
@@ -199,6 +217,7 @@ export class GoalScheduler {
         // Warning: deadline approaching — only warn once per hour
         if (this.pmAgent && (!info.warnedAt || now - info.warnedAt > 3600000)) {
           info.warnedAt = now;
+          this.emitGoalEvent('goal.warning', { goalId: goal.id, goalRunId: info.goalRunId, workflowRunId: wfRunId });
           this.sessionMgr.dispatch(this.pmAgent,
             `Warning: Goal "${goal.id}" deadline approaching in ${Math.round((info.deadline.getTime() - now) / 60000)} minutes. Workflow run ${wfRunId} is active.`
           ).catch((err) => logger.warn({ goalId: goal.id, err: err?.message }, 'Goal warning dispatch failed'));
@@ -224,6 +243,10 @@ export class GoalScheduler {
     const next = job.nextRun();
     job.stop();
     return next || new Date(Date.now() + 86400000);
+  }
+
+  private emitGoalEvent(type: string, data: Record<string, unknown>): void {
+    this.eventBuffer.push(this.pmAgent?.projectId ?? 'default', this.pmAgent?.id, type, data);
   }
 
   /**

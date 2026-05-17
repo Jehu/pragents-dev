@@ -9,17 +9,19 @@ export class GoalRegistry {
   load(goalsDir: string): { loaded: string[]; warnings: string[] } {
     const loaded: string[] = [];
     const warnings: string[] = [];
+    const nextGoals: Map<string, GoalDefType> = new Map();
     try {
       const files = readdirSync(goalsDir).filter(f => f.endsWith('.yaml') || f.endsWith('.yml'));
       for (const file of files) {
         try {
           const raw = readFileSync(join(goalsDir, file), 'utf-8');
           const def = GoalDef.parse(parseYaml(raw));
-          this.goals.set(def.id, def);
+          nextGoals.set(def.id, def);
           loaded.push(def.id);
         } catch (err: any) { warnings.push(`${file}: ${err.message}`); }
       }
     } catch { warnings.push(`Goals directory not accessible: ${goalsDir}`); }
+    this.goals = nextGoals;
     return { loaded, warnings };
   }
 
