@@ -160,6 +160,9 @@ describe('WorkflowEngine', () => {
       workflow: 'simple-test',
       stepId: 'step1',
     });
+    const runId = started?.data.runId;
+    const step = tracker.getSteps(runId).find((s) => s.stepId === 'step1');
+    expect(step?.agentId).toBe('dev@test-project');
   });
 
   it('emits agent context on failed workflow step events', async () => {

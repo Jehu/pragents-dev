@@ -13,8 +13,29 @@ export const Route = createFileRoute('/plans/$planId')({
 interface PlanStep {
   id?: string;
   description: string;
+  agentId?: string;
   status?: string;
   output?: string;
+}
+
+export interface WorkflowStepArtifact {
+  id: string;
+  stepId: string;
+  description?: string;
+  agentId?: string | null;
+  status: string;
+  output?: string | null;
+  startedAt?: string | null;
+  completedAt?: string | null;
+}
+
+interface WorkflowRunArtifact {
+  id: string;
+  workflowName: string;
+  status: string;
+  startedAt: string;
+  completedAt?: string | null;
+  steps?: WorkflowStepArtifact[];
 }
 
 interface Plan {
@@ -24,6 +45,8 @@ interface Plan {
   origin?: 'nl' | 'chat' | string;
   steps?: PlanStep[];
   conversationId?: string;
+  result?: { runId?: string } | null;
+  workflowRun?: WorkflowRunArtifact;
   createdAt: string;
   updatedAt?: string;
 }
@@ -32,6 +55,8 @@ interface Plan {
 
 const STATUS_MAP: Record<string, StatusType> = {
   draft: 'proposed',
+  approved: 'proposed',
+  executing: 'running',
   running: 'running',
   done: 'complete',
   failed: 'failed',
@@ -54,6 +79,10 @@ function stepDotClass(status?: string): string {
   return STEP_STATUS_MAP[status ?? 'pending'] ?? 'bg-zinc-600';
 }
 
+export function planArtifacts(plan: Plan): WorkflowStepArtifact[] {
+  return plan.workflowRun?.steps?.filter((step) => Boolean(step.output?.trim())) ?? [];
+}
+
 // ─── Step Rail ────────────────────────────────────────────────────────────────
 
 function StepRail({ steps, planStatus }: { steps: PlanStep[]; planStatus: string }) {
@@ -61,7 +90,7 @@ function StepRail({ steps, planStatus }: { steps: PlanStep[]; planStatus: string
     <ol className="space-y-0">
       {steps.map((step, i) => {
         const isLast = i === steps.length - 1;
-        const showStatus = planStatus === 'running' && step.status;
+        const showStatus = Boolean(step.status);
 
         return (
           <li key={step.id ?? i} className="relative flex gap-3 group">
@@ -76,6 +105,7 @@ function StepRail({ steps, planStatus }: { steps: PlanStep[]; planStatus: string
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-[11px] text-zinc-600 font-mono">{i + 1}</span>
                 <span className="text-sm text-zinc-200">{step.description}</span>
+                {step.agentId && <span className="text-[11px] text-zinc-500 font-mono">{step.agentId}</span>}
                 {showStatus && step.status && (
                   <StatusPill status={toPlanStatusPill(step.status)} />
                 )}
@@ -126,7 +156,8 @@ function PlanDetailPage() {
 
   const busy = approveMutation.isPending || cancelMutation.isPending;
   const isDraft = plan?.status === 'draft';
-  const isRunning = plan?.status === 'running';
+  const isRunning = plan?.status === 'running' || plan?.status === 'executing' || plan?.status === 'approved';
+  const artifacts = plan ? planArtifacts(plan) : [];
 
   return (
     <div className="p-6 max-w-2xl mx-auto">
@@ -211,6 +242,46 @@ function PlanDetailPage() {
             </section>
           ) : (
             <div className="text-xs text-zinc-600 italic">No steps defined.</div>
+          )}
+
+          {/* Artifacts */}
+          {plan.workflowRun && (
+            <section>
+              <div className="flex items-center justify-between gap-3 mb-4">
+                <h2 className="text-sm font-semibold text-zinc-400 uppercase tracking-wider">
+                  Artifacts ({artifacts.length})
+                </h2>
+                <Link
+                  to="/workflows"
+                  className="text-xs text-sky-400 hover:text-sky-300 font-mono"
+                >
+                  {plan.workflowRun.workflowName} · {plan.workflowRun.id.slice(0, 8)}
+                </Link>
+              </div>
+              {artifacts.length === 0 ? (
+                <div className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-xs text-zinc-500">
+                  This run completed, but no step produced a text artifact.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {artifacts.map((artifact) => (
+                    <article key={artifact.id} className="bg-zinc-900 border border-zinc-800 rounded-lg p-3">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="text-[11px] text-zinc-500 font-mono">{artifact.stepId}</span>
+                        {artifact.agentId && <span className="text-[11px] text-zinc-500 font-mono">{artifact.agentId}</span>}
+                        <StatusPill status={toPlanStatusPill(artifact.status)} />
+                      </div>
+                      {artifact.description && (
+                        <div className="mb-2 text-[11px] text-zinc-500">{artifact.description}</div>
+                      )}
+                      <pre className="whitespace-pre-wrap break-words text-xs leading-relaxed text-zinc-300 max-h-80 overflow-auto">
+                        {artifact.output}
+                      </pre>
+                    </article>
+                  ))}
+                </div>
+              )}
+            </section>
           )}
         </div>
       )}

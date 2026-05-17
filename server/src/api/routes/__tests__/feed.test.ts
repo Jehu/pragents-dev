@@ -128,4 +128,29 @@ describe('Feed API', () => {
     expect(body.gates).toBeUndefined();
     expect(body.needsReview).toBeUndefined();
   });
+
+  it('includes completed plans in completed intent', async () => {
+    const db = getDb();
+    db.prepare(
+      `INSERT INTO plans
+        (id, status, origin, agent_id, project_id, conversation_id, prompt, steps_json, result_json, created_at, ended_at)
+       VALUES (?, 'done', 'chat', ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      'plan-feed-1',
+      'dev',
+      'proj-1',
+      'conv-1',
+      'Implement thing',
+      JSON.stringify([{ description: 'Do it', agentId: 'dev' }]),
+      JSON.stringify({ runId: 'run-feed-1' }),
+      new Date().toISOString(),
+      new Date().toISOString(),
+    );
+
+    const app = createFeedRoute(tracker, eventBuffer, wfTracker, registry);
+    const res = await app.request('/?intent=completed');
+    const body = await res.json();
+    expect(body.completedPlans).toBeDefined();
+    expect(body.completedPlans.some((p: any) => p.id === 'plan-feed-1' && p.result.runId === 'run-feed-1')).toBe(true);
+  });
 });

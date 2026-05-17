@@ -3,6 +3,7 @@ import type { PlanStore, ListPlansOptions } from '../../plans/store.js';
 import type { PlanExecutor } from '../../plans/executor.js';
 import { PlanStatusSchema, PlanOriginSchema } from '../../plans/schema.js';
 import { logger } from '../../logging/index.js';
+import type { WorkflowTracker } from '../../workflows/tracker.js';
 
 /**
  * REST surface for the unified plan store.
@@ -12,7 +13,27 @@ import { logger } from '../../logging/index.js';
  * POST   /:id/approve   approve a draft AND kick off execution (async)
  * POST   /:id/cancel    set status=cancelled (only meaningful pre-execution)
  */
-export function createPlansRoute(store: PlanStore, executor: PlanExecutor) {
+function enrichPlan(plan: any, wfTracker?: WorkflowTracker): any {
+  const runId = plan?.result?.runId;
+  if (!runId || !wfTracker) return plan;
+
+  const run = wfTracker.getRun(runId);
+  if (!run) return plan;
+
+  return {
+    ...plan,
+    workflowRun: {
+      ...run,
+      steps: wfTracker.getSteps(runId).map((step, index) => ({
+        ...step,
+        agentId: step.agentId ?? plan.steps?.[index]?.agentId ?? null,
+        description: plan.steps?.[index]?.description,
+      })),
+    },
+  };
+}
+
+export function createPlansRoute(store: PlanStore, executor: PlanExecutor, wfTracker?: WorkflowTracker) {
   const r = new Hono();
 
   r.get('/', (c) => {
@@ -51,7 +72,7 @@ export function createPlansRoute(store: PlanStore, executor: PlanExecutor) {
     const id = c.req.param('id');
     const plan = store.get(id);
     if (!plan) return c.json({ error: 'Plan not found' }, 404);
-    return c.json(plan);
+    return c.json(enrichPlan(plan, wfTracker));
   });
 
   r.post('/:id/approve', async (c) => {

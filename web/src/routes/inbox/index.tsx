@@ -46,6 +46,8 @@ interface Plan {
   status: string;
   steps?: { id?: string; description: string }[];
   createdAt: string;
+  endedAt?: string;
+  result?: { runId?: string } | null;
 }
 
 interface Skill {
@@ -76,8 +78,17 @@ async function fetchGates(): Promise<Gate[]> {
 }
 
 async function fetchPlans(): Promise<Plan[]> {
-  const data = await fetchJson<{ plans?: Plan[] } | Plan[]>(`${API}/api/v1/plans?status=draft`);
-  return Array.isArray(data) ? data : data.plans ?? [];
+  const [draftData, doneData] = await Promise.all([
+    fetchJson<{ plans?: Plan[] } | Plan[]>(`${API}/api/v1/plans?status=draft`),
+    fetchJson<{ plans?: Plan[] } | Plan[]>(`${API}/api/v1/plans?status=done&origin=chat&limit=10`),
+  ]);
+  const drafts = Array.isArray(draftData) ? draftData : draftData.plans ?? [];
+  const done = Array.isArray(doneData) ? doneData : doneData.plans ?? [];
+  return [...drafts, ...done].sort((a, b) => {
+    const aTime = new Date(a.endedAt ?? a.createdAt).getTime();
+    const bTime = new Date(b.endedAt ?? b.createdAt).getTime();
+    return bTime - aTime;
+  });
 }
 
 async function fetchSkills(): Promise<Skill[]> {
@@ -111,6 +122,13 @@ function normalizeGate(g: GateRow): Gate {
 }
 
 function planBody(p: Plan): React.ReactNode {
+  if (p.status === 'done') {
+    return (
+      <span>
+        completed{p.result?.runId ? <> · run {p.result.runId.slice(0, 8)}</> : null}
+      </span>
+    );
+  }
   const steps = p.steps?.slice(0, 7) ?? [];
   if (steps.length === 0) return <span>No steps defined.</span>;
   return (
@@ -283,7 +301,7 @@ function InboxPage() {
   useEffect(() => {
     const last = events[events.length - 1];
     if (!last) return;
-    const relevant = ['gate.opened', 'gate.approved', 'gate.rejected', 'skill.proposed', 'skill.approved', 'skill.rejected', 'plan.draft', 'plan.approved', 'plan.cancelled'];
+    const relevant = ['gate.opened', 'gate.approved', 'gate.rejected', 'skill.proposed', 'skill.approved', 'skill.rejected', 'plan.draft', 'plan.approved', 'plan.done', 'plan.cancelled'];
     if (relevant.includes(last.type)) {
       void queryClient.invalidateQueries({ queryKey: ['inbox'] });
       void queryClient.invalidateQueries({ queryKey: ['inbox-gates'] });
@@ -547,6 +565,7 @@ function InboxPage() {
                   variant={entry._kind}
                   title={entry.title}
                   body={entry.body}
+                  status={entry._kind === 'plan' && (entry.raw as Plan).status === 'done' ? 'approved' : undefined}
                   onApprove={() => handleApprove(entry)}
                   onReject={() => handleReject(entry)}
                   {...(isGate

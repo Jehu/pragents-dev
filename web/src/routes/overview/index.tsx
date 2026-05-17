@@ -147,6 +147,7 @@ const EVENT_ICONS: Record<string, string> = {
   'skill.rejected': '✗',
   'plan.draft':     '✏',
   'plan.approved':  '✓',
+  'plan.done':      '✓',
   'plan.cancelled': '✗',
 };
 
@@ -168,6 +169,7 @@ const EVENT_LABELS: Record<string, string> = {
   'skill.rejected': 'Skill rejected',
   'plan.draft':     'Plan drafted',
   'plan.approved':  'Plan approved',
+  'plan.done':      'Plan completed',
   'plan.cancelled': 'Plan cancelled',
 };
 
@@ -500,7 +502,7 @@ function OverviewPage() {
     const relevant = [
       'gate.opened', 'gate.approved', 'gate.rejected',
       'skill.proposed', 'skill.approved', 'skill.rejected',
-      'plan.draft', 'plan.approved', 'plan.cancelled',
+      'plan.draft', 'plan.approved', 'plan.done', 'plan.cancelled',
     ];
     if (relevant.includes(last.type)) {
       void queryClient.invalidateQueries({ queryKey: ['overview-inbox'] });

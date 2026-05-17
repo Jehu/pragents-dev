@@ -1,12 +1,14 @@
 import { Hono } from 'hono';
 import * as YAML from 'yaml';
 import { z } from 'zod';
+import { mkdirSync } from 'node:fs';
 import type { ResolvedAgent } from '../../config/schema.js';
 import { AgentConfig, ProjectConfig } from '../../config/schema.js';
 import { PROJECT_AGENT_TYPES, type ProjectAgentType } from '@pragents/schema';
 import type { AgentSessionManager } from '../../agents/manager.js';
 import { readYamlDoc, writeYamlDoc, applyMutation, EtagMismatchError } from '../../config/yaml-rw.js';
 import { logger } from '../../logging/index.js';
+import { expandHome } from '../../util/paths.js';
 
 /**
  * Config-UI: write API for projects + their agents (Slice 2 / U7).
@@ -205,6 +207,7 @@ export function createProjectsRoute(opts: ProjectsRouteOptions) {
           existing.set(id, d.createNode(projectShape.data));
         }
       });
+      mkdirSync(expandHome(projectShape.data.directory), { recursive: true });
       const { etag } = writeYamlDoc(configPath, doc, { ifMatch });
       c.header('ETag', etag);
       logger.info({ projectId: id }, 'Project created via API');

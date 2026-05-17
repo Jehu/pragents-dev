@@ -99,13 +99,15 @@ export class WorkflowEngine {
         // Resolve effective failure policy: step-level overrides workflow-level default.
         const failurePolicy = step.onStepFailure ?? def.onStepFailure ?? 'abort';
 
-        const stepRows = step.parallel.map((s) => this.tracker.createStep(runId, s.id));
+        const stepRows: Array<{ id: string } | undefined> = [];
         const stepContexts: Array<{ agentId?: string; projectId?: string }> = [];
         const results = await Promise.allSettled(step.parallel.map(async (s, i) => {
-          this.tracker.startStep(stepRows[i].id);
           const agentId = await this.resolveAgent(s);
           const agent = this.agents.find((a) => a.id === agentId);
           if (!agent) throw new Error(`Agent "${agentId}" not found`);
+          const stepRow = this.tracker.createStep(runId, s.id, agent.id);
+          stepRows[i] = stepRow;
+          this.tracker.startStep(stepRow.id);
           stepContexts[i] = { agentId: agent.id, projectId: agent.projectId };
           this.emit('workflow.step_started', {
             runId,
@@ -116,7 +118,7 @@ export class WorkflowEngine {
           });
           const prompt = this.buildPrompt(s, outputs);
           const result = await this.sessionMgr.dispatch(agent, prompt);
-          this.tracker.completeStep(stepRows[i].id, result);
+          this.tracker.completeStep(stepRow.id, result);
           if (s.output) outputs[s.output] = result;
           this.emit('workflow.step_completed', {
             runId,
@@ -134,7 +136,9 @@ export class WorkflowEngine {
         for (let i = 0; i < results.length; i++) {
           if (results[i].status === 'rejected') {
             const err = (results[i] as PromiseRejectedResult).reason;
-            this.tracker.failStep(stepRows[i].id, err?.message || String(err));
+            if (stepRows[i]) {
+              this.tracker.failStep(stepRows[i]!.id, err?.message || String(err));
+            }
             this.emit('workflow.step_failed', {
               runId,
               stepId: step.parallel[i].id,
@@ -273,14 +277,15 @@ export class WorkflowEngine {
       }
 
       if (!step.prompt) continue;
-      const stepRow = this.tracker.createStep(runId, step.id);
       let stepAgent: ResolvedAgent | undefined;
+      let stepRow: { id: string } | undefined;
       try {
-        this.tracker.startStep(stepRow.id);
         const agentId = await this.resolveAgent(step);
         const agent = this.agents.find((a) => a.id === agentId);
         if (!agent) throw new Error(`Agent "${agentId}" not found`);
         stepAgent = agent;
+        stepRow = this.tracker.createStep(runId, step.id, agent.id);
+        this.tracker.startStep(stepRow.id);
         this.emit('workflow.step_started', {
           runId,
           stepId: step.id,
@@ -301,7 +306,9 @@ export class WorkflowEngine {
           projectId: agent.projectId,
         });
       } catch (err: any) {
-        this.tracker.failStep(stepRow.id, err.message);
+        if (stepRow) {
+          this.tracker.failStep(stepRow.id, err.message);
+        }
         this.emit('workflow.step_failed', {
           runId,
           stepId: step.id,

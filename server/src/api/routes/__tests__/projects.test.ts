@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Hono } from 'hono';
@@ -95,17 +95,19 @@ describe('createProjectsRoute', () => {
 
   describe('POST /', () => {
     it('creates a new project and the YAML file contains the block', async () => {
+      const projectDir = join(dir, 'beta-project');
       const res = await app.request('/projects', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           id: 'beta',
           name: 'Beta Project',
-          directory: '~/code/beta',
+          directory: projectDir,
         }),
       });
       expect(res.status).toBe(201);
       expect(res.headers.get('ETag')).toMatch(/^W\/"[a-f0-9]{64}"$/);
+      expect(existsSync(projectDir)).toBe(true);
       const onDisk = readFileSync(configPath, 'utf8');
       expect(onDisk).toContain('beta:');
       expect(onDisk).toContain('Beta Project');
@@ -148,7 +150,7 @@ describe('createProjectsRoute', () => {
       const res = await app.request('/projects', {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'If-Match': 'W/"stale"' },
-        body: JSON.stringify({ id: 'gamma', name: 'Gamma', directory: '~/g' }),
+        body: JSON.stringify({ id: 'gamma', name: 'Gamma', directory: join(dir, 'gamma-project') }),
       });
       expect(res.status).toBe(412);
       // File untouched.
@@ -161,7 +163,7 @@ describe('createProjectsRoute', () => {
       const res = await app.request('/projects', {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'If-Match': etag },
-        body: JSON.stringify({ id: 'gamma', name: 'Gamma', directory: '~/g' }),
+        body: JSON.stringify({ id: 'gamma', name: 'Gamma', directory: join(dir, 'gamma-project') }),
       });
       expect(res.status).toBe(201);
     });

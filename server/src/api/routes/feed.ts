@@ -181,6 +181,36 @@ export function createFeedRoute(
         LIMIT 20
       `;
       result.completedGates = db.prepare(completedGatesSql).all();
+
+      const completedPlansSql = `
+        SELECT id, status, origin, agent_id as agentId, project_id as projectId,
+               conversation_id as conversationId, prompt, result_json as resultJson,
+               error, created_at as createdAt, ended_at as endedAt
+        FROM plans
+        WHERE status IN ('done', 'failed')
+          ${project ? 'AND project_id = ?' : ''}
+          ${agent ? 'AND agent_id = ?' : ''}
+        ORDER BY ended_at DESC
+        LIMIT 20
+      `;
+      const completedPlanParams: string[] = [];
+      if (project) completedPlanParams.push(project);
+      if (agent) completedPlanParams.push(agent);
+      result.completedPlans = (db.prepare(completedPlansSql).all(...completedPlanParams) as any[]).map((p) => {
+        let resultJson: unknown = null;
+        if (p.resultJson) {
+          try {
+            resultJson = JSON.parse(p.resultJson);
+          } catch {
+            resultJson = p.resultJson;
+          }
+        }
+        return {
+          ...p,
+          result: resultJson,
+          resultJson: undefined,
+        };
+      });
     }
 
     return c.json(result);

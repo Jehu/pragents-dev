@@ -158,7 +158,12 @@ export async function startServer() {
     if (pLoaded.length > 0) {
       logger.info({ projectId, loaded: pLoaded.join(', ') }, 'Project workflows loaded');
     }
-    for (const w of pWarn) logger.warn({ projectId, warning: w }, 'Project workflow warning');
+    for (const w of pWarn) {
+      logger.warn(
+        { projectId, workflowDir: dir, warning: w },
+        'Project workflow directory is missing or not accessible',
+      );
+    }
   }
 
   for (const projectId of Object.keys(config.projects)) {
@@ -340,7 +345,7 @@ export async function startServer() {
   app.route('/api/v1/workflows', createWorkflowsRoute(wfRegistry, wfEngine, wfTracker));
   app.route('/api/v1/models', createModelsRoute(piModelRegistry));
   app.route('/api/v1/nl', createNLRoutes(decomposer, agents, planStore, planExecutor));
-  app.route('/api/v1/plans', createPlansRoute(planStore, planExecutor));
+  app.route('/api/v1/plans', createPlansRoute(planStore, planExecutor, wfTracker));
   app.route('/api/v1/cost', createCostRoute(costTracker));
   app.route('/api/v1/goals', createGoalsRoute(goalRegistry, goalScheduler));
   app.route('/api/v1/gates', createGatesRoute(eventBuffer));

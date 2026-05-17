@@ -6,11 +6,13 @@ import { initDb, closeDb } from '../../../db/sqlite.js';
 import { PlanStore } from '../../../plans/store.js';
 import { PlanExecutor } from '../../../plans/executor.js';
 import { createPlansRoute } from '../plans.js';
+import { WorkflowTracker } from '../../../workflows/tracker.js';
 
 describe('Plans API — /api/v1/plans', () => {
   const tmpDir = mkdtempSync(join(tmpdir(), 'pragents-plans-route-'));
   let store: PlanStore;
   let executor: PlanExecutor;
+  let wfTracker: WorkflowTracker;
   // Mock workflow engine — execute() resolves quickly with a fake runId.
   const wfEngine = { execute: vi.fn().mockResolvedValue('run-xyz') } as any;
 
@@ -18,6 +20,7 @@ describe('Plans API — /api/v1/plans', () => {
     initDb(join(tmpDir, 'test.db'));
     store = new PlanStore();
     executor = new PlanExecutor(store, wfEngine);
+    wfTracker = new WorkflowTracker();
   });
   afterAll(() => {
     closeDb();
@@ -25,7 +28,7 @@ describe('Plans API — /api/v1/plans', () => {
   });
 
   function makeApp() {
-    return createPlansRoute(store, executor);
+    return createPlansRoute(store, executor, wfTracker);
   }
 
   it('GET / returns a list under { plans }', async () => {
@@ -79,6 +82,34 @@ describe('Plans API — /api/v1/plans', () => {
     const body = await res.json();
     expect(body.id).toBe(plan.id);
     expect(body.steps).toHaveLength(1);
+  });
+
+  it('GET /:id enriches completed plans with workflow run steps', async () => {
+    const plan = store.create({
+      origin: 'nl',
+      prompt: 'p',
+      steps: [{ description: 'x', agentId: 'dev' }],
+    });
+    const run = wfTracker.createRun('plan-test');
+    const step = wfTracker.createStep(run.id, 'step-0', 'dev');
+    wfTracker.startStep(step.id);
+    wfTracker.completeStep(step.id, 'artifact output');
+    wfTracker.completeRun(run.id);
+    store.approve(plan.id);
+    store.setExecuting(plan.id);
+    store.setDone(plan.id, { runId: run.id });
+
+    const app = makeApp();
+    const res = await app.request(`/${plan.id}`);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.workflowRun.id).toBe(run.id);
+    expect(body.workflowRun.steps[0]).toMatchObject({
+      stepId: 'step-0',
+      agentId: 'dev',
+      status: 'complete',
+      output: 'artifact output',
+    });
   });
 
   it('POST /:id/approve transitions draft and kicks off execution', async () => {
