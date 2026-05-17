@@ -3,3 +3,15 @@ description: "1 well-researched blog article per week"
 cadence: "0 8 * * 1"
 deadline: "0 16 * * 5"
 workflow: content-pipeline
+acceptance:
+  - article is published
+  - min 1500 words
+  - at least 3 cited sources
+  - matches customer styleguide
+  - SEO keyword integrated
+human_gates:
+  - step: after_draft
+    label: Review article draft
+    timeout: 4h
+  - step: before_publish
+    label: Final approval

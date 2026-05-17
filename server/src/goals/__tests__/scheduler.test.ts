@@ -388,6 +388,36 @@ describe('GoalScheduler runGoalById', () => {
     expect(row?.status).toBe('failed');
   });
 
+  it('marks goal_run complete when the linked workflow completes', async () => {
+    const { scheduler } = mkScheduler();
+    const { goalRunId, workflowRunId } = await scheduler.runGoalById('g1');
+
+    scheduler.onEvent({ type: 'workflow.completed', runId: workflowRunId });
+
+    const row = getDb().prepare('SELECT status, completed_at FROM goal_runs WHERE id = ?').get(goalRunId) as {
+      status: string;
+      completed_at: string | null;
+    };
+    expect(row.status).toBe('complete');
+    expect(row.completed_at).toEqual(expect.any(String));
+    expect((scheduler as any).activeGoalRuns.has(workflowRunId)).toBe(false);
+  });
+
+  it('marks goal_run failed when the linked workflow fails', async () => {
+    const { scheduler } = mkScheduler();
+    const { goalRunId, workflowRunId } = await scheduler.runGoalById('g1');
+
+    scheduler.onEvent({ type: 'workflow.failed', runId: workflowRunId });
+
+    const row = getDb().prepare('SELECT status, completed_at FROM goal_runs WHERE id = ?').get(goalRunId) as {
+      status: string;
+      completed_at: string | null;
+    };
+    expect(row.status).toBe('failed');
+    expect(row.completed_at).toEqual(expect.any(String));
+    expect((scheduler as any).activeGoalRuns.has(workflowRunId)).toBe(false);
+  });
+
   it('prunes cooldown map for goals removed from config (I1)', async () => {
     const { scheduler, deps } = mkScheduler();
     await scheduler.runGoalById('g1');

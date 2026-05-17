@@ -20,6 +20,10 @@ interface Goal {
   targetWorkflowId?: string;
   workflow?: string;
   deadline?: string;
+  acceptance?: string[];
+  humanGates?: Array<{ step: string; label: string; timeout?: string }>;
+  nextTriggerAt?: string | null;
+  nextDeadlineAt?: string | null;
   status?: string;
   createdAt?: string;
 }
@@ -27,7 +31,9 @@ interface Goal {
 export interface GoalRun {
   id: string;
   goalId: string;
+  workflowRunId?: string | null;
   triggeredAt: string;
+  completedAt?: string | null;
   status: string;
   error?: string;
 }
@@ -104,10 +110,25 @@ export function relativeTimeMs(tsMs: number): string {
   return `${Math.floor(h / 24)}d ago`;
 }
 
+export function relativeFutureTime(ts: string | null | undefined): string {
+  if (!ts) return 'not scheduled';
+  const ms = new Date(ts).getTime();
+  if (Number.isNaN(ms)) return ts;
+  const diff = ms - Date.now();
+  if (diff <= 0) return 'due now';
+  const minutes = Math.ceil(diff / 60_000);
+  if (minutes < 60) return `in ${minutes}m`;
+  const hours = Math.ceil(minutes / 60);
+  if (hours < 24) return `in ${hours}h`;
+  return `in ${Math.ceil(hours / 24)}d`;
+}
+
 const STATUS_PILL_MAP: Record<string, StatusType> = {
+  triggered: 'running',
   running: 'running',
   complete: 'complete',
   failed: 'failed',
+  escalated: 'busy',
   pending: 'idle',
 };
 
@@ -162,8 +183,8 @@ function GoalTable({ goals }: { goals: Goal[] }) {
       <table className="w-full text-sm text-left">
         <thead>
           <tr className="border-b border-zinc-800 text-[11px] uppercase tracking-wider text-zinc-500">
-            <th className="py-2 pr-4 font-medium">ID</th>
-            <th className="py-2 pr-4 font-medium">Description</th>
+            <th className="py-2 pr-4 font-medium">Goal</th>
+            <th className="py-2 pr-4 font-medium">Outcome</th>
             <th className="py-2 pr-4 font-medium">Schedule</th>
             <th className="py-2 pr-4 font-medium">Target</th>
             <th className="py-2 pr-4 font-medium">Deadline</th>
@@ -180,10 +201,34 @@ function GoalTable({ goals }: { goals: Goal[] }) {
                 </td>
                 <td className="py-2.5 pr-4 align-top">
                   <span className="text-zinc-200">{g.description}</span>
+                  {g.acceptance && g.acceptance.length > 0 && (
+                    <ul className="mt-2 space-y-1">
+                      {g.acceptance.map((item) => (
+                        <li key={item} className="text-[11px] text-zinc-400">
+                          {item}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {g.humanGates && g.humanGates.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {g.humanGates.map((gate) => (
+                        <span
+                          key={`${gate.step}:${gate.label}`}
+                          className="inline-flex rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[11px] text-amber-200"
+                        >
+                          {gate.label}{gate.timeout ? ` · ${gate.timeout}` : ''}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </td>
                 <td className="py-2.5 pr-4 align-top">
                   <span className="font-mono text-xs text-zinc-300 block">{g.cadence ?? g.cron}</span>
                   <span className="text-[11px] text-zinc-500">{parseCron(g.cadence ?? g.cron ?? '')}</span>
+                  <span className="mt-1 block text-[11px] text-zinc-400">
+                    Next trigger {relativeFutureTime(g.nextTriggerAt)}
+                  </span>
                 </td>
                 <td className="py-2.5 pr-4 align-top">
                   <span className="text-xs text-zinc-400">
@@ -199,6 +244,11 @@ function GoalTable({ goals }: { goals: Goal[] }) {
                         })()
                       : '—'}
                   </span>
+                  {g.nextDeadlineAt && (
+                    <span className="mt-1 block text-[11px] text-zinc-500">
+                      {relativeFutureTime(g.nextDeadlineAt)}
+                    </span>
+                  )}
                 </td>
                 <td className="py-2.5 pr-4 align-top text-right">
                   <button
@@ -252,10 +302,14 @@ function GoalRunList({ runs }: { runs: GoalRun[] }) {
         <div key={run.id} className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2.5">
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-2 min-w-0">
+              <span className="font-mono text-[11px] text-zinc-400">{run.id}</span>
               <span className="font-mono text-[11px] text-zinc-500">{run.goalId}</span>
               <span className="text-xs text-zinc-400">
                 {relativeTimeMs(new Date(run.triggeredAt).getTime())}
               </span>
+              {run.workflowRunId && (
+                <span className="font-mono text-[11px] text-zinc-600">{run.workflowRunId}</span>
+              )}
             </div>
             <div className="flex items-center gap-2">
               <StatusPill status={toStatusPill(run.status)} />

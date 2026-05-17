@@ -6,6 +6,12 @@ export const GoalDef = z.object({
   cadence: z.string(), // cron expression
   deadline: z.string().optional(), // cron expression
   workflow: z.string(), // references workflows/*.yaml name
+  acceptance: z.array(z.string().min(1)).default([]),
+  human_gates: z.array(z.object({
+    step: z.string().min(1),
+    label: z.string().min(1),
+    timeout: z.string().optional(),
+  })).default([]),
   warn_before_ms: z.number().int().positive().default(7200000), // 2h default
 });
 
