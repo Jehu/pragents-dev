@@ -35,10 +35,11 @@ const WorkflowStep = z.lazy(() =>
     /** Controls what happens when one or more parallel sub-steps fail.
      *  abort (default): throw immediately, entire run fails.
      *  continue: collect all results (ok + error), pass as JSON to next step via outputs.
-     *  resume-later: persist partial results and pause for human gate (stub — behaves like continue, see TODO).
      *  Default `'abort'` is applied at the engine level (engine.ts: `step.onStepFailure ?? def.onStepFailure ?? 'abort'`).
+     *  Want "pause for a human on partial failure"? Use `continue` plus an explicit
+     *  `human_gate` step after the parallel group and inspect `<step.id>.results`.
      */
-    onStepFailure: z.enum(['abort', 'continue', 'resume-later']).optional(),
+    onStepFailure: z.enum(['abort', 'continue']).optional(),
   }),
 );
 
@@ -59,11 +60,11 @@ export const WorkflowDef = z.object({
   trigger: TriggerConfig.optional(),
   steps: z.array(WorkflowStep),
   /** Workflow-level default for onStepFailure; individual steps override this. Engine falls back to `'abort'` if neither level sets it. */
-  onStepFailure: z.enum(['abort', 'continue', 'resume-later']).optional(),
+  onStepFailure: z.enum(['abort', 'continue']).optional(),
 });
 
 // Zod schema + inferred type: import type { WorkflowStep } for the type, { WorkflowStepSchema } for the schema
 export type WorkflowDef = z.infer<typeof WorkflowDef>;
 export type WorkflowStep = z.infer<typeof WorkflowStep>;
 export type TriggerConfig = z.infer<typeof TriggerConfig>;
-export type OnStepFailure = 'abort' | 'continue' | 'resume-later';
+export type OnStepFailure = 'abort' | 'continue';

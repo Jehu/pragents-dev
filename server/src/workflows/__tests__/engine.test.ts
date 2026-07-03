@@ -6,6 +6,7 @@ import { WorkflowEngine } from '../../workflows/engine.js';
 import { EventBuffer } from '../../events/buffer.js';
 import type { ResolvedAgent, AgentType } from '../../config/schema.js';
 import type { WorkflowDef } from '../../workflows/schema.js';
+import { WorkflowDef as WorkflowDefSchema } from '../../workflows/schema.js';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -339,7 +340,7 @@ describe('WorkflowEngine', () => {
   //   7. Verify finalize step runs
   it.todo('full revision loop: two revisions then approve completes workflow');
 
-  // --- onStepFailure: abort / continue / resume-later ---
+  // --- onStepFailure: abort / continue ---
 
   it('onStepFailure=abort (default): parallel group failure throws', async () => {
     const failingMgr = {
@@ -416,20 +417,12 @@ describe('WorkflowEngine', () => {
     expect(runId).toBeTruthy();
   });
 
-  it('onStepFailure=resume-later: behaves like continue (stub)', async () => {
-    let callCount2 = 0;
-    const mixedMgr2 = {
-      dispatch: vi.fn().mockImplementation(async () => {
-        callCount2++;
-        if (callCount2 === 1) return 'ok';
-        throw new Error('stub fail');
-      }),
-    } as any;
-    const wf: WorkflowDef = {
+  it('rejects the removed resume-later policy at schema level', () => {
+    const result = WorkflowDefSchema.safeParse({
       name: 'resume-later-test',
       steps: [
         {
-          type: 'agent' as const,
+          type: 'agent',
           id: 'group-rl',
           onStepFailure: 'resume-later',
           parallel: [
@@ -438,11 +431,8 @@ describe('WorkflowEngine', () => {
           ],
         },
       ],
-    };
-    const engine = new WorkflowEngine(tracker, router, mixedMgr2, agents, eventBuffer, 'test-project');
-    // resume-later is a stub that behaves like continue — should not throw
-    const runId = await engine.execute(wf);
-    expect(runId).toBeTruthy();
+    });
+    expect(result.success).toBe(false);
   });
 
   it('workflow-level onStepFailure default is used when step does not override', async () => {

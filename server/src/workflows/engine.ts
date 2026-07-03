@@ -155,17 +155,7 @@ export class WorkflowEngine {
             throw new Error(`Parallel group failed: ${failures.length} step(s) failed`);
           }
 
-          if (failurePolicy === 'resume-later') {
-            // TODO: full resume-later implementation — persist partial results to DB
-            // and emit a human_gate event so an operator can decide to continue or abort.
-            // For now this falls through to 'continue' behaviour and logs a warning.
-            logger.warn(
-              { runId, stepId: step.id, failures: failures.length },
-              'onStepFailure=resume-later is not yet fully implemented; treating as continue',
-            );
-          }
-
-          // 'continue' (and stub resume-later): collect all results into a JSON blob
+          // 'continue': collect all results into a JSON blob
           // and expose it as `<step.id>.results` in the outputs map so downstream
           // steps can inspect which sub-steps succeeded/failed.
           const collected: Record<string, { ok: boolean; value?: string; error?: string }> = {};

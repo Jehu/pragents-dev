@@ -78,7 +78,7 @@ projects:
 #   description: |
 #     Run multiple research agents in parallel. If one fails, collect partial
 #     results and continue — no expensive work is discarded.
-#   onStepFailure: continue          # workflow-level default (abort | continue | resume-later)
+#   onStepFailure: continue          # workflow-level default (abort | continue)
 #   steps:
 #     - id: gather
 #       onStepFailure: continue      # step-level override (takes precedence over workflow default)
