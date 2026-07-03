@@ -21,6 +21,32 @@ export function createWorkflowsRoute(registry: WorkflowRegistry, engine: Workflo
     });
   }
 
+  /**
+   * Plan-run linkage: ad-hoc workflows compiled from NL/chat plans are named
+   * `plan-<id-prefix>` and carry no human-readable context of their own. The
+   * originating plan stores the workflow run id in result_json on completion
+   * (PlanExecutor.setDone), so we can attach the plan's prompt and per-step
+   * descriptions for display.
+   */
+  function planContextForRun(runId: string, workflowName: string) {
+    if (!workflowName?.startsWith('plan-')) return null;
+    try {
+      const db = getDb();
+      const row = db.prepare(
+        "SELECT id, prompt, steps_json FROM plans WHERE json_extract(result_json, '$.runId') = ? LIMIT 1",
+      ).get(runId) as { id: string; prompt: string | null; steps_json: string | null } | undefined;
+      if (!row) return null;
+      let stepDescriptions: string[] = [];
+      try {
+        const steps = JSON.parse(row.steps_json ?? '[]');
+        if (Array.isArray(steps)) stepDescriptions = steps.map((s: any) => s?.description ?? '');
+      } catch { /* corrupt steps_json — descriptions stay empty */ }
+      return { id: row.id, prompt: row.prompt ?? '', stepDescriptions };
+    } catch {
+      return null; // enrichment is best-effort; never break the runs list
+    }
+  }
+
   r.get('/', (c) => {
     const workflows = registry.listEntries().map(({ def, projectId }) => ({
       name: def.name,
@@ -43,6 +69,7 @@ export function createWorkflowsRoute(registry: WorkflowRegistry, engine: Workflo
     const runsWithSteps = runs.map((run: any) => ({
       ...run,
       steps: enrichStepsWithGates(run.id, tracker.getSteps(run.id)),
+      plan: planContextForRun(run.id, run.workflowName),
     }));
 
     return c.json(runsWithSteps);
@@ -51,7 +78,11 @@ export function createWorkflowsRoute(registry: WorkflowRegistry, engine: Workflo
   r.get('/runs/:id', (c) => {
     const run = tracker.getRun(c.req.param('id'));
     if (!run) return c.json({ error: 'Run not found' }, 404);
-    return c.json({ ...run, steps: enrichStepsWithGates(run.id, tracker.getSteps(run.id)) });
+    return c.json({
+      ...run,
+      steps: enrichStepsWithGates(run.id, tracker.getSteps(run.id)),
+      plan: planContextForRun(run.id, run.workflowName),
+    });
   });
 
   r.get('/:name', (c) => {
