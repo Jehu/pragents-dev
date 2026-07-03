@@ -105,6 +105,46 @@ describe('Feed API', () => {
     expect(body.blocked).toBeUndefined();
   });
 
+  it('enriches gates with workflow name and surrounding steps (batched fetch)', async () => {
+    // Real run with a completed step before the gate and one step after it
+    const run = wfTracker.createRun('enrich-wf');
+    const done = wfTracker.createStep(run.id, 'draft', 'dev@proj-1');
+    wfTracker.startStep(done.id);
+    wfTracker.completeStep(done.id, 'draft output');
+    getDb().prepare(
+      "INSERT INTO human_gates (id, workflow_run_id, step_id, label, timeout_at) VALUES (?, ?, ?, ?, ?)",
+    ).run('gate-enrich-1', run.id, 'review', 'Review draft', new Date(Date.now() + 3600000).toISOString());
+
+    // Register the workflow definition so the route can order steps around the gate
+    (registry as any).workflows.set('enrich-wf', {
+      def: {
+        name: 'enrich-wf',
+        steps: [
+          { id: 'draft', type: 'agent', agent: 'dev@proj-1', prompt: 'Write draft', output: 'draft' },
+          { id: 'review', type: 'human_gate', label: 'Review draft' },
+          { id: 'publish', type: 'agent', agent: 'dev@proj-1', prompt: 'Publish' },
+        ],
+      },
+      projectId: null,
+    });
+
+    const app = createFeedRoute(tracker, eventBuffer, wfTracker, registry);
+    const res = await app.request('/?intent=gates');
+    const body = await res.json();
+    const gate = body.gates.find((g: any) => g.id === 'gate-enrich-1');
+    expect(gate).toBeDefined();
+    expect(gate.workflowName).toBe('enrich-wf');
+    expect(gate.previousStepOutputs).toHaveLength(1);
+    expect(gate.previousStepOutputs[0]).toMatchObject({
+      stepId: 'draft',
+      status: 'complete',
+      output: 'draft output',
+    });
+    expect(gate.nextSteps).toEqual([
+      { stepId: 'publish', type: 'agent', label: 'publish' },
+    ]);
+  });
+
   it('filters by intent=review returns only needsReview', async () => {
     tracker.create({ projectId: 'proj-1', agentId: 'dev', description: 'Review plz', status: 'needs_review' });
 

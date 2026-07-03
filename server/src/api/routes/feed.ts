@@ -44,12 +44,17 @@ export function createFeedRoute(
       `;
       const rawGates = db.prepare(gatesSql).all() as any[];
 
+      // Batch-fetch runs and steps once (avoids 2 queries per gate).
+      const runIds = [...new Set(rawGates.map((g: any) => g.workflowRunId).filter(Boolean))] as string[];
+      const runsById = wfTracker.getRunsByIds(runIds);
+      const stepsByRun = wfTracker.getStepsByRunIds(runIds);
+
       // Enrich gates with workflow context: name, previous step outputs, next steps
       result.gates = rawGates.map((gate: any) => {
         try {
-          const run = wfTracker.getRun(gate.workflowRunId);
+          const run = runsById.get(gate.workflowRunId) ?? null;
           const workflowName = run?.workflowName || null;
-          const steps = run ? wfTracker.getSteps(gate.workflowRunId) : [];
+          const steps = run ? (stepsByRun.get(gate.workflowRunId) ?? []) : [];
 
           // Get workflow definition for step ordering
           let previousStepOutputs: any[] = [];
