@@ -3,6 +3,7 @@ import { createFileRoute } from '@tanstack/react-router';
 import { useEtagFetch } from '../../hooks/useEtagFetch.js';
 import { useSectionSave } from '../../hooks/useSectionSave.js';
 import { SettingsSection } from '../../components/SettingsSection.js';
+import { SettingsDirtyProvider, SettingsNav, type SettingsNavEntry } from '../../components/SettingsNav.js';
 import { PoolForm, type PoolFormValues } from '../../components/PoolForm.js';
 import { ChatForm, type ChatFormValues } from '../../components/ChatForm.js';
 import {
@@ -100,6 +101,18 @@ function isSubstantiveAgentPayload(p: Record<string, unknown>): boolean {
 
 const SETTINGS_URL = '/api/v1/settings';
 
+/** Anchor targets = the testId/DOM id each SettingsSection renders. */
+const SETTINGS_NAV_ENTRIES: SettingsNavEntry[] = [
+  { id: 'section-company', label: 'Company' },
+  { id: 'section-company-agent-office', label: 'Office agent' },
+  { id: 'section-company-agent-pm', label: 'PM agent' },
+  { id: 'section-skill-approval', label: 'Skill approval' },
+  { id: 'section-pool', label: 'Session pool' },
+  { id: 'section-chat', label: 'Chat' },
+  { id: 'section-interfaces', label: 'Web interface' },
+  { id: 'section-costs', label: 'Model costs' },
+];
+
 function SettingsPage() {
   const { data, etag, refetch, loading, error } = useEtagFetch<SettingsSnapshot>(
     SETTINGS_URL,
@@ -117,37 +130,48 @@ function SettingsPage() {
   }
 
   return (
-    <div className="p-6 max-w-3xl mx-auto" data-testid="settings-page">
-      <header className="mb-6">
-        <h1 className="text-xl font-semibold tracking-tight text-zinc-100">
-          Settings
-        </h1>
-        <p className="text-sm text-zinc-500 mt-1">
-          Each section saves independently. External edits to{' '}
-          <span className="font-mono text-zinc-400">pragents.yaml</span> surface
-          via a conflict dialog.
-        </p>
-      </header>
+    <SettingsDirtyProvider>
+      <div className="p-6 max-w-5xl mx-auto flex gap-8" data-testid="settings-page">
+        {/* Section navigation — sticky, with scrollspy and unsaved indicators */}
+        <aside className="hidden md:block w-44 flex-shrink-0">
+          <div className="sticky top-6">
+            <SettingsNav entries={SETTINGS_NAV_ENTRIES} />
+          </div>
+        </aside>
 
-      <CompanySectionBlock data={data} etag={etag} onRefresh={refetch} />
-      <CompanyAgentBlock
-        agentType="office"
-        data={data}
-        etag={etag}
-        onRefresh={refetch}
-      />
-      <CompanyAgentBlock
-        agentType="pm"
-        data={data}
-        etag={etag}
-        onRefresh={refetch}
-      />
-      <SkillApprovalSectionBlock data={data} etag={etag} onRefresh={refetch} />
-      <PoolSectionBlock data={data} etag={etag} onRefresh={refetch} />
-      <ChatSectionBlock data={data} etag={etag} onRefresh={refetch} />
-      <InterfacesSectionBlock data={data} etag={etag} onRefresh={refetch} />
-      <CostsSectionBlock data={data} etag={etag} onRefresh={refetch} />
-    </div>
+        <div className="flex-1 min-w-0 max-w-3xl">
+          <header className="mb-6">
+            <h1 className="text-xl font-semibold tracking-tight text-zinc-100">
+              Settings
+            </h1>
+            <p className="text-sm text-zinc-500 mt-1">
+              Each section saves independently. External edits to{' '}
+              <span className="font-mono text-zinc-400">pragents.yaml</span> surface
+              via a conflict dialog.
+            </p>
+          </header>
+
+          <CompanySectionBlock data={data} etag={etag} onRefresh={refetch} />
+          <CompanyAgentBlock
+            agentType="office"
+            data={data}
+            etag={etag}
+            onRefresh={refetch}
+          />
+          <CompanyAgentBlock
+            agentType="pm"
+            data={data}
+            etag={etag}
+            onRefresh={refetch}
+          />
+          <SkillApprovalSectionBlock data={data} etag={etag} onRefresh={refetch} />
+          <PoolSectionBlock data={data} etag={etag} onRefresh={refetch} />
+          <ChatSectionBlock data={data} etag={etag} onRefresh={refetch} />
+          <InterfacesSectionBlock data={data} etag={etag} onRefresh={refetch} />
+          <CostsSectionBlock data={data} etag={etag} onRefresh={refetch} />
+        </div>
+      </div>
+    </SettingsDirtyProvider>
   );
 }
 

@@ -1,4 +1,5 @@
 import React from 'react';
+import { useReportSectionDirty } from './SettingsNav.js';
 
 /**
  * Container for a single settings sub-form on `/settings`. Each section
@@ -36,13 +37,20 @@ export function SettingsSection({
   children,
   testId,
 }: SettingsSectionProps) {
+  // Report dirty state to the settings nav (no-op outside its provider).
+  // The testId doubles as the section's DOM id / anchor target.
+  useReportSectionDirty(testId, dirty);
+
   return (
     <section
-      className="bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden mb-4"
+      id={testId}
+      // scroll-mt keeps anchors clear of the sticky header band; overflow-hidden
+      // was dropped because it breaks position:sticky for the header.
+      className="bg-zinc-900 border border-zinc-800 rounded-lg mb-4 scroll-mt-4"
       aria-label={title}
       data-testid={testId}
     >
-      <header className="flex items-center justify-between px-5 py-3 border-b border-zinc-800">
+      <header className="sticky top-0 z-10 flex items-center justify-between px-5 py-3 border-b border-zinc-800 bg-zinc-900 rounded-t-lg">
         <div className="min-w-0">
           <h2 className="text-sm font-semibold text-zinc-100 flex items-center gap-2">
             {title}
