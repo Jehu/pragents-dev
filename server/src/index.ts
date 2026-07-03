@@ -175,6 +175,19 @@ export async function startServer() {
   const goalsDir = join(__dirname, '..', '..', 'goals');
   const { loaded: goalsLoaded, warnings: goalWarnings } = goalRegistry.load(goalsDir);
   logger.info({ loaded: goalsLoaded.join(', ') || 'none' }, 'Goals loaded');
+
+  // Declared before the hot-reload closure below; assigned once the scheduler
+  // is constructed. reloadGoals() is the single reload path shared by the fs
+  // watcher and the goals CRUD route — a registry reload WITHOUT a scheduler
+  // restart leaves croner jobs firing the old definitions.
+  let goalScheduler: GoalScheduler | undefined;
+  const reloadGoals = (): string[] => {
+    const { loaded, warnings: goalReloadWarnings } = goalRegistry.load(goalsDir);
+    for (const w of goalReloadWarnings) logger.warn({ warning: w }, 'Goal warning');
+    goalScheduler?.stop();
+    goalScheduler?.start(goalRegistry.list());
+    return loaded;
+  };
   for (const w of warnings) logger.warn({ warning: w }, 'Workflow warning');
 
   // Skills system
@@ -196,7 +209,7 @@ export async function startServer() {
       for (const projectId of Object.keys(config.projects)) {
         loadProjectWorkflows(projectId);
       }
-      const { loaded: gl } = goalRegistry.load(goalsDir);
+      const gl = reloadGoals();
       skillRegistry.load();
       logger.info({ workflows: wf.join(', ') || 'none', goals: gl.join(', ') || 'none' }, 'Registries reloaded');
     }, 1000);
@@ -250,11 +263,12 @@ export async function startServer() {
   });
   sessionMgr.setToolExecutor(toolExecutor);
 
-  // Goal scheduler
-  const goalScheduler = new GoalScheduler(wfRegistry, wfEngine, eventBuffer, sessionMgr, agents);
+  // Goal scheduler (assigned into the hoisted `let` so reloadGoals() above
+  // can restart it after registry reloads)
+  goalScheduler = new GoalScheduler(wfRegistry, wfEngine, eventBuffer, sessionMgr, agents);
   goalScheduler.start(goalRegistry.list());
-  process.on('SIGTERM', () => goalScheduler.stop());
-  process.on('SIGINT', () => goalScheduler.stop());
+  process.on('SIGTERM', () => goalScheduler?.stop());
+  process.on('SIGINT', () => goalScheduler?.stop());
 
   // Auto-extraction: hooks into session disposal and PM monitor
   const autoApprove = config.company.autoApproveSkills ?? false;
@@ -349,7 +363,7 @@ export async function startServer() {
   app.route('/api/v1/nl', createNLRoutes(decomposer, agents, planStore, planExecutor));
   app.route('/api/v1/plans', createPlansRoute(planStore, planExecutor, wfTracker));
   app.route('/api/v1/cost', createCostRoute(costTracker));
-  app.route('/api/v1/goals', createGoalsRoute(goalRegistry, goalScheduler));
+  app.route('/api/v1/goals', createGoalsRoute(goalRegistry, goalScheduler, { goalsDir, reloadGoals }));
   app.route('/api/v1/gates', createGatesRoute(eventBuffer));
   app.route('/api/v1/feed', createFeedRoute(tracker, eventBuffer, wfTracker, wfRegistry, skillRegistry));
   app.route('/api/v1/memory', createMemoryRoute(memory, config));

@@ -312,6 +312,10 @@ These directories are compound-engineering pipeline artifacts. Never flag their 
 | GET | `/api/v1/cost/monthly` | Monthly cost summary |
 | GET | `/api/v1/goals` | List goals |
 | GET | `/api/v1/goals/runs` | Recent goal runs |
+| GET | `/api/v1/goals/:id/raw` | Raw goal YAML + ETag (editor) |
+| POST | `/api/v1/goals` | Create goal from YAML (writes `goals/<id>.yaml`) |
+| PUT | `/api/v1/goals/:id` | Update goal YAML (If-Match enforced) |
+| DELETE | `/api/v1/goals/:id` | Delete goal file (If-Match enforced; run history kept) |
 | GET | `/api/v1/gates/pending` | Pending human gates |
 | POST | `/api/v1/gates/:id/approve` | Approve gate |
 | POST | `/api/v1/gates/:id/reject` | Reject gate |
