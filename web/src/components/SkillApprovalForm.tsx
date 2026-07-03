@@ -78,8 +78,8 @@ export function SkillApprovalForm({ initial, busy, onChange }: SkillApprovalForm
         )}
       </label>
 
-      <fieldset className="block">
-        <legend className="block text-xs font-medium text-zinc-300 mb-1">
+      <fieldset className="border border-zinc-800 rounded-lg px-4 pb-4 pt-1">
+        <legend className="text-xs font-medium text-zinc-300 px-1.5">
           Blocked tools
         </legend>
         <div className="flex flex-wrap gap-1.5 mb-2" data-testid="blocked-tools">
