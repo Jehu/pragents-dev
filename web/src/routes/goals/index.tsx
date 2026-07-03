@@ -139,7 +139,7 @@ function toStatusPill(s: string): StatusType {
 
 // ─── Goal Table ───────────────────────────────────────────────────────────────
 
-function GoalTable({ goals, runs }: { goals: Goal[]; runs: GoalRun[] }) {
+function GoalTable({ goals, runs, knownWorkflows }: { goals: Goal[]; runs: GoalRun[]; knownWorkflows: Set<string> | null }) {
   const queryClient = useQueryClient();
   const [runError, setRunError] = useState<Record<string, string>>({});
   const [expandedGoal, setExpandedGoal] = useState<string | null>(null);
@@ -238,9 +238,22 @@ function GoalTable({ goals, runs }: { goals: Goal[]; runs: GoalRun[] }) {
                   <span className="text-xs text-zinc-400">
                     {g.targetAgentId ?? g.targetWorkflowId ?? g.workflow ?? '—'}
                   </span>
-                  {(g.targetWorkflowId ?? g.workflow) && (
-                    <div className="mt-1 text-[11px] text-indigo-400">workflow linked</div>
-                  )}
+                  {(() => {
+                    const wfName = g.targetWorkflowId ?? g.workflow;
+                    if (!wfName) return null;
+                    // knownWorkflows === null means the registry has not loaded — don't warn on unknown state.
+                    const missing = knownWorkflows !== null && !knownWorkflows.has(wfName);
+                    return missing ? (
+                      <div
+                        className="mt-1 text-[11px] text-amber-300"
+                        title={`No workflow named "${wfName}" is registered. Runs of this goal will fail until the workflow YAML exists.`}
+                      >
+                        ⚠ workflow missing
+                      </div>
+                    ) : (
+                      <div className="mt-1 text-[11px] text-indigo-400">workflow linked</div>
+                    );
+                  })()}
                 </td>
                 <td className="py-2.5 pr-4 align-top">
                   <span className="text-xs text-zinc-400">
@@ -436,6 +449,13 @@ function GoalsPage() {
     staleTime: 15_000,
   });
 
+  // Workflow registry — used to flag goals whose linked workflow no longer exists.
+  const { data: workflowsData } = useQuery({
+    queryKey: ['workflows'],
+    queryFn: () => fetchJson<{ workflows?: Array<{ name: string }> } | Array<{ name: string }>>('/api/v1/workflows'),
+    staleTime: 15_000,
+  });
+
   const goals: Goal[] = !Array.isArray(goalsData) && Array.isArray(goalsData?.goals)
     ? goalsData.goals
     : Array.isArray(goalsData)
@@ -463,7 +483,17 @@ function GoalsPage() {
         ) : goalsLoading ? (
           <LoadingState label="Loading goals" />
         ) : (
-          <GoalTable goals={goals} runs={runs} />
+          <GoalTable
+            goals={goals}
+            runs={runs}
+            knownWorkflows={
+              workflowsData
+                ? new Set(
+                    (Array.isArray(workflowsData) ? workflowsData : workflowsData.workflows ?? []).map((w) => w.name),
+                  )
+                : null
+            }
+          />
         )}
       </section>
 

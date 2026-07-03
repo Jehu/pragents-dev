@@ -343,7 +343,7 @@ export async function rejectItem(item: InboxItem): Promise<void> {
 
 function AgentCard({ agent, activity }: { agent: Agent; activity?: LiveWorkflowActivity }) {
   const status = (activity?.state === 'active' ? 'busy' : (agent.status ?? 'idle')) as StatusType;
-  const skillCount = agent.capabilities?.length ?? 0;
+  const capabilityCount = agent.capabilities?.length ?? 0;
   const displayName = agent.name ?? agent.id;
   const activityLabel = activity?.workflow || activity?.stepId
     ? [activity.workflow, activity.stepId ? `step ${activity.stepId}` : undefined].filter(Boolean).join(' · ')
@@ -372,7 +372,7 @@ function AgentCard({ agent, activity }: { agent: Agent; activity?: LiveWorkflowA
           </span>
         )}
         <span className="text-[11px] text-zinc-500">
-          {skillCount} skill{skillCount !== 1 ? 's' : ''}
+          {capabilityCount} capabilit{capabilityCount !== 1 ? 'ies' : 'y'}
         </span>
       </div>
     </Link>
