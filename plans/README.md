@@ -24,7 +24,7 @@ No plan pushes, merges, or commits to a shared branch — each works on its own
 | 008 | Per-agent tool capability policy (deny-by-default authz) | P2 | M | MED | 002 | DONE |
 | 009 | Remove the `resume-later` failure-policy stub | P3 | S | LOW | 006 | DONE |
 | 010 | Short-lived WebSocket ticket over authenticated POST | P2 | M | MED | 003 | DONE |
-| 011 | Goals CRUD from the Web UI (incl. scheduler-restart fix) | P2 | L | MED | — | TODO |
+| 011 | Goals CRUD from the Web UI (incl. scheduler-restart fix) | P2 | L | MED | — | DONE |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) | REJECTED (with one-line rationale)
 

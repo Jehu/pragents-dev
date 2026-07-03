@@ -5,6 +5,9 @@ import { Button, StatusPill, EmptyState, ErrorState, LoadingState, PageHeader, P
 import type { StatusType } from '../../components/ui/index.js';
 import { useEventBusStore } from '../../stores/eventBus.js';
 import { fetchJson, postJson } from '../../lib/api.js';
+import { Modal } from '../../components/Modal.js';
+import { GoalForm, buildGoalPayload, type GoalFormValues } from '../../components/GoalForm.js';
+import * as YAML from 'yaml';
 
 export const Route = createFileRoute('/goals/')({
   component: GoalsPage,
@@ -139,7 +142,19 @@ function toStatusPill(s: string): StatusType {
 
 // ─── Goal Table ───────────────────────────────────────────────────────────────
 
-function GoalTable({ goals, runs, knownWorkflows }: { goals: Goal[]; runs: GoalRun[]; knownWorkflows: Set<string> | null }) {
+function GoalTable({
+  goals,
+  runs,
+  knownWorkflows,
+  onEdit,
+  onDelete,
+}: {
+  goals: Goal[];
+  runs: GoalRun[];
+  knownWorkflows: Set<string> | null;
+  onEdit: (id: string) => void;
+  onDelete: (id: string) => void;
+}) {
   const queryClient = useQueryClient();
   const [runError, setRunError] = useState<Record<string, string>>({});
   const [expandedGoal, setExpandedGoal] = useState<string | null>(null);
@@ -288,6 +303,12 @@ function GoalTable({ goals, runs, knownWorkflows }: { goals: Goal[]; runs: GoalR
                       onClick={() => setExpandedGoal((current) => current === g.id ? null : g.id)}
                     >
                       Details
+                    </Button>
+                    <Button variant="ghost" type="button" onClick={() => onEdit(g.id)}>
+                      Edit
+                    </Button>
+                    <Button variant="ghost" type="button" onClick={() => onDelete(g.id)}>
+                      Delete
                     </Button>
                   </div>
                   {runError[g.id] && (
@@ -466,14 +487,136 @@ function GoalsPage() {
     : Array.isArray(runsData)
     ? runsData
     : [];
+  const knownWorkflowNames = workflowsData
+    ? (Array.isArray(workflowsData) ? workflowsData : workflowsData.workflows ?? []).map((w) => w.name)
+    : [];
+
+  // ── Goal CRUD state ──
+  const [editor, setEditor] = useState<
+    | { mode: 'create' }
+    | { mode: 'edit'; id: string; etag: string; initial: GoalFormValues }
+    | null
+  >(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
+  const [crudError, setCrudError] = useState<string | null>(null);
+
+  const invalidateGoals = () => {
+    void queryClient.invalidateQueries({ queryKey: ['goals'] });
+    void queryClient.invalidateQueries({ queryKey: ['goal-runs'] });
+  };
+
+  /** Surface server errors incl. Zod issues in a readable form. */
+  const readError = async (res: Response): Promise<string> => {
+    const body = await res.json().catch(() => ({} as any));
+    const issues = Array.isArray(body.issues)
+      ? '\n' + body.issues.map((i: any) => `• ${i.path?.join('.') ?? ''}: ${i.message}`).join('\n')
+      : '';
+    return `${body.error ?? `Request failed (${res.status})`}${issues}`;
+  };
+
+  const saveMutation = useMutation({
+    mutationFn: async (values: GoalFormValues) => {
+      const content = YAML.stringify(buildGoalPayload(values));
+      const res =
+        editor?.mode === 'edit'
+          ? await fetch(`/api/v1/goals/${encodeURIComponent(editor.id)}`, {
+              method: 'PUT',
+              headers: { 'content-type': 'application/json', 'If-Match': editor.etag },
+              body: JSON.stringify({ content }),
+            })
+          : await fetch('/api/v1/goals', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ content }),
+            });
+      if (!res.ok) {
+        if (res.status === 412) throw new Error('Goal changed on disk — close the editor and retry.');
+        throw new Error(await readError(res));
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      setEditor(null);
+      setCrudError(null);
+      invalidateGoals();
+    },
+    onError: (err: unknown) => setCrudError(err instanceof Error ? err.message : 'Save failed'),
+  });
+
+  const openEdit = async (id: string) => {
+    setCrudError(null);
+    try {
+      const raw = await fetchJson<{ id: string; content: string; etag: string }>(
+        `/api/v1/goals/${encodeURIComponent(id)}/raw`,
+      );
+      const parsed = (YAML.parse(raw.content) ?? {}) as Record<string, any>;
+      setEditor({
+        mode: 'edit',
+        id,
+        etag: raw.etag,
+        initial: {
+          id: parsed.id ?? id,
+          description: parsed.description ?? '',
+          cadence: parsed.cadence ?? '',
+          deadline: parsed.deadline ?? '',
+          workflow: parsed.workflow ?? '',
+          acceptance: Array.isArray(parsed.acceptance) ? parsed.acceptance : [],
+          human_gates: Array.isArray(parsed.human_gates) ? parsed.human_gates : [],
+        },
+      });
+    } catch (err) {
+      setCrudError(err instanceof Error ? err.message : 'Failed to load goal');
+    }
+  };
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string) => {
+      // Fresh etag directly before delete — the confirm dialog may sit open a while.
+      const raw = await fetchJson<{ etag: string }>(`/api/v1/goals/${encodeURIComponent(id)}/raw`);
+      const res = await fetch(`/api/v1/goals/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        headers: { 'If-Match': raw.etag },
+      });
+      if (!res.ok) throw new Error(await readError(res));
+      return res.json();
+    },
+    onSuccess: () => {
+      setDeleting(null);
+      setCrudError(null);
+      invalidateGoals();
+    },
+    onError: (err: unknown) => {
+      setCrudError(err instanceof Error ? err.message : 'Delete failed');
+      setDeleting(null);
+    },
+  });
 
   return (
     <div className="p-6 max-w-5xl mx-auto space-y-8">
       <PageHeader
         title="Goals"
         description="Managed outcomes, active status, and run history from goals/*.yaml."
-        actions={<CompanyWideBadge />}
+        actions={
+          <>
+            <CompanyWideBadge />
+            <button
+              className="btn-approve text-xs px-3 py-1.5 rounded font-medium"
+              onClick={() => {
+                setCrudError(null);
+                setEditor({ mode: 'create' });
+              }}
+            >
+              + New goal
+            </button>
+          </>
+        }
       />
+
+      {crudError && !editor && (
+        <div role="alert" className="text-xs text-red-300 bg-red-500/10 border border-red-500/30 rounded px-3 py-2 whitespace-pre-wrap">
+          {crudError}
+        </div>
+      )}
 
       <section>
         <h2 className="text-sm font-semibold text-zinc-400 uppercase tracking-wider mb-3">
@@ -487,16 +630,65 @@ function GoalsPage() {
           <GoalTable
             goals={goals}
             runs={runs}
-            knownWorkflows={
-              workflowsData
-                ? new Set(
-                    (Array.isArray(workflowsData) ? workflowsData : workflowsData.workflows ?? []).map((w) => w.name),
-                  )
-                : null
-            }
+            knownWorkflows={workflowsData ? new Set(knownWorkflowNames) : null}
+            onEdit={(id) => void openEdit(id)}
+            onDelete={(id) => {
+              setCrudError(null);
+              setDeleting(id);
+            }}
           />
         )}
       </section>
+
+      {editor && (
+        <Modal
+          open
+          onClose={() => setEditor(null)}
+          ariaLabel={editor.mode === 'create' ? 'New goal' : `Edit goal ${editor.id}`}
+        >
+          <div className="px-5 py-3 border-b border-zinc-800">
+            <h3 className="text-sm font-semibold text-zinc-100">
+              {editor.mode === 'create' ? 'New goal' : `Edit ${editor.id}`}
+            </h3>
+          </div>
+          <GoalForm
+            initialValues={editor.mode === 'edit' ? editor.initial : undefined}
+            editMode={editor.mode === 'edit'}
+            knownWorkflows={knownWorkflowNames}
+            busy={saveMutation.isPending}
+            serverError={crudError}
+            onCancel={() => setEditor(null)}
+            onSubmit={(values) => saveMutation.mutate(values)}
+            submitLabel={editor.mode === 'create' ? 'Create goal' : 'Save'}
+          />
+        </Modal>
+      )}
+
+      {deleting && (
+        <Modal open onClose={() => setDeleting(null)} ariaLabel={`Delete goal ${deleting}`}>
+          <div className="p-5 space-y-4">
+            <h3 className="text-sm font-semibold text-zinc-100">Delete goal "{deleting}"?</h3>
+            <p className="text-xs text-zinc-400">
+              The YAML file is removed and the schedule stops. Past run history is kept.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                className="text-xs px-3 py-1.5 rounded text-zinc-400 hover:text-zinc-200"
+                onClick={() => setDeleting(null)}
+              >
+                Cancel
+              </button>
+              <button
+                className="text-xs px-3 py-1.5 rounded font-medium bg-red-500/20 text-red-300 border border-red-500/40 hover:bg-red-500/30 disabled:opacity-50"
+                disabled={deleteMutation.isPending}
+                onClick={() => deleteMutation.mutate(deleting)}
+              >
+                {deleteMutation.isPending ? 'Deleting…' : 'Yes, delete'}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
 
       <section id="goals-recent-runs">
         <h2 className="text-sm font-semibold text-zinc-400 uppercase tracking-wider mb-3">
