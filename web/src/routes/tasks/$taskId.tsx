@@ -1,5 +1,6 @@
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useState } from 'react';
 import { StatusPill, EmptyState } from '../../components/ui/index.js';
 import { formatDuration, formatCost } from './index.js';
 import type { StatusType } from '../../components/ui/index.js';
@@ -22,13 +23,50 @@ function fmt(isoDate: string | null): string {
   return new Date(isoDate).toLocaleString();
 }
 
+/** Recovery actions available per task status (retry API rejects running/complete). */
+export function actionsForStatus(status: string): Array<'retry' | 'unblock' | 'complete' | 'delete'> {
+  switch (status) {
+    case 'failed': return ['retry', 'delete'];
+    case 'needs_review': return ['retry', 'complete', 'delete'];
+    case 'blocked': return ['unblock', 'retry', 'complete', 'delete'];
+    case 'pending': return ['retry', 'complete', 'delete'];
+    case 'running': return ['complete', 'delete'];
+    default: return [];
+  }
+}
+
 function TaskDetail() {
   const { taskId } = Route.useParams();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const { data, isLoading } = useQuery({
     queryKey: ['task', taskId],
     queryFn: () => fetch(`/api/v1/tasks/${taskId}`).then((r) => r.json()),
+  });
+
+  const actionMutation = useMutation({
+    mutationFn: async (action: 'retry' | 'unblock' | 'complete' | 'delete') => {
+      const res = await fetch(
+        action === 'delete' ? `/api/v1/tasks/${taskId}` : `/api/v1/tasks/${taskId}/${action}`,
+        { method: action === 'delete' ? 'DELETE' : 'POST' },
+      );
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error ?? `${action} failed (${res.status})`);
+      return body;
+    },
+    onSuccess: () => {
+      setActionError(null);
+      setConfirmDelete(false);
+      void queryClient.invalidateQueries({ queryKey: ['task', taskId] });
+      void queryClient.invalidateQueries({ queryKey: ['tasks'] });
+    },
+    onError: (err: unknown) => {
+      setActionError(err instanceof Error ? err.message : 'Action failed');
+      setConfirmDelete(false);
+    },
   });
 
   const { data: traces } = useQuery({
@@ -82,6 +120,73 @@ function TaskDetail() {
         <span>Project: <span className="text-zinc-400">{task.projectId}</span></span>
         <span className="font-mono text-zinc-600">{task.id}</span>
       </div>
+
+      {/* Recovery actions */}
+      {actionsForStatus(task.status).length > 0 && (
+        <div className="flex items-center gap-2 mb-6">
+          {actionsForStatus(task.status).includes('retry') && (
+            <button
+              className="text-xs px-3 py-1.5 rounded font-medium bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 hover:bg-indigo-500/25 disabled:opacity-50"
+              disabled={actionMutation.isPending}
+              onClick={() => actionMutation.mutate('retry')}
+            >
+              ↻ Retry
+            </button>
+          )}
+          {actionsForStatus(task.status).includes('unblock') && (
+            <button
+              className="text-xs px-3 py-1.5 rounded font-medium bg-sky-500/15 text-sky-300 border border-sky-500/30 hover:bg-sky-500/25 disabled:opacity-50"
+              disabled={actionMutation.isPending}
+              onClick={() => actionMutation.mutate('unblock')}
+            >
+              Unblock
+            </button>
+          )}
+          {actionsForStatus(task.status).includes('complete') && (
+            <button
+              className="text-xs px-3 py-1.5 rounded font-medium bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/25 disabled:opacity-50"
+              disabled={actionMutation.isPending}
+              onClick={() => actionMutation.mutate('complete')}
+            >
+              ✓ Mark complete
+            </button>
+          )}
+          {actionsForStatus(task.status).includes('delete') && (
+            confirmDelete ? (
+              <span className="flex items-center gap-2 text-xs">
+                <span className="text-zinc-400">Delete this task?</span>
+                <button
+                  className="px-2 py-1 rounded font-medium bg-red-500/20 text-red-300 border border-red-500/40 hover:bg-red-500/30 disabled:opacity-50"
+                  disabled={actionMutation.isPending}
+                  onClick={() => actionMutation.mutate('delete')}
+                >
+                  Yes, delete
+                </button>
+                <button
+                  className="px-2 py-1 rounded text-zinc-400 hover:text-zinc-200"
+                  onClick={() => setConfirmDelete(false)}
+                >
+                  Cancel
+                </button>
+              </span>
+            ) : (
+              <button
+                className="text-xs px-3 py-1.5 rounded font-medium text-zinc-500 border border-zinc-700 hover:text-red-300 hover:border-red-500/40 disabled:opacity-50"
+                disabled={actionMutation.isPending}
+                onClick={() => setConfirmDelete(true)}
+              >
+                Delete
+              </button>
+            )
+          )}
+          {actionMutation.isPending && <span className="text-xs text-zinc-500">Working…</span>}
+        </div>
+      )}
+      {actionError && (
+        <div className="mb-6 text-xs text-red-300 bg-red-500/10 border border-red-500/30 rounded px-3 py-2">
+          {actionError}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
         {/* Status Timeline */}

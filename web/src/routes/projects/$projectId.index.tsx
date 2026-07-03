@@ -37,6 +37,10 @@ export function toAgentFormValues(
     },
     tokenBudget: raw?.tokenBudget,
     keepWarm: raw?.keepWarm ?? false,
+    tools: {
+      allow: raw?.tools?.allow ?? [],
+      deny: raw?.tools?.deny ?? [],
+    },
   };
 }
 

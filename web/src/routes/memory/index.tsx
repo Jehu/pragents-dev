@@ -1,7 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { createFileRoute, Link } from '@tanstack/react-router';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { StatusPill, ProgressBar, EmptyState } from '../../components/ui/index.js';
+
+/** Categories match the REMEMBER: format agents use (see AGENTS.md). */
+export const FACT_CATEGORIES = [
+  'convention', 'decision', 'pattern', 'constraint', 'architecture', 'error_pattern', 'dependency',
+] as const;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -92,6 +97,55 @@ function MemoryView() {
   const [query, setQuery] = useState('');
   const [scope, setScope] = useState<ScopeFilter>('all');
   const debouncedQuery = useDebounce(query, 300);
+  const queryClient = useQueryClient();
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [newFact, setNewFact] = useState({ scope: 'company', category: 'decision', content: '' });
+  const [curationError, setCurationError] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+
+  const invalidateFacts = () => {
+    void queryClient.invalidateQueries({ queryKey: ['memory-facts'] });
+    void queryClient.invalidateQueries({ queryKey: ['memory-search'] });
+    void queryClient.invalidateQueries({ queryKey: ['memory-stats'] });
+  };
+
+  const addMutation = useMutation({
+    mutationFn: async (fact: { scope: string; category: string; content: string }) => {
+      const res = await fetch('/api/v1/memory/facts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...fact, agentId: 'operator' }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error ?? `Failed to add fact (${res.status})`);
+      return body;
+    },
+    onSuccess: () => {
+      setCurationError(null);
+      setNewFact((f) => ({ ...f, content: '' }));
+      setShowAddForm(false);
+      invalidateFacts();
+    },
+    onError: (err: unknown) => setCurationError(err instanceof Error ? err.message : 'Failed to add fact'),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await fetch(`/api/v1/memory/facts/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error ?? `Failed to delete fact (${res.status})`);
+      return body;
+    },
+    onSuccess: () => {
+      setCurationError(null);
+      setConfirmDeleteId(null);
+      invalidateFacts();
+    },
+    onError: (err: unknown) => {
+      setCurationError(err instanceof Error ? err.message : 'Failed to delete fact');
+      setConfirmDeleteId(null);
+    },
+  });
 
   // Stats
   const { data: stats } = useQuery<MemoryStats>({
@@ -157,7 +211,68 @@ function MemoryView() {
             </span>
           )}
         </h2>
+        <button
+          className="btn-approve text-xs px-3 py-1.5 rounded font-medium"
+          onClick={() => setShowAddForm((v) => !v)}
+        >
+          {showAddForm ? 'Close' : '+ Add fact'}
+        </button>
       </div>
+
+      {curationError && (
+        <div className="mb-4 text-xs text-red-300 bg-red-500/10 border border-red-500/30 rounded px-3 py-2">
+          {curationError}
+        </div>
+      )}
+
+      {/* Add-fact form */}
+      {showAddForm && (
+        <form
+          className="mb-6 bg-zinc-900 border border-zinc-800 rounded-lg p-4 space-y-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (newFact.content.trim()) addMutation.mutate({ ...newFact, content: newFact.content.trim() });
+          }}
+        >
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={newFact.scope}
+              onChange={(e) => setNewFact((f) => ({ ...f, scope: e.target.value }))}
+              placeholder="Scope (company or project id)"
+              aria-label="Fact scope"
+              className="flex-1 bg-zinc-800 border border-zinc-700 rounded px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 outline-none focus:border-indigo-500"
+            />
+            <select
+              value={newFact.category}
+              onChange={(e) => setNewFact((f) => ({ ...f, category: e.target.value }))}
+              aria-label="Fact category"
+              className="bg-zinc-800 border border-zinc-700 rounded px-3 py-2 text-sm text-zinc-200 outline-none focus:border-indigo-500 cursor-pointer"
+            >
+              {FACT_CATEGORIES.map((cat) => (
+                <option key={cat} value={cat}>{cat}</option>
+              ))}
+            </select>
+          </div>
+          <textarea
+            value={newFact.content}
+            onChange={(e) => setNewFact((f) => ({ ...f, content: e.target.value }))}
+            placeholder="A concise, self-contained statement of the fact…"
+            aria-label="Fact content"
+            rows={2}
+            className="w-full bg-zinc-800 border border-zinc-700 rounded px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 outline-none focus:border-indigo-500 resize-y"
+          />
+          <div className="flex justify-end">
+            <button
+              type="submit"
+              disabled={addMutation.isPending || !newFact.content.trim() || !newFact.scope.trim()}
+              className="btn-approve text-xs px-3 py-1.5 rounded font-medium disabled:opacity-50"
+            >
+              {addMutation.isPending ? 'Saving…' : 'Save fact'}
+            </button>
+          </div>
+        </form>
+      )}
 
       {/* Stats grid */}
       {(byScopeEntries.length > 0 || topCategories.length > 0) && (
@@ -260,6 +375,32 @@ function MemoryView() {
                   </Link>
                 )}
                 <span className="ml-auto">{relativeTime(fact.createdAt)}</span>
+                {confirmDeleteId === fact.id ? (
+                  <span className="flex items-center gap-1.5">
+                    <button
+                      className="px-1.5 py-0.5 rounded font-medium bg-red-500/20 text-red-300 border border-red-500/40 hover:bg-red-500/30 disabled:opacity-50"
+                      disabled={deleteMutation.isPending}
+                      onClick={() => deleteMutation.mutate(fact.id)}
+                    >
+                      Delete
+                    </button>
+                    <button
+                      className="px-1.5 py-0.5 rounded text-zinc-400 hover:text-zinc-200"
+                      onClick={() => setConfirmDeleteId(null)}
+                    >
+                      Cancel
+                    </button>
+                  </span>
+                ) : (
+                  <button
+                    aria-label={`Delete fact ${fact.id}`}
+                    title="Delete fact"
+                    className="text-zinc-600 hover:text-red-300 transition-colors"
+                    onClick={() => setConfirmDeleteId(fact.id)}
+                  >
+                    ✕
+                  </button>
+                )}
               </div>
             </div>
           ))}

@@ -150,5 +150,42 @@ export function createMemoryRoute(engine: MemoryEngine, config?: { projects: Rec
     return c.json(rows);
   });
 
+  // Persisted session-message snapshots (written on session disposal).
+  // session_id follows the agent id — filter by ?sessionId=<agentId>.
+  r.get('/session-messages', (c) => {
+    const db = getDb();
+    const sessionId = c.req.query('sessionId');
+    const limit = Math.min(parseInt(c.req.query('limit') || '20'), 100);
+    const base =
+      'SELECT id, session_id as sessionId, message_count as messageCount, created_at as createdAt FROM session_messages';
+    const rows = sessionId
+      ? db.prepare(`${base} WHERE session_id = ? ORDER BY created_at DESC LIMIT ?`).all(sessionId, limit)
+      : db.prepare(`${base} ORDER BY created_at DESC LIMIT ?`).all(limit);
+    return c.json(rows);
+  });
+
+  r.get('/session-messages/:id', (c) => {
+    const db = getDb();
+    const row = db.prepare(
+      'SELECT id, session_id as sessionId, messages_json, message_count as messageCount, created_at as createdAt FROM session_messages WHERE id = ?',
+    ).get(c.req.param('id')) as
+      | { id: string; sessionId: string; messages_json: string; messageCount: number; createdAt: string }
+      | undefined;
+    if (!row) return c.json({ error: 'Snapshot not found' }, 404);
+    let messages: unknown[] = [];
+    try {
+      messages = JSON.parse(row.messages_json);
+    } catch {
+      return c.json({ error: 'Snapshot is corrupted' }, 500);
+    }
+    return c.json({
+      id: row.id,
+      sessionId: row.sessionId,
+      messageCount: row.messageCount,
+      createdAt: row.createdAt,
+      messages,
+    });
+  });
+
   return r;
 }

@@ -112,4 +112,42 @@ describe('Memory API', () => {
       expect(factScopes.has('agent')).toBe(false);
     });
   });
+
+  describe('session-message snapshots', () => {
+    it('lists snapshots filtered by sessionId and serves the message payload', async () => {
+      const db = getDb();
+      // session_messages.session_id has a FK to sessions(id) — create parents first.
+      db.prepare("INSERT INTO sessions (id, agent_id) VALUES (?, ?)").run('dev@proj-a', 'dev@proj-a');
+      db.prepare("INSERT INTO sessions (id, agent_id) VALUES (?, ?)").run('other@proj-b', 'other@proj-b');
+      db.prepare(
+        'INSERT INTO session_messages (id, session_id, messages_json, message_count) VALUES (?, ?, ?, ?)',
+      ).run('snap-1', 'dev@proj-a', JSON.stringify([
+        { role: 'user', content: 'do the thing' },
+        { role: 'assistant', content: [{ type: 'text', text: 'done' }] },
+      ]), 2);
+      db.prepare(
+        'INSERT INTO session_messages (id, session_id, messages_json, message_count) VALUES (?, ?, ?, ?)',
+      ).run('snap-2', 'other@proj-b', JSON.stringify([{ role: 'user', content: 'hi' }]), 1);
+
+      const app = createMemoryRoute(engine);
+
+      const listRes = await app.request('/session-messages?sessionId=dev@proj-a');
+      expect(listRes.status).toBe(200);
+      const list = await listRes.json();
+      expect(list).toHaveLength(1);
+      expect(list[0]).toMatchObject({ id: 'snap-1', sessionId: 'dev@proj-a', messageCount: 2 });
+
+      const detailRes = await app.request('/session-messages/snap-1');
+      expect(detailRes.status).toBe(200);
+      const detail = await detailRes.json();
+      expect(detail.messages).toHaveLength(2);
+      expect(detail.messages[0]).toEqual({ role: 'user', content: 'do the thing' });
+    });
+
+    it('returns 404 for an unknown snapshot id', async () => {
+      const app = createMemoryRoute(engine);
+      const res = await app.request('/session-messages/nope');
+      expect(res.status).toBe(404);
+    });
+  });
 });

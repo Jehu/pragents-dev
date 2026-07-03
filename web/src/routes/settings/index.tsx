@@ -53,6 +53,7 @@ interface RawCompanyAgent {
   };
   tokenBudget?: number;
   keepWarm?: boolean;
+  tools?: { allow?: string[]; deny?: string[] };
 }
 
 function toCompanyAgentInitial(
@@ -69,6 +70,10 @@ function toCompanyAgentInitial(
     },
     tokenBudget: raw?.tokenBudget,
     keepWarm: raw?.keepWarm ?? false,
+    tools: {
+      allow: raw?.tools?.allow ?? [],
+      deny: raw?.tools?.deny ?? [],
+    },
   };
 }
 
