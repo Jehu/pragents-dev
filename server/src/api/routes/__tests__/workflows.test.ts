@@ -46,6 +46,54 @@ describe('Workflows Route', () => {
     expect(body.steps[0].gateFeedback).toBeNull();
   });
 
+  it('GET /runs/:id attaches plan context for plan-* runs', async () => {
+    const db = getDb();
+    const run = tracker.createRun('plan-abcd1234');
+    const step = tracker.createStep(run.id, 'step-0');
+    tracker.startStep(step.id);
+    tracker.completeStep(step.id, 'first step done');
+
+    db.prepare(
+      `INSERT INTO plans (id, status, origin, prompt, steps_json, result_json, created_at)
+       VALUES (?, 'done', 'chat', ?, ?, ?, datetime('now'))`,
+    ).run(
+      'abcd1234-full-plan-id',
+      'read and implement the gist',
+      JSON.stringify([{ agentId: 'dev@wiki', description: 'Read the gist and summarize it' }]),
+      JSON.stringify({ runId: run.id }),
+    );
+
+    const app = createWorkflowsRoute(registry, mockEngine(), tracker);
+    const res = await app.request(`/runs/${run.id}`);
+    expect(res.status).toBe(200);
+
+    const body = await res.json();
+    expect(body.plan).toEqual({
+      id: 'abcd1234-full-plan-id',
+      prompt: 'read and implement the gist',
+      stepDescriptions: ['Read the gist and summarize it'],
+    });
+
+    // List endpoint carries the same enrichment
+    const listRes = await app.request('/runs?includeSteps=true');
+    const runs = await listRes.json();
+    const planRun = runs.find((r: any) => r.id === run.id);
+    expect(planRun.plan.id).toBe('abcd1234-full-plan-id');
+  });
+
+  it('GET /runs/:id returns plan=null for non-plan runs and unlinked plan runs', async () => {
+    const app = createWorkflowsRoute(registry, mockEngine(), tracker);
+
+    const normal = tracker.createRun('content-pipeline');
+    const res1 = await app.request(`/runs/${normal.id}`);
+    expect((await res1.json()).plan).toBeNull();
+
+    // plan-* name but no plan row pointing at this run
+    const orphan = tracker.createRun('plan-ffffffff');
+    const res2 = await app.request(`/runs/${orphan.id}`);
+    expect((await res2.json()).plan).toBeNull();
+  });
+
   it('GET /runs/:id returns gateStatus=null for steps without gates', async () => {
     const run = tracker.createRun('test-wf-2');
     const step = tracker.createStep(run.id, 'research');

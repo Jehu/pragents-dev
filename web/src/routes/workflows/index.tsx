@@ -45,6 +45,12 @@ interface WorkflowRun {
   startedAt: string;
   completedAt?: string | null;
   steps?: RunStep[];
+  /** Present for `plan-*` runs: the originating NL/chat plan's context. */
+  plan?: {
+    id: string;
+    prompt: string;
+    stepDescriptions: string[];
+  } | null;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -347,11 +353,11 @@ function WorkflowDefCard({ wf, latestRun, selected, onSelect }: { wf: WorkflowDe
 
 // ─── Run Step Rail ────────────────────────────────────────────────────────────
 
-function RunStepList({ steps }: { steps: RunStep[] }) {
-  const [expandedErrors, setExpandedErrors] = useState<Set<string>>(new Set());
+function RunStepList({ steps, stepDescriptions }: { steps: RunStep[]; stepDescriptions?: string[] }) {
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
-  const toggleError = (id: string) => {
-    setExpandedErrors((prev) => {
+  const toggle = (id: string) => {
+    setExpanded((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
@@ -366,6 +372,8 @@ function RunStepList({ steps }: { steps: RunStep[] }) {
         const isPendingGate = step.gateStatus === 'pending' || step.gateStatus === 'revision_requested';
         const isFailed = step.status === 'failed';
         const hasError = isFailed && (step.error || step.output);
+        const hasOutput = !isFailed && !!step.output?.trim();
+        const description = stepDescriptions?.[i]?.trim();
 
         return (
           <li
@@ -382,7 +390,28 @@ function RunStepList({ steps }: { steps: RunStep[] }) {
             <div className={`pb-3 flex-1 min-w-0 ${isLast ? 'pb-1' : ''}`}>
               <div className="flex items-center gap-2 flex-wrap pt-0.5">
                 <span className="text-[11px] text-zinc-600 font-mono">{i + 1}</span>
-                <span className="text-sm text-zinc-200">{step.stepId}</span>
+                <span className="text-sm text-zinc-200">
+                  {description || step.stepId}
+                </span>
+                {description && (
+                  <span className="text-[11px] text-zinc-600 font-mono">{step.stepId}</span>
+                )}
+
+                {step.agentId && (
+                  <Link
+                    to="/agents/$agentId"
+                    params={{ agentId: step.agentId }}
+                    className="text-[11px] bg-indigo-500/15 text-indigo-300 px-1.5 py-0.5 rounded hover:bg-indigo-500/25"
+                  >
+                    {step.agentId}
+                  </Link>
+                )}
+
+                {step.startedAt && step.completedAt && (
+                  <span className="text-[11px] text-zinc-600 font-mono">
+                    {durationStr(step.startedAt, step.completedAt)}
+                  </span>
+                )}
 
                 {isPendingGate && (
                   <>
@@ -404,10 +433,19 @@ function RunStepList({ steps }: { steps: RunStep[] }) {
 
                 {hasError && (
                   <button
-                    onClick={() => toggleError(step.id)}
+                    onClick={() => toggle(step.id)}
                     className="text-[11px] text-red-400 hover:text-red-300"
                   >
-                    {expandedErrors.has(step.id) ? 'hide error ▲' : 'error ▼'}
+                    {expanded.has(step.id) ? 'hide error ▲' : 'error ▼'}
+                  </button>
+                )}
+
+                {hasOutput && (
+                  <button
+                    onClick={() => toggle(step.id)}
+                    className="text-[11px] text-zinc-500 hover:text-zinc-300"
+                  >
+                    {expanded.has(step.id) ? 'hide output ▲' : 'output ▼'}
                   </button>
                 )}
               </div>
@@ -420,9 +458,16 @@ function RunStepList({ steps }: { steps: RunStep[] }) {
               )}
 
               {/* Error expander */}
-              {hasError && expandedErrors.has(step.id) && (
+              {hasError && expanded.has(step.id) && (
                 <div className="mt-1.5 text-[11px] text-red-400 font-mono bg-red-950/20 rounded px-2 py-1.5 whitespace-pre-wrap">
                   {step.error || step.output}
+                </div>
+              )}
+
+              {/* Output expander (successful steps) */}
+              {hasOutput && expanded.has(step.id) && (
+                <div className="mt-1.5 text-[11px] text-zinc-300 font-mono bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 whitespace-pre-wrap max-h-64 overflow-auto">
+                  {step.output}
                 </div>
               )}
             </div>
@@ -450,7 +495,16 @@ function RunRow({ run }: { run: WorkflowRun }) {
         className={`w-full text-left px-3.5 py-3 flex items-center justify-between gap-3 hover:bg-zinc-800/50 transition-colors ${hasPendingGate ? 'bg-amber-950/10' : 'bg-zinc-900'}`}
       >
         <div className="flex items-center gap-2 min-w-0">
-          <span className="text-sm font-medium text-zinc-100 truncate">{run.workflowName}</span>
+          {run.plan?.prompt ? (
+            <>
+              <span className="text-sm font-medium text-zinc-100 truncate" title={run.plan.prompt}>
+                {run.plan.prompt}
+              </span>
+              <span className="text-[11px] text-zinc-600 font-mono flex-shrink-0">{run.workflowName}</span>
+            </>
+          ) : (
+            <span className="text-sm font-medium text-zinc-100 truncate">{run.workflowName}</span>
+          )}
           <StatusPill status={toRunStatusPill(run.status)} />
           {hasPendingGate && (
             <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300">gate pending</span>
@@ -466,10 +520,24 @@ function RunRow({ run }: { run: WorkflowRun }) {
       {/* Expanded steps */}
       {expanded && (
         <div className="bg-zinc-950 border-t border-zinc-800 px-4 py-3">
+          {run.plan && (
+            <div className="mb-3 flex items-start justify-between gap-3 text-[11px]">
+              <p className="text-zinc-400 leading-relaxed">
+                Compiled from plan: <span className="text-zinc-300">{run.plan.prompt}</span>
+              </p>
+              <Link
+                to="/plans/$planId"
+                params={{ planId: run.plan.id }}
+                className="text-indigo-400 hover:text-indigo-300 flex-shrink-0"
+              >
+                View plan →
+              </Link>
+            </div>
+          )}
           {steps.length === 0 ? (
             <p className="text-xs text-zinc-600 italic">No steps recorded.</p>
           ) : (
-            <RunStepList steps={steps} />
+            <RunStepList steps={steps} stepDescriptions={run.plan?.stepDescriptions} />
           )}
         </div>
       )}
