@@ -3,6 +3,8 @@ import { createFileRoute, Link } from '@tanstack/react-router';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { StatusPill, ApprovalCard, EmptyState, ErrorState, LoadingState, PageHeader, Panel } from '../../components/ui/index.js';
 import { useEventBusStore } from '../../stores/eventBus.js';
+import { useScopeStore } from '../../stores/scope.js';
+import { agentsInScope, eventsInScope } from '../../lib/scope.js';
 import { useCommandPaletteStore } from '../../stores/commandPalette.js';
 import { useShallow } from 'zustand/react/shallow';
 import type { StatusType } from '../../components/ui/StatusPill.js';
@@ -100,6 +102,7 @@ interface GoalRunSummary {
 
 interface CostRow {
   cost?: number;
+  project_id?: string;
 }
 
 export interface LiveWorkflowActivity {
@@ -453,6 +456,7 @@ export function inboxItemBody(item: InboxItem): React.ReactNode {
 function OverviewPage() {
   const queryClient = useQueryClient();
   const [liveActivities, setLiveActivities] = useState<LiveWorkflowActivityMap>({});
+  const selectedProject = useScopeStore((s) => s.selectedProject);
 
   const { data: agentsData, error: agentsError, isLoading: agentsLoading, refetch: refetchAgents } = useQuery<{ agents?: Agent[] } | Agent[]>({
     queryKey: ['agents'],
@@ -460,9 +464,10 @@ function OverviewPage() {
     staleTime: 30_000,
   });
 
-  const agents: Agent[] = Array.isArray(agentsData)
+  const allAgents: Agent[] = Array.isArray(agentsData)
     ? agentsData
     : ((agentsData as { agents?: Agent[] })?.agents ?? []);
+  const agents = agentsInScope(allAgents, selectedProject);
 
   const { data: inboxItems = [], error: inboxError, isLoading: inboxLoading, refetch: refetchInbox } = useQuery<InboxItem[]>({
     queryKey: ['overview-inbox'],
@@ -471,8 +476,11 @@ function OverviewPage() {
   });
 
   const { data: tasksData, error: tasksError } = useQuery<{ tasks?: TaskSummary[] } | TaskSummary[]>({
-    queryKey: ['overview-tasks'],
-    queryFn: () => fetchJson('/api/v1/tasks?limit=50'),
+    queryKey: ['overview-tasks', selectedProject],
+    queryFn: () =>
+      fetchJson(
+        `/api/v1/tasks?limit=50${selectedProject ? `&project=${encodeURIComponent(selectedProject)}` : ''}`,
+      ),
     staleTime: 10_000,
   });
 
@@ -527,8 +535,10 @@ function OverviewPage() {
     return () => window.clearInterval(timer);
   }, []);
 
-  // Recent events (last 6 from store, no API call, live)
-  const recentEvents = useEventBusStore(useShallow((s) => s.events.slice(-6).reverse()));
+  // Recent events (last 6 from store, no API call, live) — scoped to the
+  // selected project when one is active (company-level events stay visible).
+  const allRecentEvents = useEventBusStore(useShallow((s) => s.events.slice(-30)));
+  const recentEvents = eventsInScope(allRecentEvents, selectedProject).slice(-6).reverse();
 
   const approveMutation = useMutation({
     mutationFn: approveItem,
@@ -547,7 +557,9 @@ function OverviewPage() {
   const failedTasks = tasks.filter((task) => task.status === 'failed');
   const runningWorkflows = workflowRuns.filter((run) => run.status === 'running');
   const escalatedGoals = goalRuns.filter((run) => run.status === 'failed' || run.status === 'escalated');
-  const monthlyCost = (costData ?? []).reduce((sum, row) => sum + (row.cost ?? 0), 0);
+  const monthlyCost = (costData ?? [])
+    .filter((row) => !selectedProject || row.project_id === selectedProject)
+    .reduce((sum, row) => sum + (row.cost ?? 0), 0);
   const loadError = inboxError ?? tasksError;
 
   return (
