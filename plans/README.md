@@ -14,7 +14,7 @@ No plan pushes, merges, or commits to a shared branch — each works on its own
 
 | Plan | Title | Priority | Effort | Risk | Depends on | Status |
 |------|-------|----------|--------|------|------------|--------|
-| 001 | Resolve known dependency vulnerabilities | P1 | S | MED | — | TODO |
+| 001 | Resolve known dependency vulnerabilities | P1 | S | MED | — | DONE (leftovers: pi-agent highs — patch only via breaking downgrade, documented; esbuild low — dev-only, pinned by tsx) |
 | 002 | CI test/typecheck gates + pin Node version | P1 | M | LOW | — | TODO |
 | 003 | Stop logging API token; remove WS query-token fallback | P1 | S | LOW | — | TODO |
 | 004 | Serialize agent session creation; protect in-flight dispatches | P2 | M | MED | 002 | TODO |
