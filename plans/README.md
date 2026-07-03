@@ -18,7 +18,7 @@ No plan pushes, merges, or commits to a shared branch — each works on its own
 | 002 | CI test/typecheck gates + pin Node version | P1 | M | LOW | — | DONE |
 | 003 | Stop logging API token; remove WS query-token fallback | P1 | S | LOW | — | DONE |
 | 004 | Serialize agent session creation; protect in-flight dispatches | P2 | M | MED | 002 | TODO |
-| 005 | Surface swallowed create_task + vector-index errors | P2 | S | LOW | — | TODO |
+| 005 | Surface swallowed create_task + vector-index errors | P2 | S | LOW | — | DONE |
 | 006 | Repo hygiene: dead dep/file, version drift, doc drift | P3 | S | LOW | — | TODO |
 | 007 | Eliminate feed gate-enrichment N+1 | P3 | M | MED | — | TODO |
 | 008 | Per-agent tool capability policy (deny-by-default authz) | P2 | M | MED | 002 | TODO |

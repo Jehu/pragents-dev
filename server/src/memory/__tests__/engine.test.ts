@@ -55,6 +55,21 @@ describe('MemoryEngine', () => {
     expect(facts).toHaveLength(0);
   });
 
+  it('remember survives a failing vector store (SQL is the source of truth)', async () => {
+    const failing = new MemoryEngine(10);
+    (failing as any).vectorStore = {
+      add: () => Promise.reject(new Error('index unavailable')),
+      search: () => Promise.resolve([]),
+      remove: () => Promise.resolve(),
+    };
+    const fact = failing.remember('proj-vs', 'convention', 'Indexing may fail', 'dev@vs');
+    expect(fact.id).toBeTruthy();
+    // Let the rejected add() settle — must not become an unhandled rejection.
+    await new Promise((r) => setTimeout(r, 0));
+    const recalled = await engine.recall('Indexing may fail', 'proj-vs');
+    expect(recalled).toHaveLength(1);
+  });
+
   it('forgets facts', async () => {
     const fact = engine.remember('proj-a', 'test', 'temporary', 'dev@a');
     const before = await engine.recall('temporary', 'proj-a');

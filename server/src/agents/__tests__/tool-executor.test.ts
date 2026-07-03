@@ -105,6 +105,22 @@ describe('ToolExecutor', () => {
     expect(parsed.taskId).toBe('task-1');
   });
 
+  it('create_task marks the task failed when dispatch rejects', async () => {
+    const deps = makeDeps({
+      sessionMgr: { dispatch: vi.fn().mockRejectedValue(new Error('agent exploded')) },
+    });
+    const executor = new ToolExecutor(deps);
+    const result = await executor.execute('create_task', {
+      projectId: 'proj-a', agentId: 'dev@proj-a', description: 'Fix bug',
+    });
+    // Tool returns immediately (fire-and-forget) …
+    expect(JSON.parse(result)).toEqual({ taskId: 'task-1', status: 'dispatched' });
+    // … but the rejection is propagated to the tracker on the next tick.
+    await new Promise((r) => setTimeout(r, 0));
+    expect(deps.tracker.setFailed).toHaveBeenCalledWith('task-1', 'agent exploded');
+    expect(deps.tracker.setComplete).not.toHaveBeenCalled();
+  });
+
   it('executes run_workflow', async () => {
     const deps = makeDeps();
     const executor = new ToolExecutor(deps);

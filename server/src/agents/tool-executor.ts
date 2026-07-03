@@ -11,6 +11,7 @@ import type { ResolvedAgent } from '../config/schema.js';
 import type { NLDecomposer } from '../nl/decomposer.js';
 import type { AgentSessionManager } from './manager.js';
 import { getDb } from '../db/sqlite.js';
+import { logger } from '../logging/index.js';
 
 export interface ToolExecutorDeps {
   tracker: TaskTracker;
@@ -55,7 +56,11 @@ export class ToolExecutor {
           }
           this.deps.sessionMgr.dispatch(agent, description, task.id).then(
             (result) => this.deps.tracker.setComplete(task.id, result),
-            (err) => this.deps.tracker.setFailed(task.id, err?.message || String(err)),
+            (err) => {
+              const msg = err?.message || String(err);
+              logger.warn({ taskId: task.id, agentId: agent.id, err: msg }, 'create_task dispatch failed');
+              this.deps.tracker.setFailed(task.id, msg);
+            },
           );
           return JSON.stringify({ taskId: task.id, status: 'dispatched' });
         }
