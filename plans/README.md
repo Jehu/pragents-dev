@@ -23,7 +23,7 @@ No plan pushes, merges, or commits to a shared branch — each works on its own
 | 007 | Eliminate feed gate-enrichment N+1 | P3 | M | MED | — | DONE |
 | 008 | Per-agent tool capability policy (deny-by-default authz) | P2 | M | MED | 002 | DONE |
 | 009 | Remove the `resume-later` failure-policy stub | P3 | S | LOW | 006 | DONE |
-| 010 | Short-lived WebSocket ticket over authenticated POST | P2 | M | MED | 003 | TODO |
+| 010 | Short-lived WebSocket ticket over authenticated POST | P2 | M | MED | 003 | DONE |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) | REJECTED (with one-line rationale)
 

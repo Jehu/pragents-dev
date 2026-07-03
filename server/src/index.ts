@@ -14,6 +14,7 @@ import { SkillRouter } from './routing/router.js';
 import { setupWebSocket, broadcast } from './api/ws.js';
 import { createEventsRoute, broadcastSSE } from './api/routes/events.js';
 import { createHealthRoute } from './api/routes/health.js';
+import { createWsTicketRoute } from './api/routes/ws-ticket.js';
 import { createTasksRoute } from './api/routes/tasks.js';
 import { createProjectsRoute, createAgentsRoute } from './api/routes/projects.js';
 import { createAgentDetailRoute } from './api/routes/agents.js';
@@ -327,6 +328,7 @@ export async function startServer() {
   if (wsInject) logger.info('WebSocket endpoint ready');
 
   app.route('/api/v1', createHealthRoute(memory));
+  app.route('/api/v1/ws-ticket', createWsTicketRoute());
   const configPath = process.env.PRAGENTS_CONFIG_PATH || join(homedir(), '.pragents', 'pragents.yaml');
   app.route('/api/v1/projects', createProjectsRoute({ configPath, sessionMgr }));
   // Slice 4 / U11: per-project workflow files — mounted on the projects
