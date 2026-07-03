@@ -134,9 +134,12 @@ export function ToolPolicyEditor({
   }
 
   return (
-    <fieldset className="block" data-testid="tool-policy-editor">
-      <legend className="block text-xs font-medium text-zinc-300 mb-1">Tool policy</legend>
-      <p className="text-[11px] text-zinc-500 mb-2">
+    <fieldset
+      className="border border-zinc-800 rounded-lg px-4 pb-4 pt-1"
+      data-testid="tool-policy-editor"
+    >
+      <legend className="text-xs font-medium text-zinc-300 px-1.5">Tool policy</legend>
+      <p className="text-[11px] text-zinc-500 mb-3">
         Deny always wins. A non-empty allow list permits <em>only</em> those tools. Leave both
         empty to permit every platform tool.
       </p>
