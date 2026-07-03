@@ -144,11 +144,6 @@ function HealthView() {
           {formatUptime(data.uptime)}
         </HealthRow>
       </div>
-
-      {/* M6 banner */}
-      <p className="mt-4 text-xs text-zinc-600 italic">
-        Removed: log tail (no HTTP endpoint streams ~/.pragents/logs/pragents.log) and versions — see M6.
-      </p>
     </div>
   );
 }

@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState, useEffect } from 'react';
 import { EmptyState, ErrorState, LoadingState, PageHeader, Tabs } from '../../components/ui/index.js';
 import { useEventBusStore } from '../../stores/eventBus.js';
+import { useCommandPaletteStore } from '../../stores/commandPalette.js';
 import { fetchJson } from '../../lib/api.js';
 
 export const Route = createFileRoute('/tasks/')({
@@ -112,18 +113,26 @@ function TasksList() {
       {/* Toolbar */}
       <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800 flex-shrink-0">
         <PageHeader title="Tasks" />
-        {agentIds.length > 0 && (
-          <select
-            value={agentFilter}
-            onChange={(e) => setAgentFilter(e.target.value)}
-            className="bg-zinc-800 border border-zinc-700 text-zinc-300 text-xs rounded px-2 py-1.5 outline-none hover:border-zinc-600"
+        <div className="flex items-center gap-2">
+          {agentIds.length > 0 && (
+            <select
+              value={agentFilter}
+              onChange={(e) => setAgentFilter(e.target.value)}
+              className="bg-zinc-800 border border-zinc-700 text-zinc-300 text-xs rounded px-2 py-1.5 outline-none hover:border-zinc-600"
+            >
+              <option value="">All agents</option>
+              {agentIds.map((id) => (
+                <option key={id} value={id}>{id}</option>
+              ))}
+            </select>
+          )}
+          <button
+            className="btn-approve text-xs px-3 py-1.5 rounded font-medium"
+            onClick={() => useCommandPaletteStore.getState().openDispatch()}
           >
-            <option value="">All agents</option>
-            {agentIds.map((id) => (
-              <option key={id} value={id}>{id}</option>
-            ))}
-          </select>
-        )}
+            + New task
+          </button>
+        </div>
       </div>
 
       {/* Status tabs */}
@@ -151,6 +160,16 @@ function TasksList() {
             icon="Tasks"
             title="No tasks"
             description={activeTab === 'all' ? 'No tasks have been created yet.' : `No ${activeTab} tasks.`}
+            action={
+              activeTab === 'all' ? (
+                <button
+                  className="btn-approve text-xs px-3 py-1.5 rounded font-medium"
+                  onClick={() => useCommandPaletteStore.getState().openDispatch()}
+                >
+                  + Dispatch your first task
+                </button>
+              ) : undefined
+            }
           />
         ) : (
           <table className="w-full text-sm">

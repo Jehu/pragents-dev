@@ -228,8 +228,12 @@ function MemoryView() {
       ) : displayFacts.length === 0 ? (
         <EmptyState
           icon="🧠"
-          title="No facts found"
-          description="No facts found. Try a different query or lower your score expectations."
+          title={debouncedQuery ? 'No matching facts' : 'No facts stored yet'}
+          description={
+            debouncedQuery
+              ? 'Try a broader search term or switch the scope filter to "All scopes".'
+              : 'Facts appear here as agents remember things during their work — conventions, decisions, and project knowledge.'
+          }
         />
       ) : (
         <div className="space-y-2">
