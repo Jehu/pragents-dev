@@ -130,7 +130,7 @@ cd server && npm run dev
 cd web && npm run dev
 ```
 
-Open `http://localhost:3000` for the API and `http://localhost:5173` for the dashboard.
+Open `http://localhost:3000` for the API and `http://localhost:5174` for the dashboard.
 
 To change the API port, set `interfaces.web.port` in `~/.pragents/pragents.yaml`:
 

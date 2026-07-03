@@ -176,7 +176,7 @@ Agents access platform services through typed tools (`server/src/agents/tool-def
 ### Workflow Engine
 Workflows are YAML-defined step sequences loaded from `workflows/`. The engine supports:
 - **Sequential steps** with output chaining (`{research}` template variables)
-- **Parallel step groups** via `Promise.allSettled` with fail-fast
+- **Parallel step groups** via `Promise.allSettled`, with a configurable failure policy (`onStepFailure`: `abort` throws and stops the run, `continue` collects partial results into `<step.id>.results`)
 - **Human gates** — workflow pauses until approved/rejected via API
 - **Conditional branching** — step-level `condition` field
 
