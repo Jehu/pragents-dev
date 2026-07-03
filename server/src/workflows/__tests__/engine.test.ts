@@ -12,7 +12,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 function agent(id: string, type: AgentType, capabilities: string[], projectId = 'test-project'): ResolvedAgent {
-  return { id, projectId, type, model: 'test/model', personality: '', memory: {}, capabilities, projectDir: '/tmp/test-project', tokenBudget: 40000, keepWarm: false };
+  return { id, projectId, type, model: 'test/model', personality: '', memory: {}, capabilities, tools: {}, projectDir: '/tmp/test-project', tokenBudget: 40000, keepWarm: false };
 }
 
 const agents = [

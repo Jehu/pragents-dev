@@ -33,6 +33,7 @@ const mockAgent: ResolvedAgent = {
   personality: 'You are a test agent.',
   memory: { project: 'read', company: 'read' },
   capabilities: [],
+  tools: {},
   projectDir: '/tmp/test',
   tokenBudget: 10000,
   keepWarm: false,

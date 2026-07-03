@@ -14,6 +14,12 @@ company:
       capabilities:
         - calendar-management
         - task-tracking
+      # Optional platform-tool policy (deny wins; a present allow-list is
+      # exclusive; omitted = every tool permitted). Distinct from
+      # `capabilities`, which is free-form routing keywords.
+      # tools:
+      #   deny: [approve_gate, reject_gate]   # never resolve human gates
+      #   allow: [query_tasks, search_memory] # if set, ONLY these are permitted
 
     pm:
       type: pm

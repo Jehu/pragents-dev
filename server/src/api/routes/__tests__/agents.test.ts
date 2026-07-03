@@ -15,6 +15,7 @@ function makeAgent(id: string, overrides: Partial<ResolvedAgent> = {}): Resolved
     type: 'dev',
     model: 'claude-sonnet',
     capabilities: ['coding', 'review'],
+    tools: {},
     personality: 'helpful',
     memory: { project: 'read/write', company: 'read' },
     projectDir: '/tmp',

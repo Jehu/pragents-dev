@@ -334,6 +334,8 @@ These directories are compound-engineering pipeline artifacts. Never flag their 
 
 ## Agent Tools (M6)
 
+Each agent's tool access can be restricted via the per-agent `tools: { allow, deny }` policy in `pragents.yaml` (deny takes precedence; a present `allow` list is exclusive; absent policy = all tools permitted). Enforcement lives in `ToolExecutor.execute`. New tools added to `TOOL_DEFINITIONS` are permitted by default for policy-less agents and must be added to existing `allow` lists explicitly.
+
 Agents can invoke these 19 platform tools:
 
 | Tool | Category |

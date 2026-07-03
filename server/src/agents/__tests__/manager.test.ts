@@ -38,6 +38,7 @@ const mockAgent: ResolvedAgent = {
   personality: 'You are a test dev agent.',
   memory: { project: 'read/write', company: 'read' },
   capabilities: ['typescript'],
+  tools: {},
   projectDir: '/tmp/test-project',
   tokenBudget: 40000,
   keepWarm: false,

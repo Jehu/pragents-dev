@@ -34,6 +34,16 @@ export class ToolExecutor {
 
   async execute(toolName: string, args: Record<string, unknown>, agentContext?: ResolvedAgent): Promise<string> {
     try {
+      // Capability policy: deny always wins; a present allow-list is exclusive.
+      if (agentContext?.tools) {
+        const { allow, deny } = agentContext.tools;
+        const denied = deny?.includes(toolName) ?? false;
+        const notAllowed = allow !== undefined && !allow.includes(toolName);
+        if (denied || notAllowed) {
+          logger.warn({ agentId: agentContext.id, tool: toolName }, 'Tool call blocked by agent capability policy');
+          return `Error: Tool "${toolName}" is not permitted for this agent`;
+        }
+      }
       switch (toolName) {
         case 'query_tasks': {
           const { projectId, status } = args as { projectId: string; status?: string };

@@ -92,6 +92,27 @@ describe('resolveAllAgents', () => {
     expect(agents[0].capabilities).toEqual(['ts']);
   });
 
+  it('resolves the tools policy and defaults it to an empty object', () => {
+    const config = PragentsConfig.parse({
+      company: { name: 'Test' },
+      projects: {
+        'proj-a': {
+          name: 'Project A',
+          directory: '/tmp/a',
+          agents: {
+            dev: { type: 'dev', tools: { deny: ['approve_gate'], allow: ['query_tasks'] } },
+            seo: { type: 'seo' },
+          },
+        },
+      },
+    });
+    const agents = resolveAllAgents(config);
+    const dev = agents.find((a) => a.id === 'dev@proj-a');
+    const seo = agents.find((a) => a.id === 'seo@proj-a');
+    expect(dev?.tools).toEqual({ deny: ['approve_gate'], allow: ['query_tasks'] });
+    expect(seo?.tools).toEqual({});
+  });
+
   it('applies config cascade: agent model > default', () => {
     const config = PragentsConfig.parse({
       company: { name: 'Test' },

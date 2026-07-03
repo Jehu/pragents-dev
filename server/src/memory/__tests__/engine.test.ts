@@ -16,6 +16,7 @@ function makeAgent(overrides: Partial<ResolvedAgent> = {}): ResolvedAgent {
     personality: 'Test agent',
     memory: { company: 'read/write', project: 'read/write' },
     capabilities: [],
+    tools: {},
     projectDir: '/tmp',
     tokenBudget: 40000,
     keepWarm: false,

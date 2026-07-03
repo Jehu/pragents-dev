@@ -21,7 +21,7 @@ No plan pushes, merges, or commits to a shared branch — each works on its own
 | 005 | Surface swallowed create_task + vector-index errors | P2 | S | LOW | — | DONE |
 | 006 | Repo hygiene: dead dep/file, version drift, doc drift | P3 | S | LOW | — | DONE |
 | 007 | Eliminate feed gate-enrichment N+1 | P3 | M | MED | — | DONE |
-| 008 | Per-agent tool capability policy (deny-by-default authz) | P2 | M | MED | 002 | TODO |
+| 008 | Per-agent tool capability policy (deny-by-default authz) | P2 | M | MED | 002 | DONE |
 | 009 | Remove the `resume-later` failure-policy stub | P3 | S | LOW | 006 | DONE |
 | 010 | Short-lived WebSocket ticket over authenticated POST | P2 | M | MED | 003 | TODO |
 
