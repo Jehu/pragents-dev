@@ -228,8 +228,8 @@ export function AgentForm({
         />
       </label>
 
-      <fieldset className="block">
-        <legend className="block text-xs font-medium text-zinc-300 mb-1">
+      <fieldset className="border border-zinc-800 rounded-lg px-4 pb-4 pt-1">
+        <legend className="text-xs font-medium text-zinc-300 px-1.5">
           Capabilities
         </legend>
         <div className="flex flex-wrap gap-1.5 mb-2" data-testid="capability-tags">
@@ -277,8 +277,8 @@ export function AgentForm({
         idPrefix={`agent-${values.type}`}
       />
 
-      <fieldset className="block">
-        <legend className="block text-xs font-medium text-zinc-300 mb-2">
+      <fieldset className="border border-zinc-800 rounded-lg px-4 pb-4 pt-2">
+        <legend className="text-xs font-medium text-zinc-300 px-1.5">
           Memory access
         </legend>
         <div className="space-y-2">
