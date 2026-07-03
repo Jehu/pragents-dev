@@ -69,6 +69,39 @@ describe('WorkflowTracker', () => {
     expect(ids).toContain(r2.id);
   });
 
+  it('getRunsByIds returns a map of all requested runs', () => {
+    const a = tracker.createRun('batch-a', { x: 1 });
+    const b = tracker.createRun('batch-b');
+    const map = tracker.getRunsByIds([a.id, b.id, 'missing-id']);
+    expect(map.size).toBe(2);
+    expect(map.get(a.id)?.workflowName).toBe('batch-a');
+    expect(map.get(a.id)?.params).toEqual({ x: 1 });
+    expect(map.get(b.id)?.workflowName).toBe('batch-b');
+  });
+
+  it('getRunsByIds returns an empty map for an empty id list', () => {
+    expect(tracker.getRunsByIds([]).size).toBe(0);
+  });
+
+  it('getStepsByRunIds groups steps by run with getSteps ordering', () => {
+    const a = tracker.createRun('batch-steps-a');
+    const b = tracker.createRun('batch-steps-b');
+    const s1 = tracker.createStep(a.id, 'one');
+    tracker.startStep(s1.id);
+    tracker.completeStep(s1.id, 'r1');
+    const s2 = tracker.createStep(a.id, 'two');
+    tracker.startStep(s2.id);
+    const s3 = tracker.createStep(b.id, 'solo');
+    tracker.startStep(s3.id);
+
+    const map = tracker.getStepsByRunIds([a.id, b.id]);
+    expect(map.get(a.id)?.map((s) => s.stepId)).toEqual(
+      tracker.getSteps(a.id).map((s) => s.stepId),
+    );
+    expect(map.get(b.id)?.map((s) => s.stepId)).toEqual(['solo']);
+    expect(tracker.getStepsByRunIds([]).size).toBe(0);
+  });
+
   it('getRun returns null for nonexistent', () => {
     expect(tracker.getRun('nonexistent')).toBeNull();
   });

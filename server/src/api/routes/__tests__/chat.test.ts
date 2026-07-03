@@ -66,6 +66,7 @@ function createMockAgents(): ResolvedAgent[] {
       personality: 'helpful',
       memory: {},
       capabilities: ['coding'],
+      tools: {},
       projectDir: '/tmp',
       tokenBudget: 40000,
       keepWarm: false,

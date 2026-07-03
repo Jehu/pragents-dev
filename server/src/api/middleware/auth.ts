@@ -30,8 +30,8 @@ export function getOrCreateApiToken(envPath: string): string {
     const line = `${prefix}PRAGENTS_API_TOKEN=${token}\n`;
     appendFileSync(envPath, line, { encoding: 'utf-8' });
     logger.warn(
-      { token, envPath },
-      'Generated new PRAGENTS_API_TOKEN — copy this into your client config',
+      { envPath },
+      'Generated new PRAGENTS_API_TOKEN and wrote it to the env file — copy it from there into your client config',
     );
   } catch (err: any) {
     logger.warn(
@@ -97,7 +97,6 @@ function unauthorized(c: Context) {
  * Pass-through conditions (any one is sufficient):
  *   - request originates from localhost (127.0.0.1 / ::1 / localhost host)
  *   - `Authorization: Bearer <token>` header matches the active token
- *   - `?token=<token>` query parameter matches the active token
  *
  * If the active token is empty/unset, the middleware degrades to localhost-only
  * access (any non-localhost request is rejected).
@@ -119,11 +118,6 @@ export function authMiddleware(getToken: () => string): MiddlewareHandler {
       if (match && match[1].trim() === expected) {
         return next();
       }
-    }
-
-    const queryToken = c.req.query('token');
-    if (queryToken && queryToken === expected) {
-      return next();
     }
 
     return unauthorized(c);
@@ -161,8 +155,9 @@ export function checkWsAuth(
     if (match && match[1].trim() === expected) return { ok: true, reason: 'header' };
   }
 
-  // Query token
-  if (req.url) {
+  // Query token — opt-in only; disabled by default because query strings
+  // leak into logs/proxy history. Set PRAGENTS_ALLOW_WS_QUERY_TOKEN=1 to allow.
+  if (req.url && process.env.PRAGENTS_ALLOW_WS_QUERY_TOKEN === '1') {
     try {
       const parsed = new URL(req.url, 'http://localhost');
       const t = parsed.searchParams.get('token');

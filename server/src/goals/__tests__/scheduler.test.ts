@@ -14,6 +14,7 @@ const mockPM: ResolvedAgent = {
   personality: 'You are a PM.',
   memory: { project: 'read', company: 'read/write' },
   capabilities: [],
+  tools: {},
   projectDir: '/tmp/test',
   tokenBudget: 30000,
   keepWarm: false,

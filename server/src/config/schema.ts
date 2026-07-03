@@ -75,6 +75,7 @@ export function resolveAgent(
       agentConfig.personality ?? SYSTEM_DEFAULTS.personality,
     memory: agentConfig.memory ?? { project: 'read/write', company: 'read' },
     capabilities: agentConfig.capabilities ?? [],
+    tools: agentConfig.tools ?? {},
     projectDir: (projectConfig.directory || process.env.HOME || '/tmp').replace(/^~/, process.env.HOME || ''),
     tokenBudget: agentConfig.tokenBudget || TOKEN_BUDGETS[agentConfig.type] || TOKEN_BUDGETS.default,
     keepWarm: agentConfig.keepWarm ?? false,

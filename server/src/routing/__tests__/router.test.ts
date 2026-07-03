@@ -3,7 +3,7 @@ import { SkillRouter } from '../../routing/router.js';
 import type { ResolvedAgent } from '../../config/schema.js';
 
 function agent(id: string, type: string, capabilities: string[], projectId = 'proj-a'): ResolvedAgent {
-  return { id, projectId, type: type as any, model: 'test', personality: '', memory: {}, capabilities, projectDir: '/tmp', tokenBudget: 40000, keepWarm: false };
+  return { id, projectId, type: type as any, model: 'test', personality: '', memory: {}, capabilities, tools: {}, projectDir: '/tmp', tokenBudget: 40000, keepWarm: false };
 }
 
 describe('SkillRouter', () => {

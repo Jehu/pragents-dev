@@ -105,6 +105,70 @@ describe('ToolExecutor', () => {
     expect(parsed.taskId).toBe('task-1');
   });
 
+  it('blocks a denied tool and leaves state untouched', async () => {
+    const deps = makeDeps();
+    const executor = new ToolExecutor(deps);
+    const agentContext = { id: 'dev@proj-a', projectId: 'proj-a', tools: { deny: ['approve_gate'] } } as any;
+    const result = await executor.execute('approve_gate', { gateId: 'gate-x' }, agentContext);
+    expect(result).toBe('Error: Tool "approve_gate" is not permitted for this agent');
+  });
+
+  it('blocks tools outside a present allow-list', async () => {
+    const deps = makeDeps();
+    const executor = new ToolExecutor(deps);
+    const agentContext = { id: 'dev@proj-a', projectId: 'proj-a', tools: { allow: ['query_tasks'] } } as any;
+    const result = await executor.execute('create_task', {
+      projectId: 'proj-a', agentId: 'dev@proj-a', description: 'nope',
+    }, agentContext);
+    expect(result).toBe('Error: Tool "create_task" is not permitted for this agent');
+    expect(deps.tracker.create).not.toHaveBeenCalled();
+    expect(deps.sessionMgr.dispatch).not.toHaveBeenCalled();
+  });
+
+  it('permits an allow-listed tool', async () => {
+    const deps = makeDeps();
+    const executor = new ToolExecutor(deps);
+    const agentContext = { id: 'dev@proj-a', projectId: 'proj-a', tools: { allow: ['query_tasks'] } } as any;
+    const result = await executor.execute('query_tasks', { projectId: 'proj-a' }, agentContext);
+    expect(deps.tracker.list).toHaveBeenCalledWith('proj-a');
+    expect(JSON.parse(result)).toEqual([]);
+  });
+
+  it('deny wins over allow for the same tool', async () => {
+    const deps = makeDeps();
+    const executor = new ToolExecutor(deps);
+    const agentContext = {
+      id: 'dev@proj-a', projectId: 'proj-a',
+      tools: { allow: ['query_tasks'], deny: ['query_tasks'] },
+    } as any;
+    const result = await executor.execute('query_tasks', { projectId: 'proj-a' }, agentContext);
+    expect(result).toBe('Error: Tool "query_tasks" is not permitted for this agent');
+  });
+
+  it('an empty policy object permits every tool (backward compat)', async () => {
+    const deps = makeDeps();
+    const executor = new ToolExecutor(deps);
+    const agentContext = { id: 'dev@proj-a', projectId: 'proj-a', tools: {} } as any;
+    const result = await executor.execute('query_tasks', { projectId: 'proj-a' }, agentContext);
+    expect(JSON.parse(result)).toEqual([]);
+  });
+
+  it('create_task marks the task failed when dispatch rejects', async () => {
+    const deps = makeDeps({
+      sessionMgr: { dispatch: vi.fn().mockRejectedValue(new Error('agent exploded')) },
+    });
+    const executor = new ToolExecutor(deps);
+    const result = await executor.execute('create_task', {
+      projectId: 'proj-a', agentId: 'dev@proj-a', description: 'Fix bug',
+    });
+    // Tool returns immediately (fire-and-forget) …
+    expect(JSON.parse(result)).toEqual({ taskId: 'task-1', status: 'dispatched' });
+    // … but the rejection is propagated to the tracker on the next tick.
+    await new Promise((r) => setTimeout(r, 0));
+    expect(deps.tracker.setFailed).toHaveBeenCalledWith('task-1', 'agent exploded');
+    expect(deps.tracker.setComplete).not.toHaveBeenCalled();
+  });
+
   it('executes run_workflow', async () => {
     const deps = makeDeps();
     const executor = new ToolExecutor(deps);

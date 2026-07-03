@@ -1,6 +1,7 @@
 import { EventBuffer, type PragentsEvent } from '../events/buffer.js';
 import { logger } from '../logging/index.js';
 import { checkWsAuth } from './middleware/auth.js';
+import { consumeWsTicket } from './middleware/ws-ticket.js';
 
 // Hot-reload safe singleton: survives tsx-watch module re-execution (issue #32)
 const g = globalThis as any;
@@ -40,13 +41,22 @@ export async function setupWebSocket(
         expected,
       );
       if (!result.ok) {
-        return c.json(
-          {
-            error: 'Unauthorized',
-            hint: 'set PRAGENTS_API_TOKEN env or use Authorization: Bearer header',
-          },
-          401,
-        );
+        // Fallback: short-lived single-use ticket minted via POST /api/v1/ws-ticket
+        // (browsers cannot set an Authorization header on a WebSocket upgrade).
+        let ticketOk = false;
+        try {
+          const ticket = new URL(c.req.url, 'http://localhost').searchParams.get('ticket');
+          ticketOk = !!ticket && consumeWsTicket(ticket);
+        } catch { /* malformed url */ }
+        if (!ticketOk) {
+          return c.json(
+            {
+              error: 'Unauthorized',
+              hint: 'use Authorization: Bearer header, or POST /api/v1/ws-ticket for a WebSocket ticket',
+            },
+            401,
+          );
+        }
       }
       return next();
     });

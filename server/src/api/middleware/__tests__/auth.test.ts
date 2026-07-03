@@ -44,16 +44,24 @@ describe('authMiddleware', () => {
     expect(res.status).toBe(401);
   });
 
-  it('accepts request with valid ?token= query param', async () => {
+  it('rejects request with valid ?token= query param (query auth removed)', async () => {
     const app = buildApp(() => TOKEN);
     const res = await app.request(`http://example.com/api/v1/ping?token=${TOKEN}`);
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(401);
   });
 
   it('rejects request with wrong ?token= query param', async () => {
     const app = buildApp(() => TOKEN);
     const res = await app.request('http://example.com/api/v1/ping?token=nope');
     expect(res.status).toBe(401);
+  });
+
+  it('still accepts Bearer header when a ?token= param is also present', async () => {
+    const app = buildApp(() => TOKEN);
+    const res = await app.request(`http://example.com/api/v1/ping?token=${TOKEN}`, {
+      headers: { authorization: `Bearer ${TOKEN}` },
+    });
+    expect(res.status).toBe(200);
   });
 
   it('bypasses auth for localhost Host header', async () => {
@@ -115,7 +123,8 @@ describe('checkWsAuth', () => {
     if (result.ok) expect(result.reason).toBe('header');
   });
 
-  it('passes with valid ?token= query param', () => {
+  it('rejects valid ?token= query param when opt-in flag is unset', () => {
+    delete process.env.PRAGENTS_ALLOW_WS_QUERY_TOKEN;
     const result = checkWsAuth(
       {
         url: `/ws?token=${TOKEN}`,
@@ -124,8 +133,39 @@ describe('checkWsAuth', () => {
       },
       TOKEN,
     );
+    expect(result.ok).toBe(false);
+  });
+
+  it('passes with valid ?token= query param when PRAGENTS_ALLOW_WS_QUERY_TOKEN=1', () => {
+    process.env.PRAGENTS_ALLOW_WS_QUERY_TOKEN = '1';
+    try {
+      const result = checkWsAuth(
+        {
+          url: `/ws?token=${TOKEN}`,
+          headers: { host: 'example.com' },
+          socket: { remoteAddress: '10.0.0.5' },
+        },
+        TOKEN,
+      );
+      expect(result.ok).toBe(true);
+      if (result.ok) expect(result.reason).toBe('query');
+    } finally {
+      delete process.env.PRAGENTS_ALLOW_WS_QUERY_TOKEN;
+    }
+  });
+
+  it('passes with Bearer header regardless of the query-token flag', () => {
+    delete process.env.PRAGENTS_ALLOW_WS_QUERY_TOKEN;
+    const result = checkWsAuth(
+      {
+        url: '/ws',
+        headers: { host: 'example.com', authorization: `Bearer ${TOKEN}` },
+        socket: { remoteAddress: '10.0.0.5' },
+      },
+      TOKEN,
+    );
     expect(result.ok).toBe(true);
-    if (result.ok) expect(result.reason).toBe('query');
+    if (result.ok) expect(result.reason).toBe('header');
   });
 
   it('rejects when no token provided and not localhost', () => {

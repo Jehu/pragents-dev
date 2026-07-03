@@ -79,8 +79,13 @@ export class MemoryEngine {
     db.prepare(
       'INSERT INTO facts (id, scope, category, content, agent_id) VALUES (?, ?, ?, ?, ?)',
     ).run(id, scope, category, content, agentId);
-    // Index in vector store
-    this.vectorStore.add(id, content, { scope, category, agentId }).catch(() => {});
+    // Index in vector store (best-effort; SQL is the source of truth)
+    this.vectorStore.add(id, content, { scope, category, agentId }).catch((err) => {
+      logger.warn(
+        { factId: id, scope, store: this._storeName, err: err?.message || String(err) },
+        'Vector-store indexing failed; fact is stored in SQL but not semantically searchable',
+      );
+    });
     return { id, scope, category, content, agentId, createdAt: new Date().toISOString() };
   }
 

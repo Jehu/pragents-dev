@@ -21,6 +21,11 @@ export interface SessionHandle {
   runtimeHandle: RuntimeSessionHandle;
   createdAt: number;
   lastActivityAt: number;
+  /**
+   * Number of in-flight dispatches currently using this session. Disposal
+   * paths (idle sweep, stale restart) must not reclaim a session while > 0.
+   */
+  refCount: number;
   stale?: boolean;
   /**
    * When true, this session was spawned for a keepWarm agent and must not be
@@ -33,6 +38,12 @@ export interface SessionHandle {
 
 export class AgentSessionManager {
   private sessions: Map<string, SessionHandle> = new Map();
+  /**
+   * One in-flight create() promise per agent id. Concurrent getOrCreate()
+   * calls for a cold agent share it instead of spawning duplicate runtime
+   * sessions (the losing session would leak until shutdown).
+   */
+  private creating: Map<string, Promise<SessionHandle>> = new Map();
   private idleTimeoutMs: number;
   private memory: MemoryEngine;
   private onEvent: ((event: any) => void) | null = null;
@@ -79,20 +90,26 @@ export class AgentSessionManager {
   async getOrCreate(agent: ResolvedAgent): Promise<SessionHandle> {
     const existing = this.sessions.get(agent.id);
     if (existing) {
-      // If session is stale and not currently streaming, dispose and respawn with fresh config
-      if (existing.stale && !existing.runtimeHandle.isStreaming) {
+      // If session is stale, not currently streaming, and no dispatch holds a
+      // reference, dispose and respawn with fresh config
+      if (existing.stale && !existing.runtimeHandle.isStreaming && existing.refCount === 0) {
         logger.info({ agentId: agent.id }, 'Restarting stale session with updated config');
         this.persistSessionMessages(agent.id, existing);
         this.runtime.dispose(existing.runtimeHandle);
         this.sessions.delete(agent.id);
-        return this.create(agent);
+        // fall through to the guarded create below
+      } else {
+        // Reuse existing session even if streaming — pi SDK sequential prompts work on same session
+        existing.lastActivityAt = Date.now();
+        return existing;
       }
-      // Reuse existing session even if streaming — pi SDK sequential prompts work on same session
-      existing.lastActivityAt = Date.now();
-      return existing;
     }
 
-    return this.create(agent);
+    const inflight = this.creating.get(agent.id);
+    if (inflight) return inflight;
+    const pending = this.create(agent).finally(() => this.creating.delete(agent.id));
+    this.creating.set(agent.id, pending);
+    return pending;
   }
 
   /**
@@ -184,6 +201,7 @@ export class AgentSessionManager {
       runtimeHandle,
       createdAt: Date.now(),
       lastActivityAt: Date.now(),
+      refCount: 0,
       warm,
     };
 
@@ -260,6 +278,22 @@ export class AgentSessionManager {
 
     const handle = await this.getOrCreate(agent);
 
+    // Hold a reference for the duration of the dispatch so disposal paths
+    // cannot reclaim the session between getOrCreate() and prompt().
+    handle.refCount++;
+    try {
+      return await this.runDispatch(handle, agent, task, taskId);
+    } finally {
+      handle.refCount--;
+    }
+  }
+
+  private async runDispatch(
+    handle: SessionHandle,
+    agent: ResolvedAgent,
+    task: string,
+    taskId?: string,
+  ): Promise<string> {
     // Assemble memory context — respect token budget
     const facts = await this.memory.recall(task, agent.projectId, 10, agent);
     const budget = agent.tokenBudget || 40000;
@@ -454,20 +488,13 @@ export class AgentSessionManager {
       // restart (see #35) still applies via getOrCreate(), so a warm agent
       // gets a fresh session on the next dispatch after config reload.
       if (handle.warm) continue;
-      if (!handle.runtimeHandle.isStreaming && now - handle.lastActivityAt > this.idleTimeoutMs) {
-        this.persistSessionMessages(id, handle);
-
-        // Try auto-extraction after persistence (fire-and-forget, R9)
-        if (this.autoExtractor) {
-          const messages = this.runtime.getMessages(handle.runtimeHandle);
-          this.autoExtractor.tryExtract(id, messages).catch((err: any) =>
-            logger.error({ sessionId: id, err: err?.message || err }, 'Auto-extraction error for session'),
-          );
-        }
-
-        this.runtime.dispose(handle.runtimeHandle);
+      if (
+        !handle.runtimeHandle.isStreaming &&
+        handle.refCount === 0 &&
+        now - handle.lastActivityAt > this.idleTimeoutMs
+      ) {
+        this.disposeSession(id, handle);
         this.sessions.delete(id);
-        this.memory.compress(id, id);
         disposed.push(id);
       }
     }
@@ -475,24 +502,47 @@ export class AgentSessionManager {
     return disposed;
   }
 
+  /** Persist, auto-extract, and dispose one session (shared by all disposal paths). */
+  private disposeSession(id: string, handle: SessionHandle): void {
+    this.persistSessionMessages(id, handle);
+
+    // Try auto-extraction after persistence (fire-and-forget, R9)
+    if (this.autoExtractor) {
+      const messages = this.runtime.getMessages(handle.runtimeHandle);
+      this.autoExtractor.tryExtract(id, messages).catch((err: any) =>
+        logger.error({ sessionId: id, err: err?.message || err }, 'Auto-extraction error for session'),
+      );
+    }
+
+    this.runtime.dispose(handle.runtimeHandle);
+    this.memory.compress(id, id);
+  }
+
   async disposeAll(): Promise<void> {
+    // First pass: dispose everything without an in-flight dispatch; sessions
+    // holding a reference are deferred so the dispatch can drain.
+    const deferred: string[] = [];
     for (const [id, handle] of this.sessions) {
+      if (handle.refCount > 0) {
+        deferred.push(id);
+        continue;
+      }
       if (handle.runtimeHandle.isStreaming) {
         // Wait briefly for current turn to finish
         await new Promise((resolve) => setTimeout(resolve, 5000));
       }
-      this.persistSessionMessages(id, handle);
+      this.disposeSession(id, handle);
+    }
 
-      // Try auto-extraction after persistence (fire-and-forget, R9)
-      if (this.autoExtractor) {
-        const messages = this.runtime.getMessages(handle.runtimeHandle);
-        this.autoExtractor.tryExtract(id, messages).catch((err: any) =>
-          logger.error({ sessionId: id, err: err?.message || err }, 'Auto-extraction error for session'),
-        );
+    // Second pass: deferred sessions get one grace wait, then are force-
+    // disposed — shutdown must terminate (the caller enforces the deadline).
+    for (const id of deferred) {
+      const handle = this.sessions.get(id);
+      if (!handle) continue;
+      if (handle.refCount > 0 || handle.runtimeHandle.isStreaming) {
+        await new Promise((resolve) => setTimeout(resolve, 5000));
       }
-
-      this.runtime.dispose(handle.runtimeHandle);
-      this.memory.compress(id, id);
+      this.disposeSession(id, handle);
     }
     this.sessions.clear();
   }

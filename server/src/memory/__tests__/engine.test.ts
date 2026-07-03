@@ -16,6 +16,7 @@ function makeAgent(overrides: Partial<ResolvedAgent> = {}): ResolvedAgent {
     personality: 'Test agent',
     memory: { company: 'read/write', project: 'read/write' },
     capabilities: [],
+    tools: {},
     projectDir: '/tmp',
     tokenBudget: 40000,
     keepWarm: false,
@@ -53,6 +54,21 @@ describe('MemoryEngine', () => {
   it('recall returns empty for non-existent scope', async () => {
     const facts = await engine.recall('nothing', 'non-existent');
     expect(facts).toHaveLength(0);
+  });
+
+  it('remember survives a failing vector store (SQL is the source of truth)', async () => {
+    const failing = new MemoryEngine(10);
+    (failing as any).vectorStore = {
+      add: () => Promise.reject(new Error('index unavailable')),
+      search: () => Promise.resolve([]),
+      remove: () => Promise.resolve(),
+    };
+    const fact = failing.remember('proj-vs', 'convention', 'Indexing may fail', 'dev@vs');
+    expect(fact.id).toBeTruthy();
+    // Let the rejected add() settle — must not become an unhandled rejection.
+    await new Promise((r) => setTimeout(r, 0));
+    const recalled = await engine.recall('Indexing may fail', 'proj-vs');
+    expect(recalled).toHaveLength(1);
   });
 
   it('forgets facts', async () => {

@@ -95,6 +95,42 @@ export class WorkflowTracker {
     ).all(runId) as any[];
   }
 
+  /** Batch variant of getRun for enrichment paths (avoids per-item queries). */
+  getRunsByIds(runIds: string[]): Map<string, WorkflowRun> {
+    const out = new Map<string, WorkflowRun>();
+    if (runIds.length === 0) return out;
+    const placeholders = runIds.map(() => '?').join(',');
+    const rows = getDb().prepare(
+      `SELECT id, workflow_name as workflowName, status, params, trigger_source_run_id as triggerSourceRunId,
+              started_at as startedAt, completed_at as completedAt
+         FROM workflow_runs WHERE id IN (${placeholders})`,
+    ).all(...runIds) as any[];
+    for (const row of rows) {
+      if (row.params) row.params = JSON.parse(row.params);
+      out.set(row.id, row);
+    }
+    return out;
+  }
+
+  /** Batch variant of getSteps, grouped by run id; per-run ordering matches getSteps. */
+  getStepsByRunIds(runIds: string[]): Map<string, WorkflowStepRow[]> {
+    const out = new Map<string, WorkflowStepRow[]>();
+    if (runIds.length === 0) return out;
+    const placeholders = runIds.map(() => '?').join(',');
+    const rows = getDb().prepare(
+      `SELECT id, run_id as runId, step_id as stepId, agent_id as agentId, status, output,
+              started_at as startedAt, completed_at as completedAt
+         FROM workflow_steps WHERE run_id IN (${placeholders})
+        ORDER BY COALESCE(started_at, '9999') ASC, completed_at ASC`,
+    ).all(...runIds) as any[];
+    for (const row of rows) {
+      const list = out.get(row.runId) ?? [];
+      list.push(row);
+      out.set(row.runId, list);
+    }
+    return out;
+  }
+
   listRuns(limit: number = 20): WorkflowRun[] {
     return getDb().prepare(
       `SELECT id, workflow_name as workflowName, status, params, trigger_source_run_id as triggerSourceRunId,

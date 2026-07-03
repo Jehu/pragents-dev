@@ -12,6 +12,17 @@ export const MemoryAccess = z.object({
     .optional(),
 });
 
+/**
+ * Per-agent platform-tool authorization. Evaluated in ToolExecutor.execute:
+ * a tool named in `deny` is always blocked; if `allow` is set, only listed
+ * tools are permitted. Absent policy (the default) permits every tool.
+ * Distinct from `capabilities`, which is free-form routing keywords.
+ */
+export const ToolPolicy = z.object({
+  allow: z.array(z.string()).optional(),
+  deny: z.array(z.string()).optional(),
+});
+
 export const AgentConfig = z.object({
   type: AgentType,
   role: z.enum(['fast', 'standard']).optional(),
@@ -19,6 +30,7 @@ export const AgentConfig = z.object({
   personality: z.string().optional(),
   memory: MemoryAccess.optional(),
   capabilities: z.array(z.string()).optional(),
+  tools: ToolPolicy.optional(),
   tokenBudget: z.number().int().positive().max(10_000_000).optional(),
   /**
    * When true, the agent's session is pre-spawned on server boot and never
@@ -151,6 +163,7 @@ export type InterfacesConfig = z.infer<typeof InterfacesConfig>;
 export type CostRate = z.infer<typeof CostRate>;
 export type PoolConfig = z.infer<typeof PoolConfig>;
 export type MemoryConfig = z.infer<typeof MemoryConfig>;
+export type ToolPolicy = z.infer<typeof ToolPolicy>;
 
 /**
  * Fully-resolved agent record materialized by the server from PragentsConfig.
@@ -165,6 +178,8 @@ export interface ResolvedAgent {
   personality: string;
   memory: MemoryAccess;
   capabilities: string[];
+  /** Platform-tool authorization ({} = all tools permitted); see ToolPolicy. */
+  tools: ToolPolicy;
   projectDir: string;
   tokenBudget: number;
   keepWarm: boolean;

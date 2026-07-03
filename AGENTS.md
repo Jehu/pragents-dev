@@ -176,7 +176,7 @@ Agents access platform services through typed tools (`server/src/agents/tool-def
 ### Workflow Engine
 Workflows are YAML-defined step sequences loaded from `workflows/`. The engine supports:
 - **Sequential steps** with output chaining (`{research}` template variables)
-- **Parallel step groups** via `Promise.allSettled` with fail-fast
+- **Parallel step groups** via `Promise.allSettled`, with a configurable failure policy (`onStepFailure`: `abort` throws and stops the run, `continue` collects partial results into `<step.id>.results`)
 - **Human gates** — workflow pauses until approved/rejected via API
 - **Conditional branching** — step-level `condition` field
 
@@ -187,7 +187,7 @@ The `workflows/`, `goals/`, and `skills/` directories are watched via `fs.watch`
 All significant actions (task lifecycle, workflow steps, gate changes, agent events) emit through the `EventBuffer` → broadcast to WebSocket + SSE clients. The buffer holds the last 1000 events. SSE clients receive missed events via `Last-Event-ID` header replay.
 
 ### Auth
-All `/api/*` routes, SSE, and WebSocket access are protected by `PRAGENTS_API_TOKEN` except for localhost requests. On first boot, the server generates a token and appends it to `~/.pragents/.env` if one is not already present. Remote clients must use `Authorization: Bearer <token>` or `?token=<token>` for WebSocket upgrades.
+All `/api/*` routes, SSE, and WebSocket access are protected by `PRAGENTS_API_TOKEN` except for localhost requests. On first boot, the server generates a token and appends it to `~/.pragents/.env` if one is not already present (the value is never logged). Remote HTTP clients must use `Authorization: Bearer <token>` — query-string tokens are not accepted. For WebSocket upgrades, non-localhost clients either send the Bearer header (non-browser clients) or obtain a short-lived, single-use ticket via `POST /api/v1/ws-ticket` (Bearer-authenticated) and connect with `/ws?ticket=<value>`; the long-lived token never travels in a URL. A legacy `?token=` WS fallback exists behind `PRAGENTS_ALLOW_WS_QUERY_TOKEN=1` and is discouraged.
 
 ### Database
 Single SQLite file at `~/.pragents/data/pragents.db` with WAL mode. Migrations run sequentially from `server/src/db/migrations/`. Always access via `getDb()` — the singleton is initialized in `startServer()`. Never create new database connections directly.
@@ -333,6 +333,8 @@ These directories are compound-engineering pipeline artifacts. Never flag their 
 ---
 
 ## Agent Tools (M6)
+
+Each agent's tool access can be restricted via the per-agent `tools: { allow, deny }` policy in `pragents.yaml` (deny takes precedence; a present `allow` list is exclusive; absent policy = all tools permitted). Enforcement lives in `ToolExecutor.execute`. New tools added to `TOOL_DEFINITIONS` are permitted by default for policy-less agents and must be added to existing `allow` lists explicitly.
 
 Agents can invoke these 19 platform tools:
 
