@@ -1,7 +1,8 @@
 import React from 'react';
 import { createFileRoute } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
-import { StatCard, ProgressBar } from '../../components/ui/index.js';
+import { StatCard, ProgressBar, CompanyWideBadge } from '../../components/ui/index.js';
+import { useScopeStore } from '../../stores/scope.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -102,6 +103,10 @@ export const Route = createFileRoute('/costs/')({
 });
 
 function CostsView() {
+  const selectedProject = useScopeStore((s) => s.selectedProject);
+
+  // Summary rows are per project per month — the global scope filters them
+  // client-side (see below) so the response shape stays uniform.
   const { data: summaryRaw, isLoading: summaryLoading } = useQuery<CostSummaryRow[] | CostSummary>({
     queryKey: ['cost-summary'],
     queryFn: () => fetch('/api/v1/cost/summary').then((r) => r.json()),
@@ -109,8 +114,9 @@ function CostsView() {
   });
 
   const { data: todayData } = useQuery<TodayCost>({
-    queryKey: ['cost-today'],
-    queryFn: () => fetch('/api/v1/cost/today').then((r) => r.json()),
+    queryKey: ['cost-today', selectedProject],
+    queryFn: () =>
+      fetch(`/api/v1/cost/today${selectedProject ? `?project=${encodeURIComponent(selectedProject)}` : ''}`).then((r) => r.json()),
     staleTime: 30_000,
   });
 
@@ -123,7 +129,11 @@ function CostsView() {
   // API returns an array of per-project rows; older callers expected a single summary object.
   // Accept both shapes.
   const summary: CostSummary | undefined = Array.isArray(summaryRaw)
-    ? aggregateSummary(summaryRaw as CostSummaryRow[])
+    ? aggregateSummary(
+        selectedProject
+          ? (summaryRaw as CostSummaryRow[]).filter((r) => r.project_id === selectedProject)
+          : (summaryRaw as CostSummaryRow[]),
+      )
     : (summaryRaw as CostSummary | undefined);
 
   const modelRows: ModelCostRow[] = Array.isArray(modelData)
@@ -209,8 +219,9 @@ function CostsView() {
       {/* Per-model table */}
       {models.length > 0 && (
         <div>
-          <h3 className="text-sm font-semibold text-zinc-400 uppercase tracking-wider mb-2">
+          <h3 className="text-sm font-semibold text-zinc-400 uppercase tracking-wider mb-2 flex items-center gap-2">
             By Model
+            <CompanyWideBadge />
           </h3>
           <div className="bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden">
             <table className="w-full text-sm">

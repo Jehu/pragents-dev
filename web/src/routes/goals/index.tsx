@@ -1,7 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { Fragment, useState, useEffect } from 'react';
-import { Button, StatusPill, EmptyState, ErrorState, LoadingState, PageHeader, Panel, Table, TableWrap } from '../../components/ui/index.js';
+import { Button, StatusPill, EmptyState, ErrorState, LoadingState, PageHeader, Panel, Table, TableWrap, CompanyWideBadge } from '../../components/ui/index.js';
 import type { StatusType } from '../../components/ui/index.js';
 import { useEventBusStore } from '../../stores/eventBus.js';
 import { fetchJson, postJson } from '../../lib/api.js';
@@ -472,6 +472,7 @@ function GoalsPage() {
       <PageHeader
         title="Goals"
         description="Managed outcomes, active status, and run history from goals/*.yaml."
+        actions={<CompanyWideBadge />}
       />
 
       <section>

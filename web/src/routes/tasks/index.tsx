@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { EmptyState, ErrorState, LoadingState, PageHeader, Tabs } from '../../components/ui/index.js';
 import { useEventBusStore } from '../../stores/eventBus.js';
 import { useCommandPaletteStore } from '../../stores/commandPalette.js';
+import { useScopeStore } from '../../stores/scope.js';
 import { fetchJson } from '../../lib/api.js';
 
 export const Route = createFileRoute('/tasks/')({
@@ -98,9 +99,13 @@ function TasksList() {
     }
   }, [busEvents, queryClient]);
 
+  const selectedProject = useScopeStore((s) => s.selectedProject);
   const { data, isLoading, error, refetch } = useQuery({
-    queryKey: ['tasks'],
-    queryFn: () => fetchJson<{ tasks?: Task[] }>('/api/v1/tasks?limit=100'),
+    queryKey: ['tasks', selectedProject],
+    queryFn: () =>
+      fetchJson<{ tasks?: Task[] }>(
+        `/api/v1/tasks?limit=100${selectedProject ? `&project=${encodeURIComponent(selectedProject)}` : ''}`,
+      ),
     staleTime: 5_000,
   });
 
@@ -159,7 +164,13 @@ function TasksList() {
           <EmptyState
             icon="Tasks"
             title="No tasks"
-            description={activeTab === 'all' ? 'No tasks have been created yet.' : `No ${activeTab} tasks.`}
+            description={
+              activeTab === 'all'
+                ? selectedProject
+                  ? `No tasks in project "${selectedProject}" yet.`
+                  : 'No tasks have been created yet.'
+                : `No ${activeTab} tasks${selectedProject ? ` in "${selectedProject}"` : ''}.`
+            }
             action={
               activeTab === 'all' ? (
                 <button

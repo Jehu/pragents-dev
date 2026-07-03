@@ -4,6 +4,8 @@ import { useEffect } from 'react';
 import { MasterDetail, StatusPill, EmptyState, ErrorState, LoadingState } from '../../components/ui/index.js';
 import type { StatusType } from '../../components/ui/index.js';
 import { fetchJson } from '../../lib/api.js';
+import { useScopeStore } from '../../stores/scope.js';
+import { agentsInScope } from '../../lib/scope.js';
 
 export const Route = createFileRoute('/agents/')({
   component: AgentsPage,
@@ -86,6 +88,7 @@ function AgentSidebar({ agents }: { agents: AgentSummary[] }) {
 
 function AgentsPage() {
   const navigate = useNavigate();
+  const selectedProject = useScopeStore((s) => s.selectedProject);
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['agents'],
@@ -93,7 +96,8 @@ function AgentsPage() {
     refetchInterval: 30_000,
   });
 
-  const agents: AgentSummary[] = Array.isArray(data) ? data : [];
+  const allAgents: AgentSummary[] = Array.isArray(data) ? data : [];
+  const agents = agentsInScope(allAgents, selectedProject);
 
   // Auto-navigate to first agent on load
   useEffect(() => {

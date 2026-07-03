@@ -3,7 +3,8 @@ import { useQuery, useQueries, useQueryClient, useMutation } from '@tanstack/rea
 import { useState, useEffect } from 'react';
 import * as YAML from 'yaml';
 import { Modal } from '../../components/Modal.js';
-import { Button, StatusPill, EmptyState, ErrorState, LoadingState, PageHeader, Panel } from '../../components/ui/index.js';
+import { Button, StatusPill, EmptyState, ErrorState, LoadingState, PageHeader, Panel, CompanyWideBadge } from '../../components/ui/index.js';
+import { useScopeStore } from '../../stores/scope.js';
 import type { StatusType } from '../../components/ui/index.js';
 import { useEventBusStore } from '../../stores/eventBus.js';
 import { fetchJson, postJson } from '../../lib/api.js';
@@ -112,11 +113,16 @@ interface ProjectWorkflowFile {
 }
 
 function ProjectWorkflowsSection() {
-  const { data: projects, isLoading, error, refetch } = useQuery<ProjectSummary[]>({
+  const selectedProject = useScopeStore((s) => s.selectedProject);
+  const { data: allProjects, isLoading, error, refetch } = useQuery<ProjectSummary[]>({
     queryKey: ['projects'],
     queryFn: () => fetchJson<ProjectSummary[]>('/api/v1/projects'),
     staleTime: 30_000,
   });
+
+  const projects = selectedProject
+    ? (allProjects ?? []).filter((p) => p.id === selectedProject)
+    : allProjects;
 
   const wfQueries = useQueries({
     queries: (projects ?? []).map((p) => ({
@@ -476,6 +482,7 @@ function RunRow({ run }: { run: WorkflowRun }) {
 export function WorkflowsPage() {
   const queryClient = useQueryClient();
   const [selectedWorkflow, setSelectedWorkflow] = useState<string | null>(null);
+  const scopeProject = useScopeStore((s) => s.selectedProject);
 
   const busEvents = useEventBusStore((s) => s.events);
   useEffect(() => {
@@ -498,11 +505,17 @@ export function WorkflowsPage() {
     refetchInterval: 15_000,
   });
 
-  const workflows: WorkflowDef[] = !Array.isArray(wfData) && Array.isArray(wfData?.workflows)
+  const allWorkflows: WorkflowDef[] = !Array.isArray(wfData) && Array.isArray(wfData?.workflows)
     ? wfData.workflows
     : Array.isArray(wfData)
     ? wfData
     : [];
+
+  // Project scope: keep global repo workflows (no projectId) plus the
+  // selected project's registry entries.
+  const workflows = scopeProject
+    ? allWorkflows.filter((wf) => !wf.projectId || wf.projectId === scopeProject)
+    : allWorkflows;
 
   const runs: WorkflowRun[] = !Array.isArray(runsData) && Array.isArray(runsData?.runs)
     ? runsData.runs
@@ -572,6 +585,7 @@ export function WorkflowsPage() {
           <span className="ml-2 text-zinc-600 font-normal normal-case">
             ({shownRuns.length}{selectedWorkflow ? ` for ${selectedWorkflow}` : ''})
           </span>
+          <CompanyWideBadge className="ml-2 align-middle" />
           {selectedWorkflow && (
             <button
               type="button"

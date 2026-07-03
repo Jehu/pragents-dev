@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
 import { useEventBusStore } from '../../stores/eventBus.js';
+import { useScopeStore } from '../../stores/scope.js';
 import { MasterDetail, EmptyState } from '../../components/ui/index.js';
 
 // ---------------------------------------------------------------------------
@@ -74,7 +75,10 @@ function TracesList() {
   const search = Route.useSearch();
 
   const taskId = search.taskId ?? '';
-  const project = search.project ?? '';
+  // Global project scope acts as the default; an explicit ?project= search
+  // param (typed into the page filter) still overrides it.
+  const globalProject = useScopeStore((s) => s.selectedProject);
+  const project = (search.project || globalProject) ?? '';
   const since = search.since ?? '';
   const page = search.page ?? 0;
 

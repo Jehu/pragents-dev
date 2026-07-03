@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createFileRoute } from '@tanstack/react-router';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { Modal } from '../../components/Modal.js';
-import { ApprovalCard, Button, EmptyState, ErrorState, KbdHint, LoadingState } from '../../components/ui/index.js';
+import { ApprovalCard, Button, EmptyState, ErrorState, KbdHint, LoadingState, CompanyWideBadge } from '../../components/ui/index.js';
 import { useEventBusStore } from '../../stores/eventBus.js';
 import { fetchJson, postJson } from '../../lib/api.js';
 
@@ -494,7 +494,11 @@ function InboxPage() {
     >
       {/* Header */}
       <div className="flex items-center justify-between mb-5">
-        <h1 className="text-xl font-semibold tracking-tight text-zinc-100">Inbox</h1>
+        <h1 className="text-xl font-semibold tracking-tight text-zinc-100 flex items-center gap-2">
+          Inbox
+          {/* Approvals are deliberately never project-filtered — a hidden pending gate is a footgun. */}
+          <CompanyWideBadge />
+        </h1>
         <button
           className="text-xs text-zinc-500 hover:text-zinc-300 flex items-center gap-1"
           onClick={() => setShowHelp(true)}

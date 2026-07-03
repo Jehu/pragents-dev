@@ -15,3 +15,4 @@ export { PageHeader } from './PageHeader';
 export { Panel } from './Panel';
 export { Tabs } from './Tabs';
 export { Table, TableWrap } from './Table';
+export { CompanyWideBadge } from './ScopeBadge';
