@@ -5,6 +5,7 @@ import {
   type ProjectAgentType,
 } from '@pragents/schema/config';
 import { ModelSelect } from './ModelSelect.js';
+import { ToolPolicyEditor, buildToolsPayload, type ToolPolicyValue } from './ToolPolicyEditor.js';
 
 // Re-export so existing consumers (`new.tsx`, `$projectId.tsx`) keep their
 // import path stable while the single source of truth lives in
@@ -39,6 +40,7 @@ export interface AgentFormValues {
   };
   tokenBudget?: number;
   keepWarm: boolean;
+  tools: ToolPolicyValue;
 }
 
 export interface AgentFormProps {
@@ -81,6 +83,8 @@ export function buildAgentPayload(values: AgentFormValues): Record<string, unkno
   if (memory) payload.memory = memory;
   if (typeof values.tokenBudget === 'number' && Number.isFinite(values.tokenBudget))
     payload.tokenBudget = values.tokenBudget;
+  const tools = buildToolsPayload(values.tools);
+  if (tools) payload.tools = tools;
   return payload;
 }
 
@@ -110,6 +114,10 @@ export function AgentForm({
     },
     tokenBudget: initialValues?.tokenBudget,
     keepWarm: initialValues?.keepWarm ?? false,
+    tools: {
+      allow: initialValues?.tools?.allow ?? [],
+      deny: initialValues?.tools?.deny ?? [],
+    },
   }));
 
   const [tagInput, setTagInput] = useState('');
@@ -261,6 +269,13 @@ export function AgentForm({
           className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-zinc-500"
         />
       </fieldset>
+
+      <ToolPolicyEditor
+        value={values.tools}
+        onChange={(next) => update('tools', next)}
+        disabled={busy}
+        idPrefix={`agent-${values.type}`}
+      />
 
       <fieldset className="block">
         <legend className="block text-xs font-medium text-zinc-300 mb-2">

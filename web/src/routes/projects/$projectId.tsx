@@ -35,6 +35,7 @@ export interface RawAgent {
   };
   tokenBudget?: number;
   keepWarm?: boolean;
+  tools?: { allow?: string[]; deny?: string[] };
 }
 
 export interface ProjectDetail {

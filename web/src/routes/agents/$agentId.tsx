@@ -181,7 +181,109 @@ function AgentSidebar({
 // Detail tabs
 // ──────────────────────────────────────────────────────────────────
 
-type Tab = 'events' | 'tasks' | 'capabilities';
+type Tab = 'events' | 'tasks' | 'capabilities' | 'sessions';
+
+interface SessionSnapshot {
+  id: string;
+  sessionId: string;
+  messageCount: number;
+  createdAt: string;
+}
+
+interface SessionMessage {
+  role?: string;
+  content?: string | Array<{ type?: string; text?: string }>;
+}
+
+/** Flatten a pi message content block into displayable text. */
+export function messageText(msg: SessionMessage): string {
+  if (typeof msg.content === 'string') return msg.content;
+  if (Array.isArray(msg.content)) {
+    return msg.content
+      .filter((b) => b?.type === 'text' || b?.text)
+      .map((b) => b.text ?? '')
+      .join('\n');
+  }
+  return '';
+}
+
+function SessionsTab({ agentId }: { agentId: string }) {
+  const [openSnapshot, setOpenSnapshot] = useState<string | null>(null);
+
+  const { data: snapshots } = useQuery<SessionSnapshot[]>({
+    queryKey: ['session-snapshots', agentId],
+    queryFn: () =>
+      fetch(`/api/v1/memory/session-messages?sessionId=${encodeURIComponent(agentId)}`).then((r) => r.json()),
+    staleTime: 15_000,
+  });
+
+  const { data: detail, isLoading: detailLoading } = useQuery<{
+    messages: SessionMessage[];
+    createdAt: string;
+  }>({
+    queryKey: ['session-snapshot', openSnapshot],
+    queryFn: () =>
+      fetch(`/api/v1/memory/session-messages/${encodeURIComponent(openSnapshot!)}`).then((r) => r.json()),
+    enabled: openSnapshot !== null,
+  });
+
+  const list = Array.isArray(snapshots) ? snapshots : [];
+
+  if (list.length === 0) {
+    return (
+      <EmptyState
+        icon="🗂"
+        title="No persisted sessions"
+        description="Message history is snapshotted when a session is disposed (idle timeout or shutdown)."
+      />
+    );
+  }
+
+  return (
+    <div className="divide-y divide-zinc-800">
+      {list.map((snap) => (
+        <div key={snap.id}>
+          <button
+            className="w-full flex items-center gap-3 px-4 py-2.5 text-xs hover:bg-zinc-800/30 text-left"
+            onClick={() => setOpenSnapshot(openSnapshot === snap.id ? null : snap.id)}
+          >
+            <span className="text-zinc-500">{openSnapshot === snap.id ? '▾' : '▸'}</span>
+            <span className="text-zinc-300">{new Date(snap.createdAt).toLocaleString()}</span>
+            <span className="text-zinc-500 ml-auto">{snap.messageCount} messages</span>
+          </button>
+          {openSnapshot === snap.id && (
+            <div className="px-4 pb-4 space-y-2">
+              {detailLoading ? (
+                <div className="text-xs text-zinc-500 py-2">Loading messages…</div>
+              ) : (
+                (detail?.messages ?? []).map((msg, i) => {
+                  const text = messageText(msg);
+                  if (!text.trim()) return null;
+                  const isUser = msg.role === 'user';
+                  return (
+                    <div
+                      key={i}
+                      className={`rounded-lg px-3 py-2 text-xs whitespace-pre-wrap leading-relaxed border ${
+                        isUser
+                          ? 'bg-zinc-800/60 border-zinc-700 text-zinc-300'
+                          : 'bg-indigo-500/5 border-indigo-500/20 text-zinc-200'
+                      }`}
+                    >
+                      <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">
+                        {msg.role ?? 'message'}
+                      </div>
+                      {text.length > 2000 ? `${text.slice(0, 2000)}…` : text}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
 
 function EventsTab({ agentId }: { agentId: string }) {
   const events = useEventBus({ agentId });
@@ -440,7 +542,7 @@ function AgentDetail({ agentId }: { agentId: string }) {
 
       {/* Tabs */}
       <div className="flex items-center gap-1 px-6 py-2 border-b border-zinc-800 flex-shrink-0">
-        {(['events', 'tasks', 'capabilities'] as Tab[]).map((tab) => (
+        {(['events', 'tasks', 'capabilities', 'sessions'] as Tab[]).map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -460,6 +562,7 @@ function AgentDetail({ agentId }: { agentId: string }) {
         {activeTab === 'events' && <EventsTab agentId={agentId} />}
         {activeTab === 'tasks' && <TasksTab agentId={agentId} />}
         {activeTab === 'capabilities' && <CapabilitiesTab agent={agent} />}
+        {activeTab === 'sessions' && <SessionsTab agentId={agentId} />}
       </div>
     </div>
   );

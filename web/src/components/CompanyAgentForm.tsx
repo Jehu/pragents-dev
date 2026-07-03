@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { CompanyAgentConfig } from '@pragents/schema/config';
 import type { MemoryLevel } from './AgentForm.js';
 import { ModelSelect } from './ModelSelect.js';
+import { ToolPolicyEditor, buildToolsPayload, type ToolPolicyValue } from './ToolPolicyEditor.js';
 
 /**
  * Company-scope agent form (office / pm). Re-uses the same memory-access
@@ -21,6 +22,7 @@ export interface CompanyAgentFormValues {
   };
   tokenBudget?: number;
   keepWarm: boolean;
+  tools: ToolPolicyValue;
 }
 
 export interface CompanyAgentFormProps {
@@ -62,6 +64,8 @@ function buildPayload(values: CompanyAgentFormValues, agentType: CompanyAgentTyp
   if (memory) payload.memory = memory;
   if (typeof values.tokenBudget === 'number' && Number.isFinite(values.tokenBudget))
     payload.tokenBudget = values.tokenBudget;
+  const tools = buildToolsPayload(values.tools);
+  if (tools) payload.tools = tools;
   return payload;
 }
 
@@ -82,6 +86,10 @@ export function CompanyAgentForm({
     },
     tokenBudget: initial?.tokenBudget,
     keepWarm: initial?.keepWarm ?? false,
+    tools: {
+      allow: initial?.tools?.allow ?? [],
+      deny: initial?.tools?.deny ?? [],
+    },
   }));
   const [tagInput, setTagInput] = useState('');
 
@@ -98,6 +106,10 @@ export function CompanyAgentForm({
       },
       tokenBudget: initial?.tokenBudget,
       keepWarm: initial?.keepWarm ?? false,
+      tools: {
+        allow: initial?.tools?.allow ?? [],
+        deny: initial?.tools?.deny ?? [],
+      },
     });
   }, [
     initial?.model,
@@ -108,6 +120,7 @@ export function CompanyAgentForm({
     initial?.memory?.projectsAll,
     initial?.tokenBudget,
     initial?.keepWarm,
+    initial?.tools,
   ]);
 
   const payload = useMemo(() => buildPayload(values, agentType), [values, agentType]);
@@ -209,6 +222,13 @@ export function CompanyAgentForm({
           className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-zinc-500"
         />
       </fieldset>
+
+      <ToolPolicyEditor
+        value={values.tools}
+        onChange={(next) => update('tools', next)}
+        disabled={busy}
+        idPrefix={`company-agent-${agentType}`}
+      />
 
       <fieldset className="block">
         <legend className="block text-xs font-medium text-zinc-300 mb-2">
