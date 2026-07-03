@@ -882,3 +882,110 @@ describe('AgentSessionManager.getActiveSessionsForProject', () => {
     expect(buildMgr().getActiveSessionsForProject('anything')).toEqual([]);
   });
 });
+
+describe('AgentSessionManager concurrency guards', () => {
+  const tmpDir = mkdtempSync(join(tmpdir(), 'pragents-conc-test-'));
+
+  beforeAll(() => {
+    initDb(join(tmpDir, 'test.db'));
+  });
+
+  afterAll(() => {
+    closeDb();
+    rmSync(tmpDir, { recursive: true });
+  });
+
+  function makeMockSession(overrides: Record<string, any> = {}) {
+    return {
+      subscribe: vi.fn((cb: any) => {
+        setTimeout(() => cb({ type: 'agent_end' }), 5);
+        return () => {};
+      }),
+      prompt: vi.fn().mockResolvedValue(undefined),
+      dispose: vi.fn(),
+      isStreaming: false,
+      ...overrides,
+    };
+  }
+
+  it('concurrent getOrCreate calls share one create (no duplicate sessions)', async () => {
+    const { createAgentSession, DefaultResourceLoader } = await import('@mariozechner/pi-coding-agent');
+    (DefaultResourceLoader as any).mockImplementation(function () {
+      return { reload: vi.fn().mockResolvedValue(undefined) };
+    });
+    // Session creation resolves on the next macrotask so both callers race
+    (createAgentSession as any).mockReset();
+    (createAgentSession as any).mockImplementation(
+      () => new Promise((resolve) => setTimeout(() => resolve({ session: makeMockSession() }), 20)),
+    );
+
+    const mgr = new AgentSessionManager(new MemoryEngine(10));
+    const [h1, h2] = await Promise.all([mgr.getOrCreate(mockAgent), mgr.getOrCreate(mockAgent)]);
+    expect(createAgentSession).toHaveBeenCalledTimes(1);
+    expect(h1).toBe(h2);
+  });
+
+  it('a failed create clears the in-flight guard so the agent can retry', async () => {
+    const { createAgentSession, DefaultResourceLoader } = await import('@mariozechner/pi-coding-agent');
+    (DefaultResourceLoader as any).mockImplementation(function () {
+      return { reload: vi.fn().mockResolvedValue(undefined) };
+    });
+    (createAgentSession as any).mockReset();
+    (createAgentSession as any)
+      .mockRejectedValueOnce(new Error('cold start failed'))
+      .mockResolvedValueOnce({ session: makeMockSession() });
+
+    const mgr = new AgentSessionManager(new MemoryEngine(10));
+    await expect(mgr.getOrCreate(mockAgent)).rejects.toThrow('cold start failed');
+    // Second attempt must not be wedged on the rejected in-flight promise
+    await expect(mgr.getOrCreate(mockAgent)).resolves.toBeDefined();
+  });
+
+  it('disposeIdle skips a session with an in-flight dispatch (refCount > 0)', async () => {
+    const { createAgentSession, DefaultResourceLoader } = await import('@mariozechner/pi-coding-agent');
+    (DefaultResourceLoader as any).mockImplementation(function () {
+      return { reload: vi.fn().mockResolvedValue(undefined) };
+    });
+    // prompt hangs and agent_end never fires — the dispatch stays in flight
+    const hangingSession = makeMockSession({
+      subscribe: vi.fn(() => () => {}),
+      prompt: vi.fn(() => new Promise(() => {})),
+    });
+    (createAgentSession as any).mockReset();
+    (createAgentSession as any).mockResolvedValue({ session: hangingSession });
+
+    const mgr = new AgentSessionManager(new MemoryEngine(10), 1); // 1ms idle timeout
+    const dispatchPromise = mgr.dispatch(mockAgent, 'never finishes');
+    dispatchPromise.catch(() => {}); // silence eventual timeout rejection
+    // Let the dispatch reach getOrCreate + refCount++ and start the prompt
+    await new Promise((r) => setTimeout(r, 20));
+
+    const sessions = (mgr as any).sessions as Map<string, any>;
+    expect(sessions.size).toBe(1);
+    const handle = sessions.get(mockAgent.id);
+    expect(handle.refCount).toBe(1);
+
+    // Way past the 1ms idle timeout — but the ref must protect the session
+    const disposed = await mgr.disposeIdle();
+    expect(disposed).toEqual([]);
+    expect(sessions.has(mockAgent.id)).toBe(true);
+  });
+
+  it('refCount is released when a dispatch fails', async () => {
+    const { createAgentSession, DefaultResourceLoader } = await import('@mariozechner/pi-coding-agent');
+    (DefaultResourceLoader as any).mockImplementation(function () {
+      return { reload: vi.fn().mockResolvedValue(undefined) };
+    });
+    const failingSession = makeMockSession({
+      prompt: vi.fn().mockRejectedValue(new Error('prompt exploded')),
+    });
+    (createAgentSession as any).mockReset();
+    (createAgentSession as any).mockResolvedValue({ session: failingSession });
+
+    const mgr = new AgentSessionManager(new MemoryEngine(10));
+    await expect(mgr.dispatch(mockAgent, 'boom')).rejects.toThrow('prompt exploded');
+
+    const handle = ((mgr as any).sessions as Map<string, any>).get(mockAgent.id);
+    expect(handle.refCount).toBe(0);
+  });
+});
