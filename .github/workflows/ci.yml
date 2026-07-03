@@ -1,0 +1,36 @@
+# CI — typecheck, tests, and build gates for server and web
+name: CI
+
+on: [push, pull_request]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'npm'
+
+      # npm install (not ci with cached node_modules) so better-sqlite3 is
+      # always rebuilt against the CI Node ABI.
+      - name: Install dependencies
+        run: npm install
+
+      - name: Typecheck server
+        run: cd server && npx tsc --noEmit
+
+      - name: Test server
+        run: cd server && npm test
+
+      - name: Typecheck web
+        run: cd web && npx tsc --noEmit
+
+      - name: Test web
+        run: cd web && npx vitest run
+
+      - name: Build web
+        run: cd web && npm run build
