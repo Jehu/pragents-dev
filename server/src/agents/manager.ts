@@ -399,6 +399,13 @@ export class AgentSessionManager {
       }, 10 * 60 * 1000);
     });
 
+    // responsePromise is only awaited after prompt() resolves. If prompt()
+    // itself throws, a later rejection from the subscribe handler (error
+    // stopReason, empty-response guard, timeout) would be unhandled and kill
+    // the process — pre-attach a no-op handler. The await below still
+    // receives the rejection.
+    responsePromise.catch(() => {});
+
     await this.runtime.prompt(handle.runtimeHandle, task + contextStr);
     handle.lastActivityAt = Date.now();
     const response = await responsePromise;
