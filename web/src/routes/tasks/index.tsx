@@ -109,6 +109,17 @@ function TasksList() {
     staleTime: 5_000,
   });
 
+  // Display name for the empty state — cache-shared with the header picker.
+  const { data: projectsData } = useQuery<{ id: string; name: string }[]>({
+    queryKey: ['projects'],
+    queryFn: () => fetchJson('/api/v1/projects'),
+    staleTime: 60_000,
+    enabled: selectedProject !== null,
+  });
+  const selectedProjectName =
+    (Array.isArray(projectsData) ? projectsData : []).find((p) => p.id === selectedProject)?.name ??
+    selectedProject;
+
   const allTasks: Task[] = Array.isArray(data?.tasks) ? data.tasks : [];
   const agentIds = [...new Set(allTasks.map((t) => t.agentId))].filter(Boolean);
   const filtered = filterTasks(allTasks, activeTab, agentFilter);
@@ -167,9 +178,9 @@ function TasksList() {
             description={
               activeTab === 'all'
                 ? selectedProject
-                  ? `No tasks in project "${selectedProject}" yet.`
+                  ? `No tasks in project "${selectedProjectName}" yet.`
                   : 'No tasks have been created yet.'
-                : `No ${activeTab} tasks${selectedProject ? ` in "${selectedProject}"` : ''}.`
+                : `No ${activeTab} tasks${selectedProject ? ` in "${selectedProjectName}"` : ''}.`
             }
             action={
               activeTab === 'all' ? (

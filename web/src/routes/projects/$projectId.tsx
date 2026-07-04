@@ -14,6 +14,7 @@ import {
 import { AGENT_TYPES, type ProjectAgentType } from '../../components/AgentForm.js';
 import { DeleteProjectModal } from '../../components/DeleteProjectModal.js';
 import { ConflictDialog } from '../../components/ConflictDialog.js';
+import { useScopeStore } from '../../stores/scope.js';
 import { useEtagFetch } from '../../hooks/useEtagFetch.js';
 
 export const Route = createFileRoute('/projects/$projectId')({
@@ -305,6 +306,10 @@ function ProjectDetailLayout() {
           onDelete={performDelete}
           onClose={() => setDeleting(false)}
           onSuccess={async () => {
+            // Reset the global scope if it pointed at the deleted project —
+            // otherwise every page keeps filtering on a dead id.
+            const scope = useScopeStore.getState();
+            if (scope.selectedProject === data.id) scope.setProject(null);
             setDeleting(false);
             await queryClient.invalidateQueries({ queryKey: ['projects'] });
             await queryClient.invalidateQueries({ queryKey: ['agents'] });

@@ -60,6 +60,12 @@ export interface ListPlansOptions {
   status?: PlanStatus;
   origin?: PlanOrigin;
   conversationId?: string;
+  /**
+   * Scope to one project. Plans without a project (e.g. chat-origin drafts)
+   * are still included — same semantics as the event feed's scope filter,
+   * where unscoped items belong to every scope.
+   */
+  projectId?: string;
   limit?: number;
   offset?: number;
 }
@@ -117,6 +123,10 @@ export class PlanStore {
     if (opts.conversationId) {
       clauses.push('conversation_id = ?');
       params.push(opts.conversationId);
+    }
+    if (opts.projectId) {
+      clauses.push('(project_id = ? OR project_id IS NULL)');
+      params.push(opts.projectId);
     }
     const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
     const limit = opts.limit ?? 50;

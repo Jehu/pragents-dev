@@ -138,6 +138,7 @@ describe('Chat SSE Route — POST /api/v1/chat', () => {
     // Mock IntentClassifier
     mockClassifier = {
       classify: vi.fn().mockResolvedValue({ tool: 'list_agents', args: {} }),
+      reply: vi.fn().mockResolvedValue('Hi! I can help you run tasks and workflows.'),
     } as any;
     mockDecomposer = {
       decompose: vi.fn().mockResolvedValue({
@@ -295,6 +296,43 @@ describe('Chat SSE Route — POST /api/v1/chat', () => {
   });
 
   // ---- AE3: NL Decomposition → plan_proposal (classifier returns "complex") ----
+  // ---- Chat intent: direct reply, no plan (usability report K3) ----
+  it('answers conversational messages directly instead of proposing a plan', async () => {
+    (mockClassifier.classify as any).mockResolvedValue({ tool: 'chat', args: {}, confidence: 0.99 });
+    (mockDecomposer.decompose as any).mockClear();
+    const app = createApp();
+
+    const res = await app.request('/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: 'Hallo! Was kannst du für mich tun?' }),
+    });
+    expect(res.status).toBe(200);
+    const events = parseSSEStream(await res.text());
+
+    const msg = events.find((e) => e.type === 'message');
+    expect(msg?.data?.subtype).toBe('text');
+    expect(msg?.data?.content).toContain('Hi! I can help');
+    // The greeting must NOT reach the decomposer (no greet-the-user plans).
+    expect(mockDecomposer.decompose).not.toHaveBeenCalled();
+    expect(events.some((e) => e.type === 'done')).toBe(true);
+  });
+
+  it('falls back to a static capability blurb when reply() returns null', async () => {
+    (mockClassifier.classify as any).mockResolvedValue({ tool: 'chat', args: {}, confidence: 0.99 });
+    (mockClassifier.reply as any).mockResolvedValueOnce(null);
+    const app = createApp();
+
+    const res = await app.request('/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: 'Danke!' }),
+    });
+    const events = parseSSEStream(await res.text());
+    const msg = events.find((e) => e.type === 'message');
+    expect(msg?.data?.content).toContain('dispatch tasks');
+  });
+
   it('AE3: streams plan_proposal when classifier returns complex', async () => {
     (mockClassifier.classify as any).mockResolvedValue({ tool: 'complex', args: {} });    const app = createApp();
     const res = await app.request('/', {

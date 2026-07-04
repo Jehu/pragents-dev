@@ -196,8 +196,19 @@ export class ConversationManager {
    * empty — only callable from the "scope=all with zero configured projects"
    * fallback). This is the security-relevant entry point used by the chat
    * API; do not collapse with listRecent().
+   *
+   * `includeUnscoped` additionally returns rows with NULL project_id (e.g.
+   * company-agent conversations). The chat route sets it for `scope=all` so
+   * the list matches the messages endpoint, which already grants scope=all
+   * access to NULL-project conversations — without it those conversations
+   * were readable but never listed, i.e. invisible (usability report K3).
    */
-  listRecentForProjects(projectIds: string[], limit: number = 20, agentId?: string): Conversation[] {
+  listRecentForProjects(
+    projectIds: string[],
+    limit: number = 20,
+    agentId?: string,
+    includeUnscoped: boolean = false,
+  ): Conversation[] {
     const db = this.getDb();
     if (projectIds.length === 0) {
       // No configured projects — return only legacy NULL-project rows.
@@ -215,12 +226,13 @@ export class ConversationManager {
       return rows;
     }
     const placeholders = projectIds.map(() => '?').join(', ');
+    const nullClause = includeUnscoped ? ' OR project_id IS NULL' : '';
     const rows = db
       .prepare(
         `SELECT id, agent_id as agentId, project_id as projectId,
                 last_activity_at as lastActivityAt, created_at as createdAt
          FROM chat_conversations
-         WHERE project_id IN (${placeholders})
+         WHERE (project_id IN (${placeholders})${nullClause})
            AND (? IS NULL OR agent_id = ?)
          ORDER BY last_activity_at DESC
          LIMIT ?`,

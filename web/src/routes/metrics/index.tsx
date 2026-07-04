@@ -1,7 +1,7 @@
 import React from 'react';
 import { createFileRoute } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
-import { StatCard } from '../../components/ui/index.js';
+import { StatCard, CompanyWideBadge } from '../../components/ui/index.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -96,7 +96,10 @@ function MetricsView() {
 
   return (
     <div className="p-6 max-w-2xl">
-      <h2 className="text-xl font-bold text-zinc-100 mb-4">Metrics</h2>
+      <h2 className="text-xl font-bold text-zinc-100 mb-4 flex items-center gap-2">
+        Metrics
+        <CompanyWideBadge />
+      </h2>
 
       {/* 2×2 StatCard grid */}
       <div className="grid grid-cols-2 gap-4 mb-4">

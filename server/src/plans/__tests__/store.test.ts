@@ -150,6 +150,33 @@ describe('PlanStore', () => {
     }
   });
 
+  it('list() filters by projectId but keeps unscoped plans visible', () => {
+    const projectId = `proj-${Date.now()}`;
+    const scoped = store.create({
+      origin: 'nl',
+      projectId,
+      prompt: 'scoped',
+      steps: [{ description: 'x', agentId: 'dev' }],
+    });
+    const otherProject = store.create({
+      origin: 'nl',
+      projectId: `${projectId}-other`,
+      prompt: 'other',
+      steps: [{ description: 'x', agentId: 'dev' }],
+    });
+    const unscoped = store.create({
+      origin: 'chat',
+      prompt: 'unscoped',
+      steps: [{ description: 'x', agentId: 'dev' }],
+    });
+
+    const byProject = store.list({ projectId, limit: 200 });
+    const ids = byProject.map((p) => p.id);
+    expect(ids).toContain(scoped.id);
+    expect(ids).toContain(unscoped.id);
+    expect(ids).not.toContain(otherProject.id);
+  });
+
   it('list() respects limit + offset', () => {
     const all = store.list({ limit: 200 });
     expect(all.length).toBeGreaterThan(0);

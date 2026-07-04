@@ -23,6 +23,7 @@ export {
   InterfacesConfig,
   CostRate,
   PoolConfig,
+  ProviderConfig,
   PragentsConfig,
 } from '@pragents/schema/config';
 export type { ResolvedAgent } from '@pragents/schema/config';

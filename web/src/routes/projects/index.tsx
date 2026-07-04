@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { EmptyState } from '../../components/ui/index.js';
 import { DeleteProjectModal } from '../../components/DeleteProjectModal.js';
+import { useScopeStore } from '../../stores/scope.js';
 
 export const Route = createFileRoute('/projects/')({
   component: ProjectsIndexPage,
@@ -12,6 +13,8 @@ export interface ProjectSummary {
   id: string;
   name: string;
   directory: string;
+  /** False when the configured directory does not exist on disk (server-checked). */
+  directoryExists?: boolean;
 }
 
 async function fetchProjects(): Promise<ProjectSummary[]> {
@@ -121,6 +124,15 @@ function ProjectsIndexPage() {
                   <p className="text-[11px] text-zinc-500 font-mono truncate mt-1">
                     {p.directory}
                   </p>
+                  {p.directoryExists === false && (
+                    <p
+                      className="text-[11px] text-amber-400 mt-1 flex items-center gap-1"
+                      data-testid={`dir-missing-${p.id}`}
+                    >
+                      <span role="img" aria-label="Warning">⚠</span>
+                      Directory does not exist — agent runs in this project will fail.
+                    </p>
+                  )}
                 </div>
               </div>
               <div className="flex gap-1.5 mt-3 flex-wrap">
@@ -165,6 +177,10 @@ function ProjectsIndexPage() {
           onDelete={() => performDelete(deleteTarget.id)}
           onClose={() => setDeleteTarget(null)}
           onSuccess={() => {
+            // Deleting the project that is currently the global scope would
+            // leave every page filtering on a dead id — reset immediately.
+            const scope = useScopeStore.getState();
+            if (scope.selectedProject === deleteTarget.id) scope.setProject(null);
             setDeleteTarget(null);
             void queryClient.invalidateQueries({ queryKey: ['projects'] });
             void queryClient.invalidateQueries({ queryKey: ['agents'] });

@@ -145,10 +145,18 @@ export function createChatRoute(
     const agentId = c.req.query('agentId') || undefined;
 
     // Legacy mode delegates to listRecent which keeps the old projectId filter
-    // semantics intact (return all when no filter is supplied).
+    // semantics intact (return all when no filter is supplied). scope=all also
+    // includes NULL-project rows (company-agent conversations) so the list
+    // matches what the messages endpoint already grants access to.
+    const isScopeAll = c.req.query('scope') === 'all';
     const conversations = scope.legacy
       ? conversationManager.listRecent(limit.success ? limit.data : 20, projectId, agentId)
-      : conversationManager.listRecentForProjects(scope.projects, limit.success ? limit.data : 20, agentId);
+      : conversationManager.listRecentForProjects(
+          scope.projects,
+          limit.success ? limit.data : 20,
+          agentId,
+          isScopeAll,
+        );
 
     return c.json({ conversations });
   });
@@ -289,7 +297,23 @@ export function createChatRoute(
             // 4c. Classify intent via LLM classifier
             const classification = await classifier.classify(message);
 
-            if (classification && classification.tool !== 'complex') {
+            if (classification && classification.tool === 'chat') {
+              // Conversational message — answer directly. Routing this
+              // through the decomposer produced approvable "greet the user"
+              // plans (usability report K3). Fall back to a static
+              // capability blurb when the reply model is unavailable.
+              const replyText =
+                (await classifier.reply(message)) ??
+                'Hi! I can dispatch tasks to agents, run workflows, track goals, ' +
+                'search the shared memory, and show costs, skills, and pending approvals. ' +
+                'Tell me what you need.';
+
+              emit({
+                type: 'message',
+                data: { subtype: 'text', content: replyText },
+              });
+              conversationManager.addMessage(convId, 'assistant', replyText, 'text');
+            } else if (classification && classification.tool !== 'complex') {
               // Inject projectId into tool args if available
               const toolArgs = {
                 ...classification.args,
@@ -495,10 +519,13 @@ export function createChatRoute(
                 let planId: string | undefined;
                 if (planStore) {
                   try {
+                    // Fall back to the conversation's project so chat plans
+                    // stay visible under the project scope they came from.
+                    const conv = conversationManager.getConversation(convId);
                     const persisted = planStore.create({
                       origin: 'chat',
                       conversationId: convId,
-                      projectId: projectId ?? null,
+                      projectId: projectId ?? conv?.projectId ?? null,
                       agentId: agentId ?? null,
                       prompt: message,
                       steps: planSteps,

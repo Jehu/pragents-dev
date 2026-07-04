@@ -38,7 +38,7 @@ export function resolveModel(modelString: string | undefined): unknown | null {
   const registry = sharedRegistry;
   if (registry) {
     const fromRegistry = registry.find(provider, modelId);
-    if (fromRegistry) return fromRegistry;
+    if (fromRegistry) return applyProviderOverrides(provider, fromRegistry);
   }
 
   // Fallback to pi-ai built-in registry (covers test paths that skip boot
@@ -49,7 +49,30 @@ export function resolveModel(modelString: string | undefined): unknown | null {
       'resolveModel: model not found in pi registry (built-in or custom)');
     return null;
   }
-  return model;
+  return applyProviderOverrides(provider, model);
+}
+
+/** Per-provider overrides from the `providers:` section of pragents.yaml. */
+export interface ProviderOverride {
+  baseUrl?: string;
+}
+
+let providerOverrides: Record<string, ProviderOverride> = {};
+
+/**
+ * Install per-provider overrides (currently `baseUrl`). Called at boot and on
+ * every config hot-reload so `pragents.yaml` stays the single source of
+ * truth. Example: pointing the "zai" provider at the GLM Coding Plan
+ * endpoint, which uses a separate quota from the general API.
+ */
+export function setProviderOverrides(overrides: Record<string, ProviderOverride>): void {
+  providerOverrides = overrides;
+}
+
+function applyProviderOverrides(provider: string, model: unknown): unknown {
+  const override = providerOverrides[provider];
+  if (!override?.baseUrl) return model;
+  return { ...(model as Record<string, unknown>), baseUrl: override.baseUrl };
 }
 
 let sharedRegistry: ModelRegistry | null = null;

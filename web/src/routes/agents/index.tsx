@@ -41,6 +41,19 @@ function agentInitials(id: string): string {
 function AgentSidebar({ agents }: { agents: AgentSummary[] }) {
   const navigate = useNavigate();
 
+  // Model health from the health endpoint: agents whose configured model is
+  // unusable (unknown id / missing provider key) get a warning marker —
+  // previously they looked perfectly fine while every run failed silently.
+  const { data: health } = useQuery<{ models?: Array<{ model: string; ok: boolean; resolvable: boolean; keyPresent: boolean; provider: string }> }>({
+    queryKey: ['health'],
+    queryFn: () => fetchJson('/api/v1/health'),
+    refetchInterval: 30_000,
+    staleTime: 20_000,
+  });
+  const brokenModels = new Map(
+    (health?.models ?? []).filter((m) => !m.ok).map((m) => [m.model, m]),
+  );
+
   if (agents.length === 0) {
     return (
       <EmptyState
@@ -77,6 +90,20 @@ function AgentSidebar({ agents }: { agents: AgentSummary[] }) {
             <div className="flex items-center gap-1.5">
               <span className="text-xs font-medium text-zinc-200 truncate">{agent.id}</span>
               <StatusPill status={STATUS_PILL_MAP[agent.status] ?? 'idle'} />
+              {brokenModels.has(agent.model) && (
+                <span
+                  title={`Model "${agent.model}" is unusable — ${
+                    !brokenModels.get(agent.model)!.resolvable
+                      ? 'unknown model id'
+                      : `no API key for "${brokenModels.get(agent.model)!.provider}"`
+                  }`}
+                  className="text-amber-400 text-[11px]"
+                  role="img"
+                  aria-label="Model unusable"
+                >
+                  ⚠
+                </span>
+              )}
             </div>
             <p className="text-[11px] text-zinc-500 truncate">{agent.projectId}</p>
           </div>

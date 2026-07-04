@@ -8,7 +8,7 @@ import type { WorkflowTracker } from '../../workflows/tracker.js';
 /**
  * REST surface for the unified plan store.
  *
- * GET    /              list plans (optional ?status=&origin=&conversationId=&limit=&offset=)
+ * GET    /              list plans (optional ?status=&origin=&conversationId=&project=&limit=&offset=)
  * GET    /:id           fetch a single plan
  * POST   /:id/approve   approve a draft AND kick off execution (async)
  * POST   /:id/cancel    set status=cancelled (only meaningful pre-execution)
@@ -52,6 +52,9 @@ export function createPlansRoute(store: PlanStore, executor: PlanExecutor, wfTra
     }
     const conversationId = c.req.query('conversationId');
     if (conversationId) opts.conversationId = conversationId;
+
+    const project = c.req.query('project');
+    if (project) opts.projectId = project;
 
     const limit = c.req.query('limit');
     if (limit) {

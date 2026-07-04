@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { StatusPill, EmptyState } from '../../components/ui/index.js';
 import type { StatusType } from '../../components/ui/index.js';
 import { useEventBusStore } from '../../stores/eventBus.js';
+import { useScopeStore } from '../../stores/scope.js';
 
 export const Route = createFileRoute('/plans/')({
   component: PlansPage,
@@ -169,12 +170,20 @@ function PlansPage() {
     }
   }, [busEvents, queryClient]);
 
+  // Global project scope — plans carry a projectId; unscoped plans (e.g.
+  // chat drafts) remain visible in every scope (server-side semantics).
+  const selectedProject = useScopeStore((s) => s.selectedProject);
+  useEffect(() => {
+    setOffset(0);
+  }, [selectedProject]);
+
   const { data, isLoading } = useQuery({
-    queryKey: ['plans', activeTab, originFilter, offset],
+    queryKey: ['plans', activeTab, originFilter, offset, selectedProject],
     queryFn: () => {
       const params = new URLSearchParams();
       if (activeTab !== 'all') params.set('status', activeTab);
       if (originFilter !== 'all') params.set('origin', originFilter);
+      if (selectedProject) params.set('project', selectedProject);
       params.set('limit', String(PAGE_SIZE));
       params.set('offset', String(offset));
       return fetch(`/api/v1/plans?${params.toString()}`).then((r) => r.json());
@@ -184,8 +193,11 @@ function PlansPage() {
 
   // Fetch all for tab counts (without status filter)
   const { data: allData } = useQuery({
-    queryKey: ['plans-all-counts'],
-    queryFn: () => fetch('/api/v1/plans?limit=500').then((r) => r.json()),
+    queryKey: ['plans-all-counts', selectedProject],
+    queryFn: () =>
+      fetch(
+        `/api/v1/plans?limit=500${selectedProject ? `&project=${encodeURIComponent(selectedProject)}` : ''}`,
+      ).then((r) => r.json()),
     staleTime: 20_000,
   });
 

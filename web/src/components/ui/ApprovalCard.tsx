@@ -24,7 +24,8 @@ const STATUS_STYLE: Record<Exclude<ApprovalStatus, 'pending'>, string> = {
 
 interface ApprovalCardProps {
   variant: ApprovalVariant;
-  title: string;
+  /** Plain text or a node — pass a router Link when the entry has a detail page. */
+  title: React.ReactNode;
   body: React.ReactNode;
   onApprove?: () => void;
   onReject?: () => void;
