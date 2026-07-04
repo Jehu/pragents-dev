@@ -104,13 +104,46 @@ export function suppressWatcherChange(filePath: string, durationMs = 250): void 
 }
 
 /**
+ * Single listener invoked with the freshly-loaded config whenever
+ * `pragents.yaml` changes — from the fs watcher OR from a UI-originated
+ * write (which suppresses the watcher and must therefore notify explicitly
+ * via {@link notifyConfigChanged}). Without this, API writes updated the
+ * file but the running server kept serving boot-time agents until restart
+ * (usability report K2).
+ */
+type ConfigChangeListener = (loaded: LoadedConfig) => void;
+
+let configChangeListener: ConfigChangeListener | null = null;
+let mainConfigPath: string = DEFAULT_CONFIG_PATHS[0];
+
+export function registerConfigChangeListener(fn: ConfigChangeListener | null): void {
+  configChangeListener = fn;
+}
+
+/**
+ * Re-load the config and deliver it to the registered listener. Called by
+ * `writeYamlDoc` after every successful write; a no-op for files other than
+ * the main config, when no listener is registered, or when the file is
+ * mid-save malformed (the fs watcher will retry on the next real change).
+ */
+export function notifyConfigChanged(filePath: string): void {
+  if (!configChangeListener) return;
+  if (resolve(filePath) !== mainConfigPath) return;
+  try {
+    configChangeListener(loadConfig(mainConfigPath));
+  } catch {
+    // Malformed YAML mid-save — ignore; watcher/next write will retry
+  }
+}
+
+/**
  * Watch `pragents.yaml` for changes and call `onReload` with the new config
  * whenever the file changes. Returns a {@link WatchHandle} with `stop` to
  * shut the watcher down and `suppressNextChange` so callers (or the
  * module-level `suppressWatcherChange` proxy) can mark UI-originated writes.
  */
 export function watchConfig(
-  onReload: (agents: ResolvedAgent[], changedAgentIds: Set<string>) => void,
+  onReload: (agents: ResolvedAgent[], changedAgentIds: Set<string>, config: PragentsConfig) => void,
   configPath?: string,
 ): WatchHandle {
   const paths = configPath
@@ -118,6 +151,7 @@ export function watchConfig(
     : DEFAULT_CONFIG_PATHS;
 
   const watchPath = paths[0];
+  mainConfigPath = watchPath;
 
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
   let previousAgentIds: Set<string> = new Set();
@@ -135,11 +169,11 @@ export function watchConfig(
     if (debounceTimer) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
       try {
-        const { agents } = loadConfig(configPath);
+        const { config, agents } = loadConfig(configPath);
         const newAgentIds = new Set(agents.map((a) => a.id));
         const changedIds = new Set([...previousAgentIds].filter((id) => newAgentIds.has(id)));
         previousAgentIds = newAgentIds;
-        onReload(agents, changedIds);
+        onReload(agents, changedIds, config);
       } catch {
         // Malformed YAML mid-save — ignore and retry on next change
       }

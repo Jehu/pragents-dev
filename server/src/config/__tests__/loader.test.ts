@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { loadConfig } from '../../config/loader.js';
+import {
+  loadConfig,
+  watchConfig,
+  registerConfigChangeListener,
+  notifyConfigChanged,
+  type LoadedConfig,
+} from '../../config/loader.js';
 import { writeFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -203,5 +209,43 @@ projects:
     writeFileSync(path, yaml);
     expect(() => loadConfig(path)).toThrow('PRAGENTS_MISSING');
     rmSync(tmpDir, { recursive: true });
+  });
+});
+
+describe('config change listener (K2 hot-reload)', () => {
+  it('notifyConfigChanged delivers freshly loaded config to the listener, only for the main config path', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pragents-notify-'));
+    const path = join(dir, 'pragents.yaml');
+    writeFileSync(path, minimalYaml);
+
+    // watchConfig installs `path` as the main config path; stop immediately —
+    // we only exercise the explicit notify path here.
+    const handle = watchConfig(() => {}, path);
+    handle.stop();
+
+    let received: LoadedConfig | null = null;
+    registerConfigChangeListener((loaded) => {
+      received = loaded;
+    });
+
+    try {
+      notifyConfigChanged(path);
+      expect(received).not.toBeNull();
+      expect(received!.agents.map((a) => a.id)).toContain('dev@proj-a');
+
+      // Writes to other files must not trigger a config reload.
+      received = null;
+      notifyConfigChanged(join(dir, 'something-else.yaml'));
+      expect(received).toBeNull();
+
+      // Malformed YAML mid-save is swallowed (watcher retries later).
+      writeFileSync(path, 'company: [broken');
+      received = null;
+      expect(() => notifyConfigChanged(path)).not.toThrow();
+      expect(received).toBeNull();
+    } finally {
+      registerConfigChangeListener(null);
+      rmSync(dir, { recursive: true });
+    }
   });
 });

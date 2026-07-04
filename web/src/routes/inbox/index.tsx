@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { createFileRoute } from '@tanstack/react-router';
+import { createFileRoute, Link } from '@tanstack/react-router';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { Modal } from '../../components/Modal.js';
 import { ApprovalCard, Button, EmptyState, ErrorState, KbdHint, LoadingState, CompanyWideBadge } from '../../components/ui/index.js';
@@ -64,7 +64,8 @@ export type TabKey = 'all' | 'gates' | 'plans' | 'skills';
 export interface InboxEntry {
   _kind: 'gate' | 'plan' | 'skill';
   key: string;
-  title: string;
+  /** Linked to the entry's detail page where one exists (plans, skills). */
+  title: React.ReactNode;
   body: React.ReactNode;
   raw: Gate | Plan | Skill;
 }
@@ -328,14 +329,30 @@ function InboxPage() {
     ...plans.map((p): InboxEntry => ({
       _kind: 'plan',
       key: `plan-${p.id}`,
-      title: p.prompt.length > 60 ? p.prompt.slice(0, 57) + '…' : p.prompt,
+      title: (
+        <Link
+          to="/plans/$planId"
+          params={{ planId: p.id }}
+          className="text-zinc-100 no-underline hover:text-indigo-300 hover:underline"
+        >
+          {p.prompt.length > 60 ? p.prompt.slice(0, 57) + '…' : p.prompt}
+        </Link>
+      ),
       body: planBody(p),
       raw: p,
     })),
     ...skills.map((s): InboxEntry => ({
       _kind: 'skill',
       key: `skill-${s.name}`,
-      title: s.name,
+      title: (
+        <Link
+          to="/skills"
+          search={{ name: s.name }}
+          className="text-zinc-100 no-underline hover:text-indigo-300 hover:underline"
+        >
+          {s.name}
+        </Link>
+      ),
       body: skillBody(s),
       raw: s,
     })),

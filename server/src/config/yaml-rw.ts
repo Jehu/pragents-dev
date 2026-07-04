@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import * as YAML from 'yaml';
-import { suppressWatcherChange } from './loader.js';
+import { suppressWatcherChange, notifyConfigChanged } from './loader.js';
 
 /**
  * Round-trip YAML editing helpers used by the config-UI write endpoints.
@@ -95,6 +95,10 @@ export function writeYamlDoc(
     suppressWatcherChange(path, opts.suppressMs ?? 250);
   }
   writeFileSync(path, serialized, 'utf8');
+  // The suppression above keeps the fs watcher quiet for UI-originated
+  // writes, so the running server must be told about the new config here —
+  // otherwise agents/providers only update on restart.
+  notifyConfigChanged(path);
   return { etag: computeEtag(serialized) };
 }
 

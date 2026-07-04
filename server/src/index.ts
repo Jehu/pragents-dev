@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { serve } from '@hono/node-server';
-import { loadConfig, watchConfig } from './config/loader.js';
+import { loadConfig, watchConfig, registerConfigChangeListener, type LoadedConfig } from './config/loader.js';
 import { initDb, closeDb, getDb } from './db/sqlite.js';
 import { MemoryEngine } from './memory/engine.js';
 import { AgentSessionManager } from './agents/manager.js';
@@ -53,7 +53,7 @@ import {
   ModelRegistry,
 } from '@mariozechner/pi-coding-agent';
 import { createModelsRoute } from './api/routes/models.js';
-import { setModelRegistry } from './agents/model-resolver.js';
+import { setModelRegistry, setProviderOverrides } from './agents/model-resolver.js';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { expandHome } from './util/paths.js';
@@ -88,6 +88,10 @@ export async function startServer() {
 
   const { config, agents } = loadConfig();
 
+  // Per-provider overrides (e.g. zai → GLM Coding Plan endpoint) must be in
+  // place before any pi session or model resolution happens.
+  setProviderOverrides(config.providers ?? {});
+
   // Initialize database
   const dbPath = join(DATA_DIR, 'pragents.db');
   initDb(dbPath);
@@ -116,6 +120,26 @@ export async function startServer() {
   const maxWarmSessions = config.pool?.maxWarmSessions ?? 10;
   const sessionMgr = new AgentSessionManager(memory, undefined, maxWarmSessions);
   const router = new SkillRouter(agents);
+
+  // Single reload path for config changes (fs watcher AND UI-originated
+  // writes, which suppress the watcher and notify explicitly). The `agents`
+  // array is shared by reference with every consumer (routes, router,
+  // classifier, workflow engine, …), so replacing its CONTENTS in place
+  // propagates everywhere without re-wiring. Existing sessions are marked
+  // stale so they respawn with the updated config on next use.
+  const applyConfigReload = (loaded: LoadedConfig): void => {
+    setProviderOverrides(loaded.config.providers ?? {});
+    const previousIds = new Set(agents.map((a) => a.id));
+    agents.splice(0, agents.length, ...loaded.agents);
+    for (const a of loaded.agents) {
+      if (previousIds.has(a.id)) sessionMgr.markStale(a.id);
+    }
+    logger.info(
+      { count: loaded.agents.length },
+      'Config reloaded — agents re-resolved, existing sessions marked stale',
+    );
+  };
+  registerConfigChangeListener(applyConfigReload);
 
   sessionMgr.setEventCallback((event: any) => {
     const evt = eventBuffer.push(event.projectId, event.agentId, event.type, event.data);
@@ -227,13 +251,8 @@ export async function startServer() {
 
   // Config hot-reload: mark affected agent sessions as stale on pragents.yaml change
   try {
-    watchConfig((_agents, changedAgentIds) => {
-      for (const agentId of changedAgentIds) {
-        sessionMgr.markStale(agentId);
-      }
-      if (changedAgentIds.size > 0) {
-        logger.info({ agentIds: [...changedAgentIds] }, 'Config reloaded — sessions marked stale');
-      }
+    watchConfig((freshAgents, _changedAgentIds, freshConfig) => {
+      applyConfigReload({ config: freshConfig, agents: freshAgents });
     });
   } catch {
     // Config file may not exist yet (e.g. in tests) — skip watcher
@@ -341,7 +360,7 @@ export async function startServer() {
   const wsInject = await setupWebSocket(app, eventBuffer, () => process.env.PRAGENTS_API_TOKEN || apiToken);
   if (wsInject) logger.info('WebSocket endpoint ready');
 
-  app.route('/api/v1', createHealthRoute(memory));
+  app.route('/api/v1', createHealthRoute(memory, agents));
   app.route('/api/v1/ws-ticket', createWsTicketRoute());
   const configPath = process.env.PRAGENTS_CONFIG_PATH || join(homedir(), '.pragents', 'pragents.yaml');
   app.route('/api/v1/projects', createProjectsRoute({ configPath, sessionMgr }));

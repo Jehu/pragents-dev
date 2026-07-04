@@ -1,8 +1,10 @@
 import { Hono } from 'hono';
 import { getDb } from '../../db/sqlite.js';
 import type { MemoryEngine } from '../../memory/engine.js';
+import type { ResolvedAgent } from '../../config/schema.js';
+import { checkModelHealth } from '../../agents/model-health.js';
 
-export function createHealthRoute(memory?: MemoryEngine) {
+export function createHealthRoute(memory?: MemoryEngine, agents?: ResolvedAgent[]) {
   return new Hono().get('/health', (c) => {
     let dbConnected = false;
     let dbSize = 0;
@@ -17,11 +19,18 @@ export function createHealthRoute(memory?: MemoryEngine) {
       ? { store: memory.storeName(), degraded: memory.isDegraded() }
       : { store: 'simple' as const, degraded: false };
 
+    // Per-model provider health: an unusable configured model (unknown id or
+    // missing API key) degrades overall status — a green badge over agents
+    // that cannot run was the worst finding of the 2026-07-04 usability test.
+    const models = agents ? checkModelHealth(agents) : [];
+    const modelsOk = models.every((m) => m.ok);
+
     return c.json({
-      status: dbConnected ? 'ok' : 'degraded',
+      status: dbConnected && modelsOk ? 'ok' : 'degraded',
       uptime: process.uptime(),
       db: { connected: dbConnected, size: dbSize },
       memory: memoryInfo,
+      models,
       agents_active: 0,
     });
   });

@@ -115,6 +115,15 @@ interfaces:
 pool:
   maxWarmSessions: 10
 
+# Per-provider overrides, keyed by provider id (the part before the "/" in
+# model strings). `baseUrl` redirects every model of that provider to a
+# different API endpoint. Example: Z.ai GLM Coding Plan subscriptions only
+# work against the coding endpoint — the general endpoint answers with
+# "Insufficient balance" (error 1113) even though the key is valid.
+# providers:
+#   zai:
+#     baseUrl: https://api.z.ai/api/coding/paas/v4
+
 costs:
   anthropic/claude-sonnet: { in: 3.0, out: 15.0 }
   anthropic/claude-haiku: { in: 0.8, out: 4.0 }

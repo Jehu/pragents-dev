@@ -64,9 +64,10 @@ describe('createProjectsRoute', () => {
       const res = await app.request('/projects');
       expect(res.status).toBe(200);
       expect(res.headers.get('ETag')).toMatch(/^W\/"[a-f0-9]{64}"$/);
-      const body = (await res.json()) as Array<{ id: string; name: string; directory: string }>;
+      const body = (await res.json()) as Array<{ id: string; name: string; directory: string; directoryExists: boolean }>;
       expect(body).toEqual([
-        { id: 'alpha', name: 'Alpha Project', directory: '~/code/alpha' },
+        // directoryExists is false — the fixture path is not on disk (M4).
+        { id: 'alpha', name: 'Alpha Project', directory: '~/code/alpha', directoryExists: false },
       ]);
     });
   });

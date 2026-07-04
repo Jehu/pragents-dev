@@ -143,6 +143,15 @@ export const PoolConfig = z.object({
   maxWarmSessions: z.number().int().positive().default(10),
 });
 
+export const ProviderConfig = z.object({
+  /**
+   * Override the API base URL for every model of this provider. Example:
+   * Z.ai GLM Coding Plan subscriptions are only valid against the coding
+   * endpoint (https://api.z.ai/api/coding/paas/v4), not the general one.
+   */
+  baseUrl: z.string().url('baseUrl must be a valid URL').optional(),
+});
+
 export const PragentsConfig = z.object({
   company: CompanyConfig,
   projects: z.record(z.string(), ProjectConfig).default({}),
@@ -150,6 +159,8 @@ export const PragentsConfig = z.object({
   chat: ChatConfig.optional(),
   costs: z.record(z.string(), CostRate).optional(),
   pool: PoolConfig.optional(),
+  /** Per-provider overrides, keyed by provider id (e.g. "zai", "deepseek"). */
+  providers: z.record(z.string(), ProviderConfig).optional(),
 });
 
 export type PragentsConfig = z.infer<typeof PragentsConfig>;
@@ -162,6 +173,7 @@ export type ChatConfig = z.infer<typeof ChatConfig>;
 export type InterfacesConfig = z.infer<typeof InterfacesConfig>;
 export type CostRate = z.infer<typeof CostRate>;
 export type PoolConfig = z.infer<typeof PoolConfig>;
+export type ProviderConfig = z.infer<typeof ProviderConfig>;
 export type MemoryConfig = z.infer<typeof MemoryConfig>;
 export type ToolPolicy = z.infer<typeof ToolPolicy>;
 

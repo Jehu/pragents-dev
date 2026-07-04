@@ -24,6 +24,7 @@ export const IntentResultSchema = z.object({
     'list_pending_gates',
     'list_goals',
     'list_events',
+    'chat',
     'complex',
   ]),
   args: z.record(z.unknown()).optional().default({}),
@@ -36,6 +37,7 @@ export type IntentResult = z.infer<typeof IntentResultSchema>;
 // ---- Classifier ----
 
 const CLASSIFIER_TIMEOUT_MS = 10_000;
+const REPLY_TIMEOUT_MS = 30_000;
 
 const SYSTEM_PROMPT = `You are an intent classifier for a developer operations platform.
 Your ONLY job: pick the single best tool for the user's message.
@@ -45,7 +47,10 @@ DECISION RULE (apply in order):
    → route to the specific tool (query_tasks, list_agents, list_workflows, etc.).
 2. If the message asks to CREATE, RUN, DELETE, or MODIFY something
    → route to the specific tool (create_task, run_workflow, delete_fact, etc.).
-3. ONLY if none of the above tools fit → use "complex".
+3. If the message is conversational — a greeting, small talk, a thank-you, or a
+   question about what the assistant/platform can do — → use "chat".
+4. ONLY if none of the above fit AND the message describes actual work to be
+   done (building, planning, analyzing) → use "complex".
 
 Available tools:
 - "query_tasks" — list or search tasks (often includes status words like failed/pending/blocked)
@@ -61,7 +66,8 @@ Available tools:
 - "list_pending_gates" — show pending approvals
 - "list_goals" — show goals/objectives
 - "list_events" — show recent activity
-- "complex" — anything that doesn't fit the above (building, planning, analyzing, chit-chat)
+- "chat" — greetings, small talk, thanks, questions about capabilities — answer directly, no action
+- "complex" — multi-step work that needs a plan (building, planning, analyzing)
 
 CONFIDENCE:
 After picking the tool, rate your certainty with a "confidence" field (0.0–1.0).
@@ -79,14 +85,31 @@ EXAMPLES:
 "Merk dir: Port 3000 ist der API-Server" → {"tool":"remember_fact","args":{"content":"Port 3000 ist der API-Server"},"confidence":0.97}
 "Bau eine Landing Page" → {"tool":"complex","args":{},"confidence":0.95}
 "Optimier meine SEO" → {"tool":"complex","args":{},"confidence":0.85}
-"Hallo" → {"tool":"complex","args":{},"confidence":0.99}
+"Hallo" → {"tool":"chat","args":{},"confidence":0.99}
+"Was kannst du für mich tun?" → {"tool":"chat","args":{},"confidence":0.97}
+"Danke!" → {"tool":"chat","args":{},"confidence":0.99}
 "Irgendwas mit Tasks oder so" → {"tool":"complex","args":{},"confidence":0.45}
 
 Return ONLY: {"tool":"<tool>","args":{...},"confidence":<0.0-1.0>}`;
 
+// System prompt for the direct-reply session used by the "chat" intent —
+// greetings and capability questions get a short answer here instead of
+// being force-fed through the plan decomposer (usability report K3).
+const REPLY_SYSTEM_PROMPT = `You are the assistant of "pragents", a developer operations
+platform that orchestrates AI agents. Operators chat with you inside the platform.
+
+Answer conversational messages briefly and helpfully, in the language the user wrote in.
+When asked what you can do, mention: dispatching tasks to agents, running workflows,
+tracking goals, searching the shared memory, and reviewing plans/approvals in the inbox.
+Never invent platform features. Keep answers under 120 words. Plain text only.`;
+
 // ---- Session cache ----
-// One persistent in-memory pi-session per model string, reused across calls.
-// Avoids per-call mkdtempSync + session setup overhead (fixes #18).
+// One persistent in-memory pi-session per (model string, kind), reused across
+// calls. Avoids per-call mkdtempSync + session setup overhead (fixes #18).
+// `kind` separates the classifier session (JSON-only system prompt) from the
+// direct-reply session (conversational system prompt).
+
+type SessionKind = 'classify' | 'reply';
 
 interface CachedSession {
   session: any;
@@ -95,14 +118,15 @@ interface CachedSession {
 
 const sessionCache = new Map<string, CachedSession>();
 
-async function getOrCreateSession(modelString: string): Promise<CachedSession> {
-  const cached = sessionCache.get(modelString);
+async function getOrCreateSession(modelString: string, kind: SessionKind = 'classify'): Promise<CachedSession> {
+  const cacheKey = `${kind}:${modelString}`;
+  const cached = sessionCache.get(cacheKey);
   if (cached) return cached;
 
   const model = resolveModel(modelString);
   if (!model) throw new Error(`IntentClassifier: model "${modelString}" could not be resolved`);
 
-  const tmpDir = join(tmpdir(), `pragents-intent-${modelString.replace(/[^a-z0-9]/gi, '-')}`);
+  const tmpDir = join(tmpdir(), `pragents-intent-${kind}-${modelString.replace(/[^a-z0-9]/gi, '-')}`);
   mkdirSync(join(tmpDir, '.pi'), { recursive: true });
 
   const loader = new DefaultResourceLoader({
@@ -113,7 +137,7 @@ async function getOrCreateSession(modelString: string): Promise<CachedSession> {
     noPromptTemplates: true,
     noThemes: true,
     noContextFiles: true,
-    systemPromptOverride: () => SYSTEM_PROMPT,
+    systemPromptOverride: () => (kind === 'reply' ? REPLY_SYSTEM_PROMPT : SYSTEM_PROMPT),
   });
   await loader.reload();
 
@@ -127,9 +151,45 @@ async function getOrCreateSession(modelString: string): Promise<CachedSession> {
   });
 
   const entry: CachedSession = { session, tmpDir };
-  sessionCache.set(modelString, entry);
-  logger.info({ modelString }, 'IntentClassifier: created and cached pi-session');
+  sessionCache.set(cacheKey, entry);
+  logger.info({ modelString, kind }, 'IntentClassifier: created and cached pi-session');
   return entry;
+}
+
+/**
+ * Prompt a cached session and collect the final assistant text. Shared by
+ * classify() and reply().
+ */
+async function promptForText(session: any, message: string, timeoutMs: number): Promise<string> {
+  let responseText = '';
+  const responsePromise = new Promise<string>((resolve) => {
+    const unsubscribe = session.subscribe((event: any) => {
+      if (event.type === 'message_end' && event.message?.role === 'assistant') {
+        const content = event.message.content;
+        if (typeof content === 'string') {
+          responseText = content;
+        } else if (Array.isArray(content)) {
+          responseText = content
+            .filter((b: any) => b?.text)
+            .map((b: any) => b.text)
+            .join('');
+        } else if (content && typeof content === 'object' && (content as any).text) {
+          responseText = (content as any).text;
+        }
+      }
+      if (event.type === 'agent_end') {
+        unsubscribe();
+        resolve(responseText);
+      }
+    });
+    setTimeout(() => {
+      unsubscribe();
+      resolve(responseText || '');
+    }, timeoutMs);
+  });
+
+  await session.prompt(message);
+  return responsePromise;
 }
 
 /**
@@ -192,38 +252,7 @@ export class IntentClassifier {
     }
 
     try {
-      let responseText = '';
-      const responsePromise = new Promise<string>((resolve) => {
-        const unsubscribe = session.subscribe((event: any) => {
-          // pi SDK fires message_end with the finalized assistant message.
-          // We collect text content from there (not from streaming updates).
-          if (event.type === 'message_end' && event.message?.role === 'assistant') {
-            const content = event.message.content;
-            if (typeof content === 'string') {
-              responseText = content;
-            } else if (Array.isArray(content)) {
-              responseText = content
-                .filter((b: any) => b?.text)
-                .map((b: any) => b.text)
-                .join('');
-            } else if (content && typeof content === 'object' && (content as any).text) {
-              responseText = (content as any).text;
-            }
-          }
-          if (event.type === 'agent_end') {
-            unsubscribe();
-            resolve(responseText);
-          }
-        });
-        // Timeout with cleanup
-        setTimeout(() => {
-          unsubscribe();
-          resolve(responseText || '');
-        }, CLASSIFIER_TIMEOUT_MS);
-      });
-
-      await session.prompt(message);
-      const raw = await responsePromise;
+      const raw = await promptForText(session, message, CLASSIFIER_TIMEOUT_MS);
 
       // Extract JSON from response
       const jsonMatch = raw.match(/\{[\s\S]*\}/);
@@ -257,6 +286,28 @@ export class IntentClassifier {
       return result.data;
     } catch (err) {
       logger.warn({ err }, 'IntentClassifier: session failed');
+      return null;
+    }
+  }
+
+  /**
+   * Produce a short direct answer for a conversational ("chat" intent)
+   * message. Returns null when no model is available or the reply fails —
+   * callers should fall back to a static capability blurb, NOT the plan
+   * decomposer (that path is exactly what turned "Hallo!" into an approvable
+   * greet-the-user plan, usability report K3).
+   */
+  async reply(message: string): Promise<string | null> {
+    if (!message?.trim()) return null;
+    const modelString = this.pickModelString();
+    if (!modelString) return null;
+
+    try {
+      const { session } = await getOrCreateSession(modelString, 'reply');
+      const text = (await promptForText(session, message, REPLY_TIMEOUT_MS)).trim();
+      return text || null;
+    } catch (err) {
+      logger.warn({ err, modelString }, 'IntentClassifier: direct reply failed');
       return null;
     }
   }

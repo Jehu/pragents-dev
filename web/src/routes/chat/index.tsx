@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { MasterDetail, ApprovalCard } from '../../components/ui/index.js';
 import { useEventBusStore } from '../../stores/eventBus.js';
 import { useScopeStore } from '../../stores/scope.js';
+import { agentsInScope } from '../../lib/scope.js';
 
 /** Build the URL-query suffix carrying the active project scope.
  *  - selectedProject set → ?projectId=X
@@ -381,6 +382,14 @@ function ThreadPanel({
     abortRef.current = ctrl;
 
     try {
+      // Scope the conversation to a project: project agents pin their own
+      // project (agent ids are "type@projectId"), company agents inherit the
+      // active picker scope. Without this, conversations were stored with
+      // project_id NULL and never showed up in any scoped list.
+      const agentProject = agentId?.includes('@') ? agentId.split('@')[1] : undefined;
+      const conversationProjectId =
+        agentProject && agentProject !== 'company' ? agentProject : selectedProject ?? undefined;
+
       const res = await fetch('/api/v1/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -388,6 +397,7 @@ function ThreadPanel({
           message: text,
           conversationId: activeConvId,
           agentId,
+          ...(conversationProjectId ? { projectId: conversationProjectId } : {}),
         }),
         signal: ctrl.signal,
       });
@@ -524,7 +534,7 @@ function ThreadPanel({
     } finally {
       setStreaming(false);
     }
-  }, [input, streaming, activeConvId, agentId, onConversationCreated]);
+  }, [input, streaming, activeConvId, agentId, selectedProject, onConversationCreated]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -647,14 +657,17 @@ function ChatPage() {
   // Agent display-name resolution for the sidebar — /api/v1/agents returns a
   // bare array (see U15 / F-6). Cache hits avoid re-fetching when the palette
   // is also open.
-  const { data: agentsRaw } = useQuery<Array<{ id: string; name?: string }> | { agents?: Array<{ id: string; name?: string }> }>({
+  const { data: agentsRaw } = useQuery<Array<{ id: string; name?: string; projectId?: string }> | { agents?: Array<{ id: string; name?: string; projectId?: string }> }>({
     queryKey: ['agents'],
     queryFn: () => fetch('/api/v1/agents').then((r) => r.json()),
     staleTime: 30_000,
   });
-  const agentList: Array<{ id: string; name?: string }> = Array.isArray(agentsRaw)
+  const agentList: Array<{ id: string; name?: string; projectId?: string }> = Array.isArray(agentsRaw)
     ? agentsRaw
     : (agentsRaw?.agents ?? []);
+  // The "pick an agent to talk to" list honors the global project scope
+  // (company agents + agents of the selected project).
+  const pickableAgents = agentsInScope(agentList, selectedProject);
 
   const conversationsRaw = data?.conversations ?? [];
   // Enrich each conversation with an agentName by joining against the agents list.
@@ -696,7 +709,7 @@ function ChatPage() {
       <ThreadPanel
         conversationId={activeConvId}
         agentId={agentId}
-        availableAgents={agentList}
+        availableAgents={pickableAgents}
         onPickDraftAgent={handleDraftAgentPick}
         onConversationCreated={handleConversationCreated}
       />

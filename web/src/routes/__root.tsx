@@ -70,9 +70,9 @@ const NAV: NavGroup[] = [
 // Header sub-components
 // ---------------------------------------------------------------------------
 
-function ProjectPicker() {
+function ProjectPicker({ id = 'project-picker' }: { id?: string }) {
   const { selectedProject, setProject } = useScopeStore();
-  const { data } = useQuery<{ id: string; name: string }[]>({
+  const { data, isError } = useQuery<{ id: string; name: string }[]>({
     queryKey: ['projects'],
     queryFn: () => fetchJson('/api/v1/projects'),
     staleTime: 60_000,
@@ -80,21 +80,66 @@ function ProjectPicker() {
 
   const projects = Array.isArray(data) ? data : [];
 
+  // A selected project can go stale: persisted in localStorage across a
+  // config change, or deleted while selected. Once the authoritative list
+  // has loaded, reset so the visible option and the active filter never
+  // disagree.
+  useEffect(() => {
+    if (!data) return;
+    if (selectedProject && !projects.some((p) => p.id === selectedProject)) {
+      setProject(null);
+    }
+  }, [data, projects, selectedProject, setProject]);
+
+  const active = selectedProject !== null;
+
   return (
     <div className="flex items-center gap-1 text-xs">
-      <span className="text-zinc-500">project:</span>
-      <select
-        value={selectedProject ?? ''}
-        onChange={(e) => setProject(e.target.value || null)}
-        className="bg-transparent text-zinc-200 border-none outline-none cursor-pointer hover:text-zinc-100 py-1 pr-4"
+      <label htmlFor={id} className="text-zinc-500">
+        project:
+      </label>
+      <span
+        className={`flex items-center rounded ${
+          active ? 'bg-indigo-500/15 border border-indigo-400/30 pl-1.5' : ''
+        }`}
       >
-        <option value="">all projects</option>
-        {projects.map((p) => (
-          <option key={p.id} value={p.id}>
-            {p.name}
-          </option>
-        ))}
-      </select>
+        <select
+          id={id}
+          value={selectedProject ?? ''}
+          onChange={(e) => setProject(e.target.value || null)}
+          className={`bg-transparent border-none outline-none cursor-pointer py-1 pr-1 ${
+            active ? 'text-indigo-200 hover:text-indigo-100' : 'text-zinc-200 hover:text-zinc-100'
+          }`}
+        >
+          <option value="">all projects</option>
+          {projects.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
+        </select>
+        {active && (
+          <button
+            type="button"
+            onClick={() => setProject(null)}
+            aria-label="Clear project filter"
+            title="Show all projects"
+            className="px-1.5 py-1 text-indigo-300 hover:text-white"
+          >
+            ×
+          </button>
+        )}
+      </span>
+      {isError && (
+        <span
+          title="Failed to load projects — scope switching unavailable"
+          className="text-amber-400"
+          role="img"
+          aria-label="Failed to load projects"
+        >
+          ⚠
+        </span>
+      )}
     </div>
   );
 }
@@ -122,13 +167,20 @@ function HealthDot() {
 }
 
 function CostBadge() {
-  const { data } = useQuery<{ cost?: number }[]>({
+  // Honors the global project scope — the picker sits right next to this
+  // badge, so a global number under an active filter reads as a lie.
+  const selectedProject = useScopeStore((s) => s.selectedProject);
+  const { data } = useQuery<{ cost?: number; project_id?: string }[]>({
     queryKey: ['cost-monthly'],
     queryFn: () => fetchJson('/api/v1/cost/summary'),
     staleTime: 300_000,
   });
 
-  const totalCost = (data ?? []).reduce((sum, row) => sum + (row.cost ?? 0), 0);
+  const rows = data ?? [];
+  const scoped = selectedProject
+    ? rows.filter((row) => row.project_id === selectedProject)
+    : rows;
+  const totalCost = scoped.reduce((sum, row) => sum + (row.cost ?? 0), 0);
   const cost = data
     ? `€${totalCost.toFixed(2)}`
     : '—';
@@ -142,6 +194,9 @@ function CostBadge() {
 }
 
 function InboxBadge() {
+  // Deliberately NOT project-scoped: the Inbox page itself is company-wide
+  // (a hidden pending approval is a footgun — see CompanyWideBadge there),
+  // so this count must match what the page shows.
   const { data } = useQuery<{ total?: number }>({
     queryKey: ['inbox-count'],
     queryFn: () => fetchJson('/api/v1/tasks?status=needs_review&limit=1'),
@@ -389,6 +444,11 @@ function RootLayout() {
               <button className="rounded px-2 py-1 text-xs text-zinc-400 hover:text-zinc-100" onClick={() => setMobileNavOpen(false)}>
                 Close
               </button>
+            </div>
+            {/* The header picker is hidden below sm — without this, mobile
+                users could neither see nor change an active project scope. */}
+            <div className="border-b border-zinc-800 px-3 py-2">
+              <ProjectPicker id="project-picker-mobile" />
             </div>
             <Sidebar collapsed={false} mobile onNavigate={() => setMobileNavOpen(false)} />
           </div>

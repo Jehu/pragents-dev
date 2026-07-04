@@ -51,6 +51,13 @@ export interface CreateSessionOpts {
   id: string;
   cwd: string;
   sessionDir: string;
+  /**
+   * Model string in "provider/modelId" notation (from pragents.yaml). The
+   * runtime resolves and pins it on the session. Creation FAILS if the model
+   * cannot be resolved — silently falling back to runtime auto-discovery
+   * produced empty no-op runs that were reported as complete.
+   */
+  model?: string;
   systemPromptOverride: (base: string | undefined) => string;
   /** Custom tools to expose to the agent. Shape is runtime-specific; passed through. */
   customTools?: unknown[];

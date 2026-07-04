@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import * as YAML from 'yaml';
 import { z } from 'zod';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, existsSync } from 'node:fs';
 import type { ResolvedAgent } from '../../config/schema.js';
 import { AgentConfig, ProjectConfig } from '../../config/schema.js';
 import { PROJECT_AGENT_TYPES, type ProjectAgentType } from '@pragents/schema';
@@ -119,19 +119,24 @@ export function createProjectsRoute(opts: ProjectsRouteOptions) {
   // GET / — list projects. ETag tracks the on-disk pragents.yaml content
   // so a client cache can revalidate after external edits. Backwards-
   // compatible shape (`[{id, name, directory}]`) — see `web/src/routes/__root.tsx`.
+  // `directoryExists` flags projects whose configured directory is missing on
+  // disk (usability report M4: agents dispatched into a nonexistent cwd
+  // failed with no visible warning anywhere).
   r.get('/', (c) => {
     try {
       const { doc, etag } = readYamlDoc(configPath);
       const projectsNode = getProjectsNode(doc);
-      const projects: Array<{ id: string; name: string; directory: string }> = [];
+      const projects: Array<{ id: string; name: string; directory: string; directoryExists: boolean }> = [];
       if (projectsNode) {
         for (const item of projectsNode.items) {
           const id = String(item.key);
           const value = (item.value as YAML.YAMLMap | null)?.toJSON?.() ?? {};
+          const directory = typeof value.directory === 'string' ? value.directory : '';
           projects.push({
             id,
             name: typeof value.name === 'string' ? value.name : '',
-            directory: typeof value.directory === 'string' ? value.directory : '',
+            directory,
+            directoryExists: directory ? existsSync(expandHome(directory)) : false,
           });
         }
       }

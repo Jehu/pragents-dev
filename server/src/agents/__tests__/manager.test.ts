@@ -34,7 +34,10 @@ const mockAgent: ResolvedAgent = {
   id: 'dev@test',
   projectId: 'test',
   type: 'dev',
-  model: 'claude-sonnet',
+  // Full "provider/modelId" string, as resolveAgent() always produces —
+  // pi-runtime now resolves this against the pi registry and rejects
+  // unresolvable models instead of silently running without one.
+  model: 'anthropic/claude-sonnet-4-20250514',
   personality: 'You are a test dev agent.',
   memory: { project: 'read/write', company: 'read' },
   capabilities: ['typescript'],
@@ -65,6 +68,9 @@ describe('AgentSessionManager', () => {
       prompt: vi.fn().mockResolvedValue(undefined),
       dispose: vi.fn(),
       isStreaming: false,
+      // An empty transcript now rejects the dispatch (fake-complete guard),
+      // so even config-focused tests need a real assistant response.
+      agent: { state: { messages: [{ role: 'assistant', content: 'ok' }] } },
     };
     (createAgentSession as any).mockResolvedValue({ session: mockSession });
     (DefaultResourceLoader as any).mockImplementation(function () {
@@ -109,6 +115,103 @@ describe('AgentSessionManager', () => {
 
     const result = await mgr.dispatch(mockAgent, 'Test task');
     expect(result).toContain('Task done!');
+  });
+});
+
+describe('Dispatch failure surfacing (usability report K1/K4)', () => {
+  const tmpDir = mkdtempSync(join(tmpdir(), 'pragents-failure-test-'));
+
+  beforeAll(() => {
+    initDb(join(tmpDir, 'test.db'));
+  });
+
+  afterAll(() => {
+    closeDb();
+    rmSync(tmpDir, { recursive: true });
+  });
+
+  function mockLoader(DefaultResourceLoader: any) {
+    (DefaultResourceLoader as any).mockImplementation(function () {
+      return { reload: vi.fn().mockResolvedValue(undefined) };
+    });
+  }
+
+  it('rejects when the final assistant message has stopReason "error"', async () => {
+    const { createAgentSession, DefaultResourceLoader } = await import('@mariozechner/pi-coding-agent');
+    const mockSession = {
+      subscribe: vi.fn((cb: any) => {
+        setTimeout(() => {
+          cb({
+            type: 'message_end',
+            message: { role: 'assistant', stopReason: 'error', errorMessage: 'Insufficient balance', content: [] },
+          });
+          cb({ type: 'agent_end' });
+        }, 10);
+        return () => {};
+      }),
+      prompt: vi.fn().mockResolvedValue(undefined),
+      dispose: vi.fn(),
+      isStreaming: false,
+      agent: { state: { messages: [] } },
+    };
+    (createAgentSession as any).mockResolvedValue({ session: mockSession });
+    mockLoader(DefaultResourceLoader);
+
+    const mgr = new AgentSessionManager(new MemoryEngine(10));
+    await expect(mgr.dispatch(mockAgent, 'Test task')).rejects.toThrow(/Insufficient balance/);
+  });
+
+  it('rejects when the agent produced no text at all', async () => {
+    const { createAgentSession, DefaultResourceLoader } = await import('@mariozechner/pi-coding-agent');
+    const mockSession = {
+      subscribe: vi.fn((cb: any) => {
+        setTimeout(() => cb({ type: 'agent_end' }), 10);
+        return () => {};
+      }),
+      prompt: vi.fn().mockResolvedValue(undefined),
+      dispose: vi.fn(),
+      isStreaming: false,
+      agent: { state: { messages: [] } },
+    };
+    (createAgentSession as any).mockResolvedValue({ session: mockSession });
+    mockLoader(DefaultResourceLoader);
+
+    const mgr = new AgentSessionManager(new MemoryEngine(10));
+    await expect(mgr.dispatch(mockAgent, 'Test task')).rejects.toThrow(/empty response/);
+  });
+
+  it('records provider-reported usage instead of the character estimate', async () => {
+    const { createAgentSession, DefaultResourceLoader } = await import('@mariozechner/pi-coding-agent');
+    const mockSession = {
+      subscribe: vi.fn((cb: any) => {
+        setTimeout(() => {
+          cb({
+            type: 'message_end',
+            message: {
+              role: 'assistant',
+              stopReason: 'stop',
+              content: [{ type: 'text', text: 'done' }],
+              usage: { input: 1234, output: 567 },
+            },
+          });
+          cb({ type: 'agent_end' });
+        }, 10);
+        return () => {};
+      }),
+      prompt: vi.fn().mockResolvedValue(undefined),
+      dispose: vi.fn(),
+      isStreaming: false,
+      agent: { state: { messages: [{ role: 'assistant', content: 'done' }] } },
+    };
+    (createAgentSession as any).mockResolvedValue({ session: mockSession });
+    mockLoader(DefaultResourceLoader);
+
+    const mgr = new AgentSessionManager(new MemoryEngine(10));
+    const record = vi.fn();
+    mgr.setCostTracker({ getAgentCost: vi.fn().mockReturnValue({ tokensIn: 0, tokensOut: 0 }), record } as any);
+
+    await mgr.dispatch(mockAgent, 'Test task');
+    expect(record).toHaveBeenCalledWith(expect.objectContaining({ tokensIn: 1234, tokensOut: 567 }));
   });
 });
 
@@ -194,6 +297,7 @@ describe('Token budget enforcement in dispatch', () => {
       prompt: vi.fn().mockResolvedValue(undefined),
       dispose: vi.fn(),
       isStreaming: false,
+      agent: { state: { messages: [{ role: 'assistant', content: 'ok' }] } },
     };
     (createAgentSession as any).mockResolvedValue({ session: mockSession });
     (DefaultResourceLoader as any).mockImplementation(function () {
@@ -225,6 +329,7 @@ describe('Token budget enforcement in dispatch', () => {
       prompt: vi.fn().mockResolvedValue(undefined),
       dispose: vi.fn(),
       isStreaming: false,
+      agent: { state: { messages: [{ role: 'assistant', content: 'ok' }] } },
     };
     (createAgentSession as any).mockResolvedValue({ session: mockSession });
     (DefaultResourceLoader as any).mockImplementation(function () {

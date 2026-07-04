@@ -7,6 +7,15 @@ import { StatusPill } from '../../components/ui/index.js';
 // Types
 // ---------------------------------------------------------------------------
 
+export interface ModelHealth {
+  model: string;
+  provider: string;
+  agents: string[];
+  resolvable: boolean;
+  keyPresent: boolean;
+  ok: boolean;
+}
+
 export interface HealthData {
   status: string;
   uptime: number;
@@ -18,6 +27,7 @@ export interface HealthData {
     store: string;
     degraded: boolean;
   };
+  models?: ModelHealth[];
   agents_active: number;
 }
 
@@ -46,11 +56,23 @@ export function formatUptime(seconds: number): string {
 }
 
 export function isHealthy(data: HealthData): boolean {
-  return data.db.connected && !data.memory.degraded;
+  return data.db.connected && !data.memory.degraded && modelsOk(data);
 }
 
 export function isWarning(data: HealthData): boolean {
-  return !data.db.connected || data.memory.degraded;
+  return !data.db.connected || data.memory.degraded || !modelsOk(data);
+}
+
+export function modelsOk(data: HealthData): boolean {
+  return (data.models ?? []).every((m) => m.ok);
+}
+
+/** Human-readable reason why a model is unusable. */
+export function modelProblem(m: ModelHealth): string {
+  if (!m.resolvable && !m.keyPresent) return 'unknown model, no API key';
+  if (!m.resolvable) return 'unknown model id';
+  if (!m.keyPresent) return `no API key for "${m.provider}"`;
+  return '';
 }
 
 // ---------------------------------------------------------------------------
@@ -109,7 +131,8 @@ function HealthView() {
           <span className="flex-shrink-0">✕</span>
           <span>
             {!data.db.connected && 'Database disconnected. '}
-            {data.memory.degraded && 'Memory store is degraded.'}
+            {data.memory.degraded && 'Memory store is degraded. '}
+            {!modelsOk(data) && 'One or more configured agent models are unusable.'}
           </span>
         </div>
       )}
@@ -144,6 +167,31 @@ function HealthView() {
           {formatUptime(data.uptime)}
         </HealthRow>
       </div>
+
+      {/* Model / provider health — every model configured on an agent */}
+      {(data.models ?? []).length > 0 && (
+        <>
+          <h3 className="text-sm font-semibold text-zinc-400 uppercase tracking-wider mt-6 mb-2">
+            Model providers
+          </h3>
+          <div className="bg-zinc-900 border border-zinc-800 rounded-lg divide-y divide-zinc-800">
+            {data.models!.map((m) => (
+              <div key={m.model} className="flex items-center gap-3 py-3 px-3 text-sm" data-testid={`model-health-${m.model}`}>
+                <StatusDot ok={m.ok} />
+                <span className="font-mono text-zinc-200">{m.model}</span>
+                <span className="text-[11px] text-zinc-500 truncate flex-1">
+                  {m.agents.join(', ')}
+                </span>
+                {m.ok ? (
+                  <span className="text-emerald-400 text-xs">ok</span>
+                ) : (
+                  <span className="text-red-400 text-xs">{modelProblem(m)}</span>
+                )}
+              </div>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 }

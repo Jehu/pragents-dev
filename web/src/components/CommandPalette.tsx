@@ -3,6 +3,7 @@ import { useNavigate } from '@tanstack/react-router';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useCommandPaletteStore } from '../stores/commandPalette.js';
 import { useScopeStore } from '../stores/scope.js';
+import { agentsInScope } from '../lib/scope.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -56,9 +57,12 @@ export function matchesQuery(label: string, query: string): boolean {
 function DispatchModal({
   agents,
   onClose,
+  onDispatched,
 }: {
   agents: Array<{ id: string; name?: string; projectId?: string }>;
   onClose: () => void;
+  /** Called with the created task id — the palette navigates to the task. */
+  onDispatched?: (taskId: string) => void;
 }) {
   // 'auto' = let the SkillRouter pick the best-matching agent based on the
   // task description. Users only override when they know better than the
@@ -66,6 +70,12 @@ function DispatchModal({
   const [agentId, setAgentId] = useState<string>('auto');
   const [description, setDescription] = useState('');
   const [error, setError] = useState<string | null>(null);
+
+  // Honor the global project scope: only company agents and agents of the
+  // selected project are offered. Without this, a scoped operator could
+  // accidentally dispatch into a different project.
+  const selectedProject = useScopeStore((s) => s.selectedProject);
+  const scopedAgents = agentsInScope(agents, selectedProject);
 
   // The backend's POST /tasks needs a projectId. In auto mode the server
   // derives it from the resolved agent; in pinned mode we send the picked
@@ -86,9 +96,12 @@ function DispatchModal({
       }
       return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (created: { id?: string }) => {
       setError(null);
       onClose();
+      // Land the user on the task they just created — the silent close left
+      // them guessing whether anything happened (usability report M3).
+      if (created?.id) onDispatched?.(created.id);
     },
     onError: (err: unknown) => setError(err instanceof Error ? err.message : 'Failed to dispatch'),
   });
@@ -114,7 +127,7 @@ function DispatchModal({
           aria-label="Target agent"
         >
           <option value="auto">✨ Auto — smart route to best-matching agent</option>
-          {agents.map((a) => (
+          {scopedAgents.map((a) => (
             <option key={a.id} value={a.id}>
               {a.name ?? a.id}
             </option>
@@ -187,8 +200,18 @@ export function CommandPalette() {
     enabled: open,
   });
 
+  // Fetch projects for the "switch project" actions — cache-shared with the
+  // header ProjectPicker.
+  const { data: projectsData } = useQuery<Array<{ id: string; name: string }>>({
+    queryKey: ['projects'],
+    queryFn: () => fetch('/api/v1/projects').then((r) => r.json()),
+    staleTime: 60_000,
+    enabled: open,
+  });
+
   // Fetch conversations — scope by active project to avoid cross-project leak.
   const selectedProject = useScopeStore((s) => s.selectedProject);
+  const setProject = useScopeStore((s) => s.setProject);
   const scopeParam = selectedProject ? `projectId=${encodeURIComponent(selectedProject)}` : 'scope=all';
   const { data: conversationsData } = useQuery<{ conversations?: Array<{ id: string; agentId?: string; agentName?: string }> }>({
     queryKey: ['chat-conversations', 'palette', selectedProject],
@@ -246,6 +269,28 @@ export function CommandPalette() {
     category: 'action',
   };
 
+  const projects = Array.isArray(projectsData) ? projectsData : [];
+  const scopeItems: PaletteItem[] = [
+    ...(selectedProject
+      ? [
+          {
+            id: 'scope-all',
+            label: 'Switch project: all projects',
+            category: 'action' as const,
+            onActivate: () => setProject(null),
+          },
+        ]
+      : []),
+    ...projects
+      .filter((p) => p.id !== selectedProject)
+      .map((p) => ({
+        id: `scope-${p.id}`,
+        label: `Switch project: ${p.name}`,
+        category: 'action' as const,
+        onActivate: () => setProject(p.id),
+      })),
+  ];
+
   const allItems: PaletteItem[] = [
     ...NAV_ITEMS,
     ...agentItems,
@@ -253,6 +298,7 @@ export function CommandPalette() {
     ...skillItems,
     ...conversationItems,
     dispatchItem,
+    ...scopeItems,
   ];
 
   const filtered = allItems.filter((item) => matchesQuery(item.label, query));
@@ -279,6 +325,11 @@ export function CommandPalette() {
 
   const activateItem = useCallback(
     (item: PaletteItem) => {
+      if (item.onActivate) {
+        item.onActivate();
+        close();
+        return;
+      }
       if (item.category === 'action') {
         setShowDispatch(true);
         return;
@@ -378,7 +429,13 @@ export function CommandPalette() {
 
         {/* Dispatch sub-modal */}
         {showDispatch && (
-          <DispatchModal agents={agents} onClose={close} />
+          <DispatchModal
+            agents={agents}
+            onClose={close}
+            onDispatched={(taskId) => {
+              void navigate({ to: '/tasks/$taskId', params: { taskId } } as never);
+            }}
+          />
         )}
 
         {/* Footer hint */}

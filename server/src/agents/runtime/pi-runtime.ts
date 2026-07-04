@@ -2,6 +2,7 @@ import { createAgentSession, DefaultResourceLoader, SessionManager } from '@mari
 import type { AgentSession, ResourceLoader } from '@mariozechner/pi-coding-agent';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { resolveModel } from '../model-resolver.js';
 import type {
   AgentRuntime,
   CreateSessionOpts,
@@ -46,12 +47,28 @@ export class PiRuntime implements AgentRuntime {
     });
     await loader.reload();
 
+    // Resolve the configured model explicitly. Auto-discovery (no `model`
+    // passed) silently yields sessions without a working provider, which
+    // then answer every prompt instantly and empty — see the 2026-07-04
+    // usability report. Failing loudly here turns that into a `failed` task
+    // with an actionable message instead of a fake `complete`.
+    let model: unknown | undefined;
+    if (opts.model) {
+      model = resolveModel(opts.model);
+      if (!model) {
+        throw new Error(
+          `Model "${opts.model}" could not be resolved — check the provider/modelId ` +
+          `spelling in pragents.yaml and that the provider's API key is set in ~/.pragents/.env`,
+        );
+      }
+    }
+
     const { session } = await createAgentSession({
       cwd: opts.cwd,
       resourceLoader: loader,
       sessionManager: SessionManager.inMemory() as any,
       customTools: opts.customTools as any,
-      // model auto-discovered by pi SDK from configured API keys
+      ...(model ? { model: model as any } : {}),
     });
 
     const raw: PiSessionRaw = { session, loader };

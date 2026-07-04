@@ -136,6 +136,7 @@ export class AgentSessionManager {
       id: agent.id,
       cwd: agent.projectDir,
       sessionDir,
+      model: agent.model,
       systemPromptOverride: (base: string | undefined) => {
         const personality = agent.personality || 'You are a helpful coding agent.';
         const rememberTool = [
@@ -311,11 +312,41 @@ export class AgentSessionManager {
       contextStr = '\n\nRelevant project knowledge:\n' + contextStr;
     }
 
+    // Track real usage + provider errors from this run's assistant messages.
+    // `message_end` fires once per message of THIS prompt, so summing here
+    // (instead of over the whole session transcript) scopes usage correctly.
+    const runUsage = { tokensIn: 0, tokensOut: 0 };
+    let lastAssistant: {
+      stopReason?: string;
+      errorMessage?: string;
+    } | null = null;
+
     // Capture agent response — skip events, read session state after prompt completes
     const responsePromise = new Promise<string>((resolve, reject) => {
       const unsubscribe = this.runtime.subscribe(handle.runtimeHandle, (event) => {
+        if (event.type === 'message_end') {
+          const msg = event.message as
+            | { role?: string; stopReason?: string; errorMessage?: string; usage?: { input?: number; output?: number } }
+            | undefined;
+          if (msg?.role === 'assistant') {
+            lastAssistant = msg;
+            runUsage.tokensIn += msg.usage?.input ?? 0;
+            runUsage.tokensOut += msg.usage?.output ?? 0;
+          }
+        }
         if (event.type === 'agent_end') {
           unsubscribe();
+          // Provider-level failures surface as stopReason on the final
+          // assistant message — NOT as a thrown error. Treat them as task
+          // failures instead of silently completing (usability report K1).
+          if (lastAssistant?.stopReason === 'error' || lastAssistant?.stopReason === 'aborted') {
+            reject(new Error(
+              lastAssistant.errorMessage
+                ? `Agent run ${lastAssistant.stopReason}: ${lastAssistant.errorMessage}`
+                : `Agent run ${lastAssistant.stopReason} without an error message`,
+            ));
+            return;
+          }
           // Read last assistant message, filtering out thinking blocks
           const msgs = this.runtime.getMessages(handle.runtimeHandle) ?? [];
           let responseText = '';
@@ -333,7 +364,17 @@ export class AgentSessionManager {
               if (responseText.trim()) break;
             }
           }
-          resolve(responseText.trim() || 'Task completed (no text response)');
+          if (!responseText.trim()) {
+            // An empty response has always meant "the provider never actually
+            // ran" (missing key, no balance, unresolvable model). Fail loudly
+            // instead of reporting a fake complete.
+            reject(new Error(
+              'Agent returned an empty response — the provider likely failed silently. ' +
+              'Check the API key, model id, and provider balance.',
+            ));
+            return;
+          }
+          resolve(responseText.trim());
         }
         // Handle custom tool calls from the agent
         if (event.type === 'custom_tool_call' && this.toolExecutor) {
@@ -358,18 +399,34 @@ export class AgentSessionManager {
       }, 10 * 60 * 1000);
     });
 
+    // responsePromise is only awaited after prompt() resolves. If prompt()
+    // itself throws, a later rejection from the subscribe handler (error
+    // stopReason, empty-response guard, timeout) would be unhandled and kill
+    // the process — pre-attach a no-op handler. The await below still
+    // receives the rejection.
+    responsePromise.catch(() => {});
+
     await this.runtime.prompt(handle.runtimeHandle, task + contextStr);
     handle.lastActivityAt = Date.now();
     const response = await responsePromise;
 
-    // Track cost (character-based token estimate)
+    // Track cost. Prefer the provider-reported usage collected from this
+    // run's assistant messages; fall back to the old character-based
+    // estimate only when the runtime exposed no usage at all.
     if (this.costTracker) {
+      const haveRealUsage = runUsage.tokensIn > 0 || runUsage.tokensOut > 0;
+      if (!haveRealUsage) {
+        logger.warn(
+          { agentId: agent.id, taskId },
+          'No provider usage reported for this run — falling back to character-based token estimate',
+        );
+      }
       this.costTracker.record({
         projectId: agent.projectId,
         agentId: agent.id,
         model: agent.model,
-        tokensIn: Math.ceil((task + contextStr).length / 4),
-        tokensOut: Math.ceil(response.length / 4),
+        tokensIn: haveRealUsage ? runUsage.tokensIn : Math.ceil((task + contextStr).length / 4),
+        tokensOut: haveRealUsage ? runUsage.tokensOut : Math.ceil(response.length / 4),
         taskId,
       });
     }
