@@ -54,6 +54,7 @@ import {
 } from '@mariozechner/pi-coding-agent';
 import { createModelsRoute } from './api/routes/models.js';
 import { setModelRegistry, setProviderOverrides } from './agents/model-resolver.js';
+import { migrateLegacyRuntimeDir } from './util/migrate-runtime-dir.js';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { expandHome } from './util/paths.js';
@@ -160,12 +161,25 @@ export async function startServer() {
   }
 
   // Workflow system. The registry loads from two kinds of roots:
-  //   1) the repo-level `<repo>/workflows/` directory (projectId = null)
+  //   1) the global `~/.pragents/workflows/` directory (projectId = null)
   //   2) each configured project's `<projectDir>/<workflowDirectory>/`
   // Project-tagged entries let the global Workflows view link to the
   // per-project editor.
+  //
+  // Global workflows and goals are runtime state and live under
+  // `~/.pragents/` like every other mutable artifact (DB, sessions, skills).
+  // They previously lived inside the source repo, where UI CRUD operations
+  // mutated the git working tree; a one-shot boot migration moves existing
+  // files over from those legacy locations.
   const wfRegistry = new WorkflowRegistry();
-  const wfDir = join(__dirname, '..', '..', 'workflows');
+  const wfDir = process.env.PRAGENTS_WORKFLOWS_DIR || join(homedir(), '.pragents', 'workflows');
+  mkdirSync(wfDir, { recursive: true });
+  {
+    const migrated = migrateLegacyRuntimeDir(join(__dirname, '..', '..', 'workflows'), wfDir);
+    if (migrated.length > 0) {
+      logger.info({ migrated, to: wfDir }, 'Migrated legacy in-repo workflows to ~/.pragents');
+    }
+  }
   const { loaded, warnings } = wfRegistry.load(wfDir, null);
   logger.info({ loaded: loaded.join(', ') || 'none' }, 'Workflows loaded');
 
@@ -196,7 +210,14 @@ export async function startServer() {
   }
 
   const goalRegistry = new GoalRegistry();
-  const goalsDir = join(__dirname, '..', '..', 'goals');
+  const goalsDir = process.env.PRAGENTS_GOALS_DIR || join(homedir(), '.pragents', 'goals');
+  mkdirSync(goalsDir, { recursive: true });
+  {
+    const migrated = migrateLegacyRuntimeDir(join(__dirname, '..', '..', 'goals'), goalsDir);
+    if (migrated.length > 0) {
+      logger.info({ migrated, to: goalsDir }, 'Migrated legacy in-repo goals to ~/.pragents');
+    }
+  }
   const { loaded: goalsLoaded, warnings: goalWarnings } = goalRegistry.load(goalsDir);
   logger.info({ loaded: goalsLoaded.join(', ') || 'none' }, 'Goals loaded');
 
