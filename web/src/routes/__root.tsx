@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { createRootRoute, Outlet, Link, useRouterState } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
 import { useScopeStore } from '../stores/scope.js';
+import { useNavStore } from '../stores/nav.js';
 import { useEventBusStore } from '../stores/eventBus.js';
 import { useCommandPaletteStore } from '../stores/commandPalette.js';
 import { connectSSE, disconnectSSE, isSSEAvailable } from '../hooks/useSSE.js';
@@ -22,20 +23,25 @@ type NavItem = {
 type NavGroup = {
   group: string;
   items: NavItem[];
+  /** Collapsible groups can be folded away in the sidebar (persisted). */
+  collapsible?: boolean;
 };
 
+// Grouped by operator activity, top-to-bottom in workflow order:
+// attend (Home) → act (Orchestrate) → recall (Knowledge) → inspect
+// (Observe) → set up (Configure). Chat lives in Home as a primary
+// interaction surface; configuration sinks to the bottom.
 const NAV: NavGroup[] = [
   {
-    group: 'Workspace',
+    group: 'Home',
     items: [
       { label: 'Overview', to: '/overview', short: 'Ov' },
       { label: 'Inbox', to: '/inbox', short: 'In' },
-      { label: 'Projects', to: '/projects', short: 'Pr' },
-      { label: 'Settings', to: '/settings', short: 'Se' },
+      { label: 'Chat', to: '/chat', short: 'Ch' },
     ],
   },
   {
-    group: 'Run',
+    group: 'Orchestrate',
     items: [
       { label: 'Agents', to: '/agents', short: 'Ag' },
       { label: 'Tasks', to: '/tasks', short: 'Ta' },
@@ -53,6 +59,7 @@ const NAV: NavGroup[] = [
   },
   {
     group: 'Observe',
+    collapsible: true,
     items: [
       { label: 'Metrics', to: '/metrics', short: 'Mt' },
       { label: 'Costs', to: '/costs', short: 'Co' },
@@ -61,8 +68,11 @@ const NAV: NavGroup[] = [
     ],
   },
   {
-    group: 'Talk',
-    items: [{ label: 'Chat', to: '/chat', short: 'Ch' }],
+    group: 'Configure',
+    items: [
+      { label: 'Projects', to: '/projects', short: 'Pr' },
+      { label: 'Settings', to: '/settings', short: 'Se' },
+    ],
   },
 ];
 
@@ -228,6 +238,9 @@ function InboxBadge() {
 function Sidebar({ collapsed, mobile = false, onNavigate }: { collapsed: boolean; mobile?: boolean; onNavigate?: () => void }) {
   const routerState = useRouterState();
   const pathname = routerState.location.pathname;
+  // Hooks must run unconditionally — declared before the collapsed early return.
+  const collapsedGroups = useNavStore((s) => s.collapsedGroups);
+  const toggleGroup = useNavStore((s) => s.toggleGroup);
 
   function isActive(to: string): boolean {
     if (to === '/overview') return pathname === '/overview' || pathname === '/';
@@ -235,27 +248,36 @@ function Sidebar({ collapsed, mobile = false, onNavigate }: { collapsed: boolean
   }
 
   if (collapsed) {
+    // Keep the group boundaries visible in the icon rail via thin dividers,
+    // instead of flattening all items into one undifferentiated column.
     return (
       <aside className="hidden md:block w-14 bg-zinc-900/50 border-r border-zinc-800 flex-shrink-0 overflow-y-auto">
         <nav aria-label="Primary navigation" className="py-2">
-          {NAV.flatMap((group) => group.items).map((item) => {
-            const active = isActive(item.to);
-            return (
-              <Link
-                key={item.to}
-                to={item.to}
-                title={item.label}
-                aria-label={item.label}
-                className={`mx-2 mb-1 flex h-8 items-center justify-center rounded text-[11px] font-semibold ${
-                  active
-                    ? 'bg-indigo-500/20 text-indigo-200'
-                    : 'text-zinc-500 hover:bg-zinc-800/60 hover:text-zinc-200'
-                }`}
-              >
-                {item.short}
-              </Link>
-            );
-          })}
+          {NAV.map((group, groupIdx) => (
+            <div
+              key={group.group}
+              className={groupIdx > 0 ? 'mt-1 pt-1 border-t border-zinc-800/70' : ''}
+            >
+              {group.items.map((item) => {
+                const active = isActive(item.to);
+                return (
+                  <Link
+                    key={item.to}
+                    to={item.to}
+                    title={`${group.group} · ${item.label}`}
+                    aria-label={item.label}
+                    className={`mx-2 mb-1 flex h-8 items-center justify-center rounded text-[11px] font-semibold ${
+                      active
+                        ? 'bg-indigo-500/20 text-indigo-200'
+                        : 'text-zinc-500 hover:bg-zinc-800/60 hover:text-zinc-200'
+                    }`}
+                  >
+                    {item.short}
+                  </Link>
+                );
+              })}
+            </div>
+          ))}
         </nav>
       </aside>
     );
@@ -264,31 +286,55 @@ function Sidebar({ collapsed, mobile = false, onNavigate }: { collapsed: boolean
   return (
     <aside className={`${mobile ? 'w-64' : 'hidden md:block w-48'} bg-zinc-900/50 border-r border-zinc-800 flex-shrink-0 overflow-y-auto`}>
       <nav aria-label="Primary navigation" className="py-3">
-        {NAV.map((group) => (
-          <div key={group.group} className="mb-3">
-            <div className="px-3 pb-1 text-[11px] uppercase tracking-wider text-zinc-500 font-semibold">
-              {group.group}
-            </div>
-            {group.items.map((item) => {
-              const active = isActive(item.to);
-              return (
-                <Link
-                  key={item.to}
-                  to={item.to}
-                  onClick={onNavigate}
-                  className={`flex items-center gap-2 px-3 py-1.5 text-xs border-l-2 cursor-pointer transition-colors ${
-                    active
-                      ? 'border-indigo-400 bg-indigo-500/20 text-indigo-200'
-                      : 'border-transparent text-zinc-400 hover:bg-zinc-800/40 hover:text-zinc-200'
-                  }`}
+        {NAV.map((group) => {
+          // A collapsed group with the active route stays visually expanded so
+          // the current location is never hidden behind a folded header.
+          const hasActive = group.items.some((item) => isActive(item.to));
+          const folded = !!group.collapsible && !!collapsedGroups[group.group] && !hasActive;
+          const headerBase =
+            'w-full px-3 pb-1 text-[11px] uppercase tracking-wider text-zinc-500 font-semibold';
+          return (
+            <div key={group.group} className="mb-3">
+              {group.collapsible ? (
+                <button
+                  type="button"
+                  onClick={() => toggleGroup(group.group)}
+                  aria-expanded={!folded}
+                  className={`${headerBase} flex items-center gap-1 hover:text-zinc-300 cursor-pointer`}
                 >
-                  <span className="w-1 h-1 rounded-full bg-current opacity-60" />
-                  {item.label}
-                </Link>
-              );
-            })}
-          </div>
-        ))}
+                  <span
+                    className={`inline-block transition-transform ${folded ? '' : 'rotate-90'}`}
+                    aria-hidden="true"
+                  >
+                    ›
+                  </span>
+                  {group.group}
+                </button>
+              ) : (
+                <div className={headerBase}>{group.group}</div>
+              )}
+              {!folded &&
+                group.items.map((item) => {
+                  const active = isActive(item.to);
+                  return (
+                    <Link
+                      key={item.to}
+                      to={item.to}
+                      onClick={onNavigate}
+                      className={`flex items-center gap-2 px-3 py-1.5 text-xs border-l-2 cursor-pointer transition-colors ${
+                        active
+                          ? 'border-indigo-400 bg-indigo-500/20 text-indigo-200'
+                          : 'border-transparent text-zinc-400 hover:bg-zinc-800/40 hover:text-zinc-200'
+                      }`}
+                    >
+                      <span className="w-1 h-1 rounded-full bg-current opacity-60" />
+                      {item.label}
+                    </Link>
+                  );
+                })}
+            </div>
+          );
+        })}
       </nav>
     </aside>
   );
