@@ -47,7 +47,7 @@ afterEach(() => {
 });
 
 async function renderListRoute(params = { projectId: 'alpha' }) {
-  const mod = await import('../$projectId.workflows.js');
+  const mod = await import('../$projectId.workflows.index.js');
   const route: any = mod.Route;
   // The route component reads Route.useParams() — stub it.
   (route as any).useParams = () => params;

@@ -31,6 +31,12 @@ const WORKFLOW_SCHEMA_URI = 'inmemory://schemas/workflow.json';
 const WORKFLOW_MODEL_URI = 'inmemory://workflows/edit.yaml';
 
 let monacoYamlConfigured = false;
+// The snippet completion provider is registered on the GLOBAL `yaml` language,
+// not per editor instance — so it must be registered exactly once. Without
+// this guard, every editor mount (and React StrictMode's double-mount in dev)
+// stacks another provider, and each snippet shows up duplicated in the
+// Ctrl+Space list.
+let completionProviderRegistered = false;
 
 export interface WorkflowEditorProps {
   value: string;
@@ -84,31 +90,34 @@ export function WorkflowEditor({
       monacoYamlConfigured = true;
     }
 
-    monaco.languages.registerCompletionItemProvider('yaml', {
-      triggerCharacters: [' ', '\n', '-'],
-      provideCompletionItems: (
-        _model: Monaco.editor.ITextModel,
-        position: Monaco.Position,
-      ) => {
-        const range = {
-          startLineNumber: position.lineNumber,
-          startColumn: position.column,
-          endLineNumber: position.lineNumber,
-          endColumn: position.column,
-        };
-        return {
-          suggestions: WORKFLOW_SNIPPETS.map((s) => ({
-            label: s.label,
-            kind: monaco.languages.CompletionItemKind.Snippet,
-            detail: s.description,
-            insertText: s.body,
-            insertTextRules:
-              monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-            range,
-          })),
-        };
-      },
-    });
+    if (!completionProviderRegistered) {
+      monaco.languages.registerCompletionItemProvider('yaml', {
+        triggerCharacters: [' ', '\n', '-'],
+        provideCompletionItems: (
+          _model: Monaco.editor.ITextModel,
+          position: Monaco.Position,
+        ) => {
+          const range = {
+            startLineNumber: position.lineNumber,
+            startColumn: position.column,
+            endLineNumber: position.lineNumber,
+            endColumn: position.column,
+          };
+          return {
+            suggestions: WORKFLOW_SNIPPETS.map((s) => ({
+              label: s.label,
+              kind: monaco.languages.CompletionItemKind.Snippet,
+              detail: s.description,
+              insertText: s.body,
+              insertTextRules:
+                monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+              range,
+            })),
+          };
+        },
+      });
+      completionProviderRegistered = true;
+    }
 
     refreshAgentMarkers(editor.getValue());
   };
