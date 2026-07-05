@@ -46,7 +46,6 @@ beforeEach(() => {
           deadline: '0 16 * * 5',
           workflow: 'content-pipeline',
           acceptance: ['article is published', 'min 1500 words'],
-          humanGates: [{ step: 'after_draft', label: 'Review draft', timeout: '4h' }],
           nextTriggerAt: new Date(Date.now() + 86_400_000).toISOString(),
           nextDeadlineAt: new Date(Date.now() + 172_800_000).toISOString(),
         },
@@ -68,10 +67,10 @@ describe('GoalsPage', () => {
     expect(screen.getByText('Publish one article per week')).toBeTruthy();
     expect(screen.getByText('article is published')).toBeTruthy();
     expect(screen.getByText('min 1500 words')).toBeTruthy();
-    expect(screen.getByText(/Review draft/)).toBeTruthy();
     expect(screen.getByText(/Next trigger/i)).toBeTruthy();
     expect(screen.getByText(/Deadline/i)).toBeTruthy();
     expect(screen.getByText('content-pipeline')).toBeTruthy();
-    expect(screen.getByText('gr-1')).toBeTruthy();
+    // The run row shows the goal name; the raw run id moved to a hover tooltip.
+    expect(screen.getAllByTitle('Run gr-1').length).toBeGreaterThan(0);
   });
 });

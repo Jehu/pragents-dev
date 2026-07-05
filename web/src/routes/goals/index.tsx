@@ -1,4 +1,4 @@
-import { createFileRoute } from '@tanstack/react-router';
+import { createFileRoute, Link } from '@tanstack/react-router';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { Fragment, useState, useEffect } from 'react';
 import { Button, StatusPill, EmptyState, ErrorState, LoadingState, PageHeader, Panel, Table, TableWrap, CompanyWideBadge } from '../../components/ui/index.js';
@@ -25,7 +25,6 @@ interface Goal {
   workflow?: string;
   deadline?: string;
   acceptance?: string[];
-  humanGates?: Array<{ step: string; label: string; timeout?: string }>;
   nextTriggerAt?: string | null;
   nextDeadlineAt?: string | null;
   status?: string;
@@ -146,12 +145,14 @@ function GoalTable({
   goals,
   runs,
   knownWorkflows,
+  workflowRefs,
   onEdit,
   onDelete,
 }: {
   goals: Goal[];
   runs: GoalRun[];
   knownWorkflows: Set<string> | null;
+  workflowRefs?: Map<string, string | null> | null;
   onEdit: (id: string) => void;
   onDelete: (id: string) => void;
 }) {
@@ -229,18 +230,6 @@ function GoalTable({
                       ))}
                     </ul>
                   )}
-                  {g.humanGates && g.humanGates.length > 0 && (
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      {g.humanGates.map((gate) => (
-                        <span
-                          key={`${gate.step}:${gate.label}`}
-                          className="inline-flex rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[11px] text-amber-200"
-                        >
-                          {gate.label}{gate.timeout ? ` · ${gate.timeout}` : ''}
-                        </span>
-                      ))}
-                    </div>
-                  )}
                 </td>
                 <td className="py-2.5 pr-4 align-top">
                   <span className="font-mono text-xs text-zinc-300 block">{g.cadence ?? g.cron}</span>
@@ -266,7 +255,28 @@ function GoalTable({
                         ⚠ workflow missing
                       </div>
                     ) : (
-                      <div className="mt-1 text-[11px] text-indigo-400">workflow linked</div>
+                      (() => {
+                        // Link straight to the workflow this goal drives.
+                        // Project workflows open their editor; global/repo
+                        // workflows (no projectId) go to the Workflows list.
+                        const projectId = workflowRefs?.get(wfName) ?? null;
+                        return projectId ? (
+                          <Link
+                            to="/projects/$projectId/workflows/$workflowName"
+                            params={{ projectId, workflowName: wfName }}
+                            className="mt-1 inline-block text-[11px] text-indigo-400 hover:text-indigo-300 no-underline hover:underline"
+                          >
+                            open workflow →
+                          </Link>
+                        ) : (
+                          <Link
+                            to="/workflows"
+                            className="mt-1 inline-block text-[11px] text-indigo-400 hover:text-indigo-300 no-underline hover:underline"
+                          >
+                            open workflow →
+                          </Link>
+                        );
+                      })()
                     );
                   })()}
                 </td>
@@ -332,20 +342,6 @@ function GoalTable({
                           )}
                         </div>
                         <div>
-                          <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500">Gates</h3>
-                          {g.humanGates && g.humanGates.length > 0 ? (
-                            <div className="mt-2 flex flex-wrap gap-1.5">
-                              {g.humanGates.map((gate) => (
-                                <span key={`${gate.step}:${gate.label}`} className="rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[11px] text-amber-200">
-                                  {gate.label}{gate.timeout ? ` · ${gate.timeout}` : ''}
-                                </span>
-                              ))}
-                            </div>
-                          ) : (
-                            <p className="mt-2 text-xs text-zinc-600">No human gates configured.</p>
-                          )}
-                        </div>
-                        <div>
                           <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500">Management</h3>
                           <p className="mt-2 text-xs text-zinc-400">
                             Edit the source YAML in <span className="font-mono text-zinc-300">goals/{g.id}.yaml</span>. A safe in-app goal editor is not available yet.
@@ -360,10 +356,21 @@ function GoalTable({
                           <div className="mt-2 space-y-1">
                             {goalRuns.slice(0, 5).map((run) => (
                               <div key={run.id} className="flex flex-wrap items-center gap-2 text-xs text-zinc-400">
-                                <span className="font-mono text-zinc-300">{run.id}</span>
+                                {/* Scoped to one goal already — show a short run
+                                    id (full id on hover) instead of a full UUID. */}
+                                <span className="font-mono text-zinc-300" title={`Run ${run.id}`}>
+                                  {run.id.slice(0, 8)}
+                                </span>
                                 <StatusPill status={toStatusPill(run.status)} />
                                 <span>{relativeTimeMs(new Date(run.triggeredAt).getTime())}</span>
-                                {run.workflowRunId && <span className="font-mono text-zinc-600">{run.workflowRunId}</span>}
+                                {run.workflowRunId && (
+                                  <span
+                                    className="font-mono text-[10px] text-zinc-600"
+                                    title={`Workflow-Run ${run.workflowRunId}`}
+                                  >
+                                    run {run.workflowRunId.slice(0, 8)}
+                                  </span>
+                                )}
                               </div>
                             ))}
                           </div>
@@ -412,13 +419,24 @@ function GoalRunList({ runs }: { runs: GoalRun[] }) {
         <div key={run.id} className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2.5">
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-2 min-w-0">
-              <span className="font-mono text-[11px] text-zinc-400">{run.id}</span>
-              <span className="font-mono text-[11px] text-zinc-500">{run.goalId}</span>
-              <span className="text-xs text-zinc-400">
+              {/* Goal name is the readable identifier; the raw run UUID moves
+                  to a hover tooltip so the row isn't a wall of hex. */}
+              <span
+                className="text-xs font-medium text-zinc-200 truncate"
+                title={`Run ${run.id}`}
+              >
+                {run.goalId}
+              </span>
+              <span className="text-xs text-zinc-500 flex-shrink-0">
                 {relativeTimeMs(new Date(run.triggeredAt).getTime())}
               </span>
               {run.workflowRunId && (
-                <span className="font-mono text-[11px] text-zinc-600">{run.workflowRunId}</span>
+                <span
+                  className="font-mono text-[10px] text-zinc-500 flex-shrink-0"
+                  title={`Workflow-Run ${run.workflowRunId}`}
+                >
+                  run {run.workflowRunId.slice(0, 8)}
+                </span>
               )}
             </div>
             <div className="flex items-center gap-2">
@@ -473,7 +491,11 @@ function GoalsPage() {
   // Workflow registry — used to flag goals whose linked workflow no longer exists.
   const { data: workflowsData } = useQuery({
     queryKey: ['workflows'],
-    queryFn: () => fetchJson<{ workflows?: Array<{ name: string }> } | Array<{ name: string }>>('/api/v1/workflows'),
+    queryFn: () =>
+      fetchJson<
+        | { workflows?: Array<{ name: string; projectId?: string | null }> }
+        | Array<{ name: string; projectId?: string | null }>
+      >('/api/v1/workflows'),
     staleTime: 15_000,
   });
 
@@ -487,9 +509,17 @@ function GoalsPage() {
     : Array.isArray(runsData)
     ? runsData
     : [];
-  const knownWorkflowNames = workflowsData
-    ? (Array.isArray(workflowsData) ? workflowsData : workflowsData.workflows ?? []).map((w) => w.name)
+  const workflowList = workflowsData
+    ? Array.isArray(workflowsData)
+      ? workflowsData
+      : workflowsData.workflows ?? []
     : [];
+  const knownWorkflowNames = workflowList.map((w) => w.name);
+  // name → projectId (null for global/repo workflows). Lets the goal's
+  // Target cell link straight to the workflow the goal drives.
+  const workflowRefs = workflowsData
+    ? new Map(workflowList.map((w) => [w.name, w.projectId ?? null]))
+    : null;
 
   // ── Goal CRUD state ──
   const [editor, setEditor] = useState<
@@ -561,7 +591,6 @@ function GoalsPage() {
           deadline: parsed.deadline ?? '',
           workflow: parsed.workflow ?? '',
           acceptance: Array.isArray(parsed.acceptance) ? parsed.acceptance : [],
-          human_gates: Array.isArray(parsed.human_gates) ? parsed.human_gates : [],
         },
       });
     } catch (err) {
@@ -631,6 +660,7 @@ function GoalsPage() {
             goals={goals}
             runs={runs}
             knownWorkflows={workflowsData ? new Set(knownWorkflowNames) : null}
+            workflowRefs={workflowRefs}
             onEdit={(id) => void openEdit(id)}
             onDelete={(id) => {
               setCrudError(null);

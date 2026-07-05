@@ -171,7 +171,6 @@ export class ToolExecutor {
             workflow: g.workflow,
             deadline: g.deadline,
             acceptance: g.acceptance ?? [],
-            humanGates: g.human_gates ?? [],
           })));
         }
         case 'get_goal_runs': {
