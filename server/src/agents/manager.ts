@@ -506,6 +506,16 @@ export class AgentSessionManager {
       if (messages.length === 0) return;
 
       const db = getDb();
+      // session_messages.session_id has a FK on sessions(id), but nothing in
+      // the session lifecycle ever created that parent row — the only writer
+      // of `sessions` was MemoryEngine.compress() with random UUIDs. Once
+      // agents produced real transcripts, every persist died with "FOREIGN
+      // KEY constraint failed" and auto-extraction then found no messages.
+      // Ensure the parent row exists; the session id doubles as the agent id
+      // (which is what extractor.resolveAgentId reads back out).
+      db.prepare(
+        'INSERT OR IGNORE INTO sessions (id, agent_id) VALUES (?, ?)',
+      ).run(sessionId, handle.agentId);
       const id = randomUUID();
       db.prepare(
         `INSERT INTO session_messages (id, session_id, messages_json, message_count)
