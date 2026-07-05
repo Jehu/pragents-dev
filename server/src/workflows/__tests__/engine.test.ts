@@ -132,6 +132,21 @@ describe('WorkflowEngine', () => {
     expect(started).toBeDefined();
   });
 
+  it('fans out every emitted event to a registered event listener', async () => {
+    const buf = new EventBuffer(100);
+    const engine = new WorkflowEngine(tracker, router, sessionMgr, agents, buf, 'test-project');
+    const seen: string[] = [];
+    // This listener is what index.ts wires to GoalScheduler.onEvent — without
+    // it, terminal workflow events never reach the scheduler and goal runs
+    // stay stuck in 'running'.
+    engine.setEventListener((evt) => { seen.push(evt.type); });
+
+    await engine.execute(simpleWf);
+
+    expect(seen).toContain('workflow.step_started');
+    expect(seen).toContain('workflow.completed');
+  });
+
   it('emits agent context on single-step workflow lifecycle events', async () => {
     const buf = new EventBuffer(100);
     const engine = new WorkflowEngine(tracker, router, sessionMgr, agents, buf, 'test-project');

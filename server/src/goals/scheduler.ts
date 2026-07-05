@@ -117,7 +117,11 @@ export class GoalScheduler {
 
     const goalRunId = randomUUID();
     const db = getDb();
-    db.prepare('INSERT INTO goal_runs (id, goal_id, status) VALUES (?, ?, ?)').run(goalRunId, id, 'triggered');
+    // Store triggered_at as ISO-8601 UTC (…Z) rather than relying on SQLite's
+    // datetime('now') DEFAULT, which yields a naive "YYYY-MM-DD HH:MM:SS"
+    // string the web client misparses as local time (timezone skew).
+    db.prepare('INSERT INTO goal_runs (id, goal_id, status, triggered_at) VALUES (?, ?, ?, ?)')
+      .run(goalRunId, id, 'triggered', new Date().toISOString());
 
     // Insert → executeAsync → update is one logical transaction at the row
     // level: if any step throws, the row must not stay in 'triggered'
@@ -156,7 +160,9 @@ export class GoalScheduler {
 
     const goalRunId = randomUUID();
     const db = getDb();
-    db.prepare('INSERT INTO goal_runs (id, goal_id, status) VALUES (?, ?, ?)').run(goalRunId, goal.id, 'triggered');
+    // ISO-8601 UTC timestamp — see runGoalById() for the timezone rationale.
+    db.prepare('INSERT INTO goal_runs (id, goal_id, status, triggered_at) VALUES (?, ?, ?, ?)')
+      .run(goalRunId, goal.id, 'triggered', new Date().toISOString());
 
     try {
       const runId = this.wfEngine.executeAsync(wfDef, { goalId: goal.id, goalRunId }, goalRunId);

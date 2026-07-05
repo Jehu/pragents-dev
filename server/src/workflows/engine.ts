@@ -3,7 +3,7 @@ import { WorkflowTracker } from './tracker.js';
 import { SkillRouter } from '../routing/router.js';
 import type { AgentSessionManager } from '../agents/manager.js';
 import type { ResolvedAgent } from '../config/schema.js';
-import type { EventBuffer } from '../events/buffer.js';
+import type { EventBuffer, PragentsEvent } from '../events/buffer.js';
 import { getDb } from '../db/sqlite.js';
 import { randomUUID } from 'node:crypto';
 import { logger } from '../logging/index.js';
@@ -16,6 +16,7 @@ type StepLike = { agent?: WorkflowStep['agent']; prompt?: string; input?: string
 
 export class WorkflowEngine {
   private projectId: string;
+  private eventListener?: (evt: PragentsEvent) => void;
 
   constructor(
     private tracker: WorkflowTracker,
@@ -26,6 +27,18 @@ export class WorkflowEngine {
     projectId?: string,
   ) {
     this.projectId = projectId || 'default';
+  }
+
+  /**
+   * Register a listener that receives every workflow event AFTER it has been
+   * persisted to the EventBuffer. Unlike the buffer (DB + ring only), this is
+   * the in-process fan-out used to drive WebSocket broadcast and the goal
+   * scheduler's run-status transitions — the engine's events do not flow
+   * through the agent session manager's callback, so terminal workflow events
+   * would otherwise never reach GoalScheduler.onEvent().
+   */
+  setEventListener(listener: (evt: PragentsEvent) => void): void {
+    this.eventListener = listener;
   }
 
   async execute(def: WorkflowDef, params?: any, triggerSourceRunId?: string): Promise<string> {
@@ -345,7 +358,14 @@ ${prevStep.prompt || '(no original task)'}`;
   }
 
   private emit(type: string, data: any): void {
-    this.eventBuffer.push(data.projectId || 'workflow', data.agentId, type, data);
+    const evt = this.eventBuffer.push(data.projectId || 'workflow', data.agentId, type, data);
+    if (this.eventListener) {
+      try {
+        this.eventListener(evt);
+      } catch (err: any) {
+        logger.warn({ err: err?.message, type }, 'workflow event listener threw');
+      }
+    }
   }
 
   private async waitForGate(

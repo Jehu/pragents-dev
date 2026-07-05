@@ -362,6 +362,18 @@ describe('GoalScheduler runGoalById', () => {
     expect(deps.wfEngine.executeAsync).toHaveBeenCalledTimes(1);
   });
 
+  it('stores triggered_at as ISO-8601 UTC (…Z), not a naive local string', async () => {
+    const { scheduler } = mkScheduler();
+    const { goalRunId } = await scheduler.runGoalById('g1');
+    const row = getDb().prepare('SELECT triggered_at FROM goal_runs WHERE id = ?').get(goalRunId) as {
+      triggered_at: string;
+    };
+    // Must be a full ISO-8601 UTC timestamp so the web client's new Date()
+    // parses it as UTC (no timezone skew). The SQLite datetime('now') DEFAULT
+    // would instead yield a space-separated naive string without a Z.
+    expect(row.triggered_at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/);
+  });
+
   it('second trigger within 30s cooldown is rejected', async () => {
     const { scheduler } = mkScheduler();
     await scheduler.runGoalById('g1');
