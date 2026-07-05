@@ -728,10 +728,9 @@ describe('AgentSessionManager.persistSessionMessages — pi-SDK accessor guard',
       return { reload: vi.fn().mockResolvedValue(undefined) };
     });
 
-    // Insert the required sessions row so the FK constraint is satisfied
-    const { getDb } = await import('../../db/sqlite.js');
-    getDb().prepare('INSERT OR IGNORE INTO sessions (id, agent_id) VALUES (?, ?)').run(mockAgent.id, mockAgent.id);
-
+    // Deliberately NO manual insert into `sessions` here: production never
+    // created that parent row either, so with real transcripts every persist
+    // failed the FK. The manager must create the row itself.
     const memory = new MemoryEngine(10);
     const mgr = new AgentSessionManager(memory, 0);
 
@@ -748,6 +747,53 @@ describe('AgentSessionManager.persistSessionMessages — pi-SDK accessor guard',
     expect(persisted).not.toBeNull();
     expect(persisted).toHaveLength(2);
     expect(persisted![0].role).toBe('user');
+
+    // The manager created the FK parent row itself, with the agent id
+    // readable back out (skills extractor resolveAgentId relies on this).
+    const { getDb } = await import('../../db/sqlite.js');
+    const sessionRow = getDb()
+      .prepare('SELECT id, agent_id FROM sessions WHERE id = ?')
+      .get(mockAgent.id) as { id: string; agent_id: string } | undefined;
+    expect(sessionRow).toBeDefined();
+    expect(sessionRow!.agent_id).toBe(mockAgent.id);
+  });
+
+  it('persisting twice for the same agent keeps a single sessions row and appends transcripts', async () => {
+    const { createAgentSession, DefaultResourceLoader } = await import('@mariozechner/pi-coding-agent');
+    const mockSession = {
+      subscribe: vi.fn(() => () => {}),
+      prompt: vi.fn().mockResolvedValue(undefined),
+      dispose: vi.fn(),
+      isStreaming: false,
+      agent: { state: { messages: [{ role: 'assistant', content: 'ok' }] } },
+    };
+    (createAgentSession as any).mockResolvedValue({ session: mockSession });
+    (DefaultResourceLoader as any).mockImplementation(function () {
+      return { reload: vi.fn().mockResolvedValue(undefined) };
+    });
+
+    const mgr = new AgentSessionManager(new MemoryEngine(10), 0);
+    // Own agent id — the shared test DB already holds rows for mockAgent.id
+    // from the previous test in this describe block.
+    const repeatAgent = { ...mockAgent, id: 'dev@repeat-persist' };
+
+    // Two spawn→dispose cycles → two persists for the same session id.
+    await mgr.getOrCreate(repeatAgent);
+    await new Promise((r) => setTimeout(r, 2));
+    await mgr.disposeIdle();
+    await mgr.getOrCreate(repeatAgent);
+    await new Promise((r) => setTimeout(r, 2));
+    await mgr.disposeIdle();
+
+    const { getDb } = await import('../../db/sqlite.js');
+    const sessionCount = getDb()
+      .prepare('SELECT COUNT(*) as c FROM sessions WHERE id = ?')
+      .get(repeatAgent.id) as { c: number };
+    expect(sessionCount.c).toBe(1);
+    const msgCount = getDb()
+      .prepare('SELECT COUNT(*) as c FROM session_messages WHERE session_id = ?')
+      .get(repeatAgent.id) as { c: number };
+    expect(msgCount.c).toBe(2);
   });
 });
 
