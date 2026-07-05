@@ -139,6 +139,13 @@ export async function startServer() {
       { count: loaded.agents.length },
       'Config reloaded — agents re-resolved, existing sessions marked stale',
     );
+    // Projects can be added/removed via the config hot-reload (e.g. the
+    // web UI creates a project). `config.projects` is read by
+    // `projectWorkflowDir` and `debouncedReload`, so mutate it IN PLACE
+    // (keeping the same object reference) rather than replacing `config`.
+    // Then (re)load each project's workflows and watch any new workflow
+    // dirs so goals referencing them resolve without a manual restart.
+    syncProjectsFromConfig(loaded.config.projects);
   };
   registerConfigChangeListener(applyConfigReload);
 
@@ -262,13 +269,47 @@ export async function startServer() {
   for (const dir of [wfDir, goalsDir, skillsDir]) {
     try { watch(dir, debouncedReload); } catch {}
   }
-  for (const projectId of Object.keys(config.projects)) {
+  // Tracks which project workflow dirs already have an fs watcher so the
+  // config hot-reload path (syncProjectsFromConfig) can add watchers for
+  // newly-added projects without double-watching existing ones.
+  const watchedProjectDirs = new Set<string>();
+  function watchProjectWorkflowDir(projectId: string): void {
     const dir = projectWorkflowDir(projectId);
-    if (dir) {
-      try { watch(dir, debouncedReload); } catch { /* dir may not exist yet */ }
-    }
+    if (!dir || watchedProjectDirs.has(dir)) return;
+    try {
+      watch(dir, debouncedReload);
+      watchedProjectDirs.add(dir);
+    } catch { /* dir may not exist yet */ }
+  }
+  for (const projectId of Object.keys(config.projects)) {
+    watchProjectWorkflowDir(projectId);
   }
   logger.info('Hot-reload watchers active');
+
+  // Reconcile `config.projects` with a freshly-loaded config after a
+  // hot-reload. Mutates the shared object IN PLACE (same reference), reloads
+  // each current project's workflows, and watches any new workflow dirs.
+  function syncProjectsFromConfig(nextProjects: typeof config.projects): void {
+    const before = new Set(Object.keys(config.projects));
+    for (const id of before) {
+      if (!(id in nextProjects)) {
+        delete config.projects[id];
+        wfRegistry.unloadProject(id);
+      }
+    }
+    const added: string[] = [];
+    for (const [id, cfg] of Object.entries(nextProjects)) {
+      if (!before.has(id)) added.push(id);
+      config.projects[id] = cfg;
+    }
+    for (const id of Object.keys(config.projects)) {
+      loadProjectWorkflows(id);
+      watchProjectWorkflowDir(id);
+    }
+    if (added.length > 0) {
+      logger.info({ projects: added.join(', ') }, 'New project workflows loaded after config reload');
+    }
+  }
 
   // Config hot-reload: mark affected agent sessions as stale on pragents.yaml change
   try {
@@ -307,6 +348,17 @@ export async function startServer() {
   // can restart it after registry reloads)
   goalScheduler = new GoalScheduler(wfRegistry, wfEngine, eventBuffer, sessionMgr, agents);
   goalScheduler.start(goalRegistry.list());
+
+  // Workflow-engine events are persisted directly to the EventBuffer and do NOT
+  // flow through sessionMgr.setEventCallback, so without this fan-out the goal
+  // scheduler never observes terminal workflow events and goal runs stay stuck
+  // in 'running'. Mirror the session-event sinks (WS + SSE + goal scheduler),
+  // but skip re-persisting since emit() already wrote the row.
+  wfEngine.setEventListener((evt) => {
+    broadcast(evt);
+    broadcastSSE(evt);
+    goalScheduler?.onEvent(evt);
+  });
   process.on('SIGTERM', () => goalScheduler?.stop());
   process.on('SIGINT', () => goalScheduler?.stop());
 
