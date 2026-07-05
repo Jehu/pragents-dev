@@ -35,6 +35,7 @@ import { Route as PlansPlanIdRouteImport } from './routes/plans/$planId'
 import { Route as AgentsAgentIdRouteImport } from './routes/agents/$agentId'
 import { Route as ProjectsProjectIdIndexRouteImport } from './routes/projects/$projectId.index'
 import { Route as ProjectsProjectIdWorkflowsRouteImport } from './routes/projects/$projectId.workflows'
+import { Route as ProjectsProjectIdWorkflowsIndexRouteImport } from './routes/projects/$projectId.workflows.index'
 import { Route as ProjectsProjectIdWorkflowsWorkflowNameRouteImport } from './routes/projects/$projectId.workflows.$workflowName'
 
 const IndexRoute = IndexRouteImport.update({
@@ -168,6 +169,12 @@ const ProjectsProjectIdWorkflowsRoute =
     path: '/workflows',
     getParentRoute: () => ProjectsProjectIdRoute,
   } as any)
+const ProjectsProjectIdWorkflowsIndexRoute =
+  ProjectsProjectIdWorkflowsIndexRouteImport.update({
+    id: '/',
+    path: '/',
+    getParentRoute: () => ProjectsProjectIdWorkflowsRoute,
+  } as any)
 const ProjectsProjectIdWorkflowsWorkflowNameRoute =
   ProjectsProjectIdWorkflowsWorkflowNameRouteImport.update({
     id: '/$workflowName',
@@ -203,6 +210,7 @@ export interface FileRoutesByFullPath {
   '/projects/$projectId/workflows': typeof ProjectsProjectIdWorkflowsRouteWithChildren
   '/projects/$projectId/': typeof ProjectsProjectIdIndexRoute
   '/projects/$projectId/workflows/$workflowName': typeof ProjectsProjectIdWorkflowsWorkflowNameRoute
+  '/projects/$projectId/workflows/': typeof ProjectsProjectIdWorkflowsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -228,9 +236,9 @@ export interface FileRoutesByTo {
   '/tasks': typeof TasksIndexRoute
   '/traces': typeof TracesIndexRoute
   '/workflows': typeof WorkflowsIndexRoute
-  '/projects/$projectId/workflows': typeof ProjectsProjectIdWorkflowsRouteWithChildren
   '/projects/$projectId': typeof ProjectsProjectIdIndexRoute
   '/projects/$projectId/workflows/$workflowName': typeof ProjectsProjectIdWorkflowsWorkflowNameRoute
+  '/projects/$projectId/workflows': typeof ProjectsProjectIdWorkflowsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -261,6 +269,7 @@ export interface FileRoutesById {
   '/projects/$projectId/workflows': typeof ProjectsProjectIdWorkflowsRouteWithChildren
   '/projects/$projectId/': typeof ProjectsProjectIdIndexRoute
   '/projects/$projectId/workflows/$workflowName': typeof ProjectsProjectIdWorkflowsWorkflowNameRoute
+  '/projects/$projectId/workflows/': typeof ProjectsProjectIdWorkflowsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -292,6 +301,7 @@ export interface FileRouteTypes {
     | '/projects/$projectId/workflows'
     | '/projects/$projectId/'
     | '/projects/$projectId/workflows/$workflowName'
+    | '/projects/$projectId/workflows/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -317,9 +327,9 @@ export interface FileRouteTypes {
     | '/tasks'
     | '/traces'
     | '/workflows'
-    | '/projects/$projectId/workflows'
     | '/projects/$projectId'
     | '/projects/$projectId/workflows/$workflowName'
+    | '/projects/$projectId/workflows'
   id:
     | '__root__'
     | '/'
@@ -349,6 +359,7 @@ export interface FileRouteTypes {
     | '/projects/$projectId/workflows'
     | '/projects/$projectId/'
     | '/projects/$projectId/workflows/$workflowName'
+    | '/projects/$projectId/workflows/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -562,6 +573,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ProjectsProjectIdWorkflowsRouteImport
       parentRoute: typeof ProjectsProjectIdRoute
     }
+    '/projects/$projectId/workflows/': {
+      id: '/projects/$projectId/workflows/'
+      path: '/'
+      fullPath: '/projects/$projectId/workflows/'
+      preLoaderRoute: typeof ProjectsProjectIdWorkflowsIndexRouteImport
+      parentRoute: typeof ProjectsProjectIdWorkflowsRoute
+    }
     '/projects/$projectId/workflows/$workflowName': {
       id: '/projects/$projectId/workflows/$workflowName'
       path: '/$workflowName'
@@ -574,12 +592,14 @@ declare module '@tanstack/react-router' {
 
 interface ProjectsProjectIdWorkflowsRouteChildren {
   ProjectsProjectIdWorkflowsWorkflowNameRoute: typeof ProjectsProjectIdWorkflowsWorkflowNameRoute
+  ProjectsProjectIdWorkflowsIndexRoute: typeof ProjectsProjectIdWorkflowsIndexRoute
 }
 
 const ProjectsProjectIdWorkflowsRouteChildren: ProjectsProjectIdWorkflowsRouteChildren =
   {
     ProjectsProjectIdWorkflowsWorkflowNameRoute:
       ProjectsProjectIdWorkflowsWorkflowNameRoute,
+    ProjectsProjectIdWorkflowsIndexRoute: ProjectsProjectIdWorkflowsIndexRoute,
   }
 
 const ProjectsProjectIdWorkflowsRouteWithChildren =
