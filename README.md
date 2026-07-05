@@ -172,12 +172,6 @@ acceptance:
   - at least 3 cited sources
   - matches customer styleguide
   - SEO keyword integrated
-human_gates:
-  - step: after_draft
-    label: Review article draft
-    timeout: 4h
-  - step: before_publish
-    label: Final approval
 ```
 
 | Field | Required | Description |
@@ -188,7 +182,6 @@ human_gates:
 | `deadline` | no | Cron expression used to compute when a run should be complete. |
 | `workflow` | yes | Workflow name from `workflows/*.yaml` that executes the goal. |
 | `acceptance` | no | Checklist describing what counts as done. Exposed to agents, API, and UI. |
-| `human_gates` | no | Expected review checkpoints for the outcome. The workflow still owns the executable gate steps. |
 
 Lifecycle:
 
@@ -213,7 +206,7 @@ curl -H "Authorization: Bearer $PRAGENTS_API_TOKEN" \
   http://localhost:3000/api/v1/goals/runs
 ```
 
-The web dashboard's Goals view shows each goal's cadence, next trigger, deadline, acceptance criteria, human gates, and recent run history.
+The web dashboard's Goals view shows each goal's cadence, next trigger, deadline, acceptance criteria, and recent run history.
 
 ## Skills
 

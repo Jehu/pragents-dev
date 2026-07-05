@@ -11,12 +11,11 @@ const VALID: GoalFormValues = {
   deadline: '',
   workflow: 'content-pipeline',
   acceptance: ['published'],
-  human_gates: [{ step: 'after_draft', label: 'Review draft', timeout: '4h' }],
 };
 
 describe('buildGoalPayload', () => {
   it('emits required fields and omits empty optionals', () => {
-    expect(buildGoalPayload({ ...VALID, acceptance: [], human_gates: [], deadline: '' })).toEqual({
+    expect(buildGoalPayload({ ...VALID, acceptance: [], deadline: '' })).toEqual({
       id: 'weekly-article',
       description: 'One article per week',
       cadence: '0 8 * * 1',
@@ -24,15 +23,13 @@ describe('buildGoalPayload', () => {
     });
   });
 
-  it('includes deadline, acceptance, and gates when set; drops empty gate timeouts', () => {
+  it('includes deadline and acceptance when set', () => {
     const payload = buildGoalPayload({
       ...VALID,
       deadline: '0 16 * * 5',
-      human_gates: [{ step: 's', label: 'l', timeout: '' }],
     });
     expect(payload.deadline).toBe('0 16 * * 5');
     expect(payload.acceptance).toEqual(['published']);
-    expect(payload.human_gates).toEqual([{ step: 's', label: 'l' }]);
   });
 });
 
@@ -41,10 +38,9 @@ describe('validateGoalForm', () => {
     expect(validateGoalForm(VALID)).toEqual({});
   });
 
-  it('rejects bad ids, non-cron cadence, and incomplete gates', () => {
+  it('rejects bad ids, non-cron cadence, and missing workflow', () => {
     expect(validateGoalForm({ ...VALID, id: '../evil' }).id).toBeTruthy();
     expect(validateGoalForm({ ...VALID, cadence: 'every monday' }).cadence).toBeTruthy();
-    expect(validateGoalForm({ ...VALID, human_gates: [{ step: '', label: 'x' }] }).human_gates).toBeTruthy();
     expect(validateGoalForm({ ...VALID, workflow: ' ' }).workflow).toBeTruthy();
   });
 });
@@ -91,8 +87,8 @@ describe('GoalForm', () => {
     expect(getByText(/No workflow named "missing-wf"/)).toBeTruthy();
   });
 
-  it('adds and removes acceptance tags and gate rows', () => {
-    const { getByLabelText, getByText, queryByText, queryByTestId } = render(
+  it('adds and removes acceptance tags', () => {
+    const { getByLabelText, getByText, queryByText } = render(
       <GoalForm onSubmit={() => {}} />,
     );
     const tagInput = getByLabelText('Add acceptance criterion');
@@ -101,10 +97,5 @@ describe('GoalForm', () => {
     expect(getByText('published')).toBeTruthy();
     fireEvent.click(getByLabelText('Remove published'));
     expect(queryByText('published')).toBeNull();
-
-    fireEvent.click(getByText('+ Add gate'));
-    expect(queryByTestId('gate-row-0')).toBeTruthy();
-    fireEvent.click(getByLabelText('Remove gate 1'));
-    expect(queryByTestId('gate-row-0')).toBeNull();
   });
 });

@@ -32,7 +32,6 @@ function goalToJson(g: GoalDef) {
     deadline: g.deadline,
     workflow: g.workflow,
     acceptance: g.acceptance,
-    humanGates: g.human_gates,
     warnBeforeMs: g.warn_before_ms,
     nextTriggerAt: nextRun(g.cadence),
     nextDeadlineAt: nextRun(g.deadline),

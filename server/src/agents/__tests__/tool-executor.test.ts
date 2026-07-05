@@ -53,7 +53,6 @@ function makeDeps(overrides: Record<string, any> = {}) {
         deadline: '0 16 * * 5',
         workflow: 'content-pipeline',
         acceptance: ['article is published'],
-        human_gates: [{ step: 'after_draft', label: 'Review draft', timeout: '4h' }],
       }]),
     },
     eventBuffer: {
@@ -297,7 +296,6 @@ describe('ToolExecutor', () => {
     expect(parsed[0].id).toBe('weekly-article');
     expect(parsed[0].description).toBe('Publish one article per week');
     expect(parsed[0].acceptance).toEqual(['article is published']);
-    expect(parsed[0].humanGates).toEqual([{ step: 'after_draft', label: 'Review draft', timeout: '4h' }]);
   });
 
   it('executes get_workflow_runs', async () => {

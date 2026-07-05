@@ -12,12 +12,6 @@ import { parseCron } from '../routes/goals/index.js';
  * Zod schema on write, and 400 responses surface Zod issues verbatim.
  */
 
-export interface GoalGate {
-  step: string;
-  label: string;
-  timeout?: string;
-}
-
 export interface GoalFormValues {
   id: string;
   description: string;
@@ -25,7 +19,6 @@ export interface GoalFormValues {
   deadline?: string;
   workflow: string;
   acceptance: string[];
-  human_gates: GoalGate[];
 }
 
 export const GOAL_ID_RE = /^[a-z0-9][a-z0-9_-]*$/;
@@ -46,13 +39,6 @@ export function buildGoalPayload(values: GoalFormValues): Record<string, unknown
   };
   if (values.deadline?.trim()) payload.deadline = values.deadline.trim();
   if (values.acceptance.length > 0) payload.acceptance = values.acceptance;
-  if (values.human_gates.length > 0) {
-    payload.human_gates = values.human_gates.map((g) => ({
-      step: g.step.trim(),
-      label: g.label.trim(),
-      ...(g.timeout?.trim() ? { timeout: g.timeout.trim() } : {}),
-    }));
-  }
   return payload;
 }
 
@@ -63,12 +49,6 @@ export function validateGoalForm(values: GoalFormValues): Record<string, string>
   if (!looksLikeCron(values.cadence)) errs.cadence = 'Cron expression with 5 fields, e.g. "0 8 * * 1"';
   if (values.deadline?.trim() && !looksLikeCron(values.deadline)) errs.deadline = 'Cron expression with 5 fields';
   if (!values.workflow.trim()) errs.workflow = 'Required';
-  for (const g of values.human_gates) {
-    if (!g.step.trim() || !g.label.trim()) {
-      errs.human_gates = 'Every gate needs a step and a label';
-      break;
-    }
-  }
   return errs;
 }
 
@@ -141,7 +121,6 @@ export function GoalForm({
     deadline: initialValues?.deadline ?? '',
     workflow: initialValues?.workflow ?? '',
     acceptance: initialValues?.acceptance ?? [],
-    human_gates: initialValues?.human_gates ?? [],
   }));
   const [tagInput, setTagInput] = useState('');
   const [touched, setTouched] = useState(false);
@@ -160,10 +139,6 @@ export function GoalForm({
     if (parts.length === 0) return;
     update('acceptance', Array.from(new Set([...values.acceptance, ...parts])));
     setTagInput('');
-  }
-
-  function updateGate(i: number, patch: Partial<GoalGate>) {
-    update('human_gates', values.human_gates.map((g, idx) => (idx === i ? { ...g, ...patch } : g)));
   }
 
   return (
@@ -292,62 +267,6 @@ export function GoalForm({
           placeholder="Type and press Enter or comma…"
           className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-zinc-500"
         />
-      </fieldset>
-
-      <fieldset className="border border-zinc-800 rounded-lg px-4 pb-4 pt-1">
-        <legend className="text-xs font-medium text-zinc-300 px-1.5">Human gates</legend>
-        <div className="space-y-2">
-          {values.human_gates.map((gate, i) => (
-            <div key={i} className="flex gap-2 items-start" data-testid={`gate-row-${i}`}>
-              <input
-                type="text"
-                value={gate.step}
-                onChange={(e) => updateGate(i, { step: e.target.value })}
-                disabled={busy}
-                aria-label={`Gate ${i + 1} step`}
-                placeholder="after_draft"
-                className="flex-1 bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-xs font-mono text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-zinc-500"
-              />
-              <input
-                type="text"
-                value={gate.label}
-                onChange={(e) => updateGate(i, { label: e.target.value })}
-                disabled={busy}
-                aria-label={`Gate ${i + 1} label`}
-                placeholder="Review draft"
-                className="flex-[2] bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-xs text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-zinc-500"
-              />
-              <input
-                type="text"
-                value={gate.timeout ?? ''}
-                onChange={(e) => updateGate(i, { timeout: e.target.value })}
-                disabled={busy}
-                aria-label={`Gate ${i + 1} timeout`}
-                placeholder="4h"
-                className="w-16 bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-xs font-mono text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-zinc-500"
-              />
-              <button
-                type="button"
-                aria-label={`Remove gate ${i + 1}`}
-                onClick={() => update('human_gates', values.human_gates.filter((_, idx) => idx !== i))}
-                className="text-zinc-500 hover:text-red-400 px-1 py-1"
-              >
-                ×
-              </button>
-            </div>
-          ))}
-          <button
-            type="button"
-            onClick={() => update('human_gates', [...values.human_gates, { step: '', label: '', timeout: '' }])}
-            disabled={busy}
-            className="text-xs text-indigo-400 hover:text-indigo-300"
-          >
-            + Add gate
-          </button>
-          {touched && errors.human_gates && (
-            <span role="alert" className="block text-[11px] text-red-400">{errors.human_gates}</span>
-          )}
-        </div>
       </fieldset>
 
       {serverError && (
