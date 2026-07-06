@@ -176,4 +176,23 @@ describe('CostTracker', () => {
     const map = tracker.getBudgetLockedMap([{ id: 'x' }, { id: 'y', tokenBudget: 0 }]);
     expect(map.size).toBe(0);
   });
+
+  it('pruneOrphanedBudgetResets removes only rows for agents absent from config', () => {
+    tracker.resetAgentBudget('keep-me');
+    tracker.resetAgentBudget('remove-me');
+    const monthStart = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), 1)).toISOString();
+
+    // Count-agnostic: the shared test DB may hold reset rows from earlier
+    // cases; assert the specific rows are handled correctly.
+    const removed = tracker.pruneOrphanedBudgetResets(['keep-me']);
+    expect(removed).toBeGreaterThanOrEqual(1);
+
+    // A re-added agent with the removed id no longer inherits a stale window.
+    expect(tracker.getBudgetWindowStart('remove-me')).toBe(monthStart);
+    // The still-configured agent keeps its reset.
+    expect(tracker.getBudgetWindowStart('keep-me') > monthStart).toBe(true);
+
+    // Idempotent: keep-me is the only valid id, and it has already been kept.
+    expect(tracker.pruneOrphanedBudgetResets(['keep-me'])).toBe(0);
+  });
 });

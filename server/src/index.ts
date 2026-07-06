@@ -135,6 +135,9 @@ export async function startServer() {
     for (const a of loaded.agents) {
       if (previousIds.has(a.id)) sessionMgr.markStale(a.id);
     }
+    // Clear budget-reset overrides for agents dropped from config, so a
+    // same-id re-add doesn't inherit a stale window (#100 follow-up).
+    costTracker.pruneOrphanedBudgetResets(loaded.agents.map((a) => a.id));
     logger.info(
       { count: loaded.agents.length },
       'Config reloaded — agents re-resolved, existing sessions marked stale',
@@ -326,6 +329,10 @@ export async function startServer() {
   const planExecutor = new PlanExecutor(planStore, wfEngine);
   const costTracker = new CostTracker(config.costs || {});
   sessionMgr.setCostTracker(costTracker);
+  // Self-heal any budget-reset rows left behind by agents removed while the
+  // server was down (#100 follow-up).
+  const prunedResets = costTracker.pruneOrphanedBudgetResets(agents.map((a) => a.id));
+  if (prunedResets > 0) logger.info({ pruned: prunedResets }, 'Pruned orphaned budget resets');
 
   // Agent-native tooling (M6)
   const toolExecutor = new ToolExecutor({

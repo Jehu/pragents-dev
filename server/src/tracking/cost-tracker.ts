@@ -92,6 +92,28 @@ export class CostTracker {
       .run(agentId, now);
   }
 
+  /**
+   * Drop reset overrides for agents that no longer exist in config. Without
+   * this, removing an agent leaves an orphan reset_at that a later agent
+   * re-added with the same id would silently inherit, shifting its budget
+   * window. Called at startup and on every config reload. Returns the count
+   * of rows removed.
+   */
+  pruneOrphanedBudgetResets(validAgentIds: string[]): number {
+    const db = getDb();
+    const existing = db.prepare('SELECT agent_id FROM budget_resets').all() as { agent_id: string }[];
+    if (existing.length === 0) return 0;
+    const valid = new Set(validAgentIds);
+    const orphans = existing.filter((r) => !valid.has(r.agent_id)).map((r) => r.agent_id);
+    if (orphans.length === 0) return 0;
+    const del = db.prepare('DELETE FROM budget_resets WHERE agent_id = ?');
+    const tx = db.transaction((ids: string[]) => {
+      for (const id of ids) del.run(id);
+    });
+    tx(orphans);
+    return orphans.length;
+  }
+
   /** Usage vs. limit for an agent's current budget window — used by dispatch enforcement and the Agents UI. */
   getAgentBudgetStatus(
     agentId: string,

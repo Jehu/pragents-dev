@@ -9,6 +9,7 @@ import {
 } from '../../components/ui/index.js';
 import { useEventBus } from '../../stores/eventBus.js';
 import { formatDuration, formatCost, formatAge } from '../tasks/index.js';
+import { formatTokensCompact } from '../../lib/format.js';
 import type { StatusType } from '../../components/ui/index.js';
 
 export const Route = createFileRoute('/agents/$agentId')({
@@ -124,12 +125,6 @@ function formatIdleCountdown(ms: number | null): string {
   return `${s}s`;
 }
 
-function formatTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
-  return String(n);
-}
-
 // ──────────────────────────────────────────────────────────────────
 // Token budget panel
 // ──────────────────────────────────────────────────────────────────
@@ -189,14 +184,14 @@ function BudgetPanel({
       <div className="flex items-center justify-between gap-4 mt-1.5 text-[11px] text-zinc-500">
         <span>
           <span className={budget.locked ? 'text-red-400' : 'text-zinc-300'}>
-            {formatTokens(budget.used)}
+            {formatTokensCompact(budget.used)}
           </span>{' '}
-          / {formatTokens(budget.budget)} tokens ({Math.round(pct)}%)
+          / {formatTokensCompact(budget.budget)} tokens ({Math.round(pct)}%)
         </span>
         <span>
           {budget.locked
             ? 'Dispatch blocked'
-            : `${formatTokens(budget.remaining)} remaining`}
+            : `${formatTokensCompact(budget.remaining)} remaining`}
           {' · window since '}
           {windowStart.toLocaleDateString()}
         </span>
