@@ -6,6 +6,7 @@ import type { ResolvedAgent } from '../../config/schema.js';
 import { AgentConfig, ProjectConfig } from '../../config/schema.js';
 import { PROJECT_AGENT_TYPES, type ProjectAgentType } from '@pragents/schema';
 import type { AgentSessionManager } from '../../agents/manager.js';
+import type { CostTracker } from '../../tracking/cost-tracker.js';
 import { readYamlDoc, writeYamlDoc, applyMutation, EtagMismatchError } from '../../config/yaml-rw.js';
 import { logger } from '../../logging/index.js';
 import { expandHome } from '../../util/paths.js';
@@ -424,8 +425,15 @@ export function createProjectsRoute(opts: ProjectsRouteOptions) {
   return r;
 }
 
-export function createAgentsRoute(agents: ResolvedAgent[], sessionMgr: AgentSessionManager) {
+export function createAgentsRoute(
+  agents: ResolvedAgent[],
+  sessionMgr: AgentSessionManager,
+  costTracker: CostTracker | null = null,
+) {
   return new Hono().get('/', (c) => {
+    // Batch the budget-lock check (2 queries total) instead of computing the
+    // full budget status per agent (2 queries each) just to read `.locked`.
+    const lockedMap = costTracker ? costTracker.getBudgetLockedMap(agents) : null;
     const result = agents.map((a) => ({
       id: a.id,
       type: a.type,
@@ -433,6 +441,7 @@ export function createAgentsRoute(agents: ResolvedAgent[], sessionMgr: AgentSess
       model: a.model,
       capabilities: a.capabilities,
       status: sessionMgr.getAgentStatus(a.id),
+      budgetLocked: lockedMap?.get(a.id) ?? false,
     }));
     return c.json(result);
   });

@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { initDb, closeDb } from '../../db/sqlite.js';
+import { CostTracker } from '../../tracking/cost-tracker.js';
 
 // Hoist mocks so they are available before module imports
 const { mockWarn } = vi.hoisted(() => ({ mockWarn: vi.fn() }));
@@ -208,7 +209,14 @@ describe('Dispatch failure surfacing (usability report K1/K4)', () => {
 
     const mgr = new AgentSessionManager(new MemoryEngine(10));
     const record = vi.fn();
-    mgr.setCostTracker({ getAgentCost: vi.fn().mockReturnValue({ tokensIn: 0, tokensOut: 0 }), record } as any);
+    mgr.setCostTracker({
+      getAgentCost: vi.fn().mockReturnValue({ tokensIn: 0, tokensOut: 0 }),
+      getAgentBudgetStatus: vi.fn().mockReturnValue({
+        used: 0, tokensIn: 0, tokensOut: 0, calls: 0,
+        budget: 40000, remaining: 40000, percentUsed: 0, windowStart: new Date(0).toISOString(), locked: false,
+      }),
+      record,
+    } as any);
 
     await mgr.dispatch(mockAgent, 'Test task');
     expect(record).toHaveBeenCalledWith(expect.objectContaining({ tokensIn: 1234, tokensOut: 567 }));
@@ -227,12 +235,15 @@ describe('Token budget enforcement in dispatch', () => {
     rmSync(tmpDir, { recursive: true });
   });
 
-  it('blocks dispatch and throws when cumulative token usage meets budget', async () => {
+  it('blocks dispatch and throws when the budget window is locked', async () => {
     const memory = new MemoryEngine(10);
     const mgr = new AgentSessionManager(memory);
 
     const mockCostTracker = {
-      getAgentCost: vi.fn().mockReturnValue({ tokensIn: 30000, tokensOut: 10001, cost: 0, calls: 5 }),
+      getAgentBudgetStatus: vi.fn().mockReturnValue({
+        used: 40001, tokensIn: 30000, tokensOut: 10001, calls: 5,
+        budget: 40000, remaining: 0, percentUsed: 100, windowStart: '2026-07-01T00:00:00.000Z', locked: true,
+      }),
       record: vi.fn(),
     };
     mgr.setCostTracker(mockCostTracker as any);
@@ -240,7 +251,7 @@ describe('Token budget enforcement in dispatch', () => {
     const agentOverBudget: ResolvedAgent = { ...mockAgent, tokenBudget: 40000 };
 
     await expect(mgr.dispatch(agentOverBudget, 'Some task')).rejects.toThrow('Token budget exceeded');
-    expect(mockCostTracker.getAgentCost).toHaveBeenCalledWith(agentOverBudget.id);
+    expect(mockCostTracker.getAgentBudgetStatus).toHaveBeenCalledWith(agentOverBudget.id, 40000);
   });
 
   it('emits budget.exceeded event when budget is exceeded', async () => {
@@ -248,7 +259,10 @@ describe('Token budget enforcement in dispatch', () => {
     const mgr = new AgentSessionManager(memory);
 
     const mockCostTracker = {
-      getAgentCost: vi.fn().mockReturnValue({ tokensIn: 25000, tokensOut: 15001, cost: 0, calls: 3 }),
+      getAgentBudgetStatus: vi.fn().mockReturnValue({
+        used: 40001, tokensIn: 25000, tokensOut: 15001, calls: 3,
+        budget: 40000, remaining: 0, percentUsed: 100, windowStart: '2026-07-01T00:00:00.000Z', locked: true,
+      }),
       record: vi.fn(),
     };
     mgr.setCostTracker(mockCostTracker as any);
@@ -265,6 +279,7 @@ describe('Token budget enforcement in dispatch', () => {
     expect(emittedEvents[0].agentId).toBe(agentOverBudget.id);
     expect(emittedEvents[0].used).toBe(40001);
     expect(emittedEvents[0].budget).toBe(40000);
+    expect(emittedEvents[0].windowStart).toBe('2026-07-01T00:00:00.000Z');
   });
 
   it('logs a pino warn when budget is exceeded', async () => {
@@ -272,7 +287,10 @@ describe('Token budget enforcement in dispatch', () => {
     const mgr = new AgentSessionManager(memory);
 
     const mockCostTracker = {
-      getAgentCost: vi.fn().mockReturnValue({ tokensIn: 40000, tokensOut: 1, cost: 0, calls: 10 }),
+      getAgentBudgetStatus: vi.fn().mockReturnValue({
+        used: 40001, tokensIn: 40000, tokensOut: 1, calls: 10,
+        budget: 40000, remaining: 0, percentUsed: 100, windowStart: '2026-07-01T00:00:00.000Z', locked: true,
+      }),
       record: vi.fn(),
     };
     mgr.setCostTracker(mockCostTracker as any);
@@ -287,7 +305,7 @@ describe('Token budget enforcement in dispatch', () => {
     );
   });
 
-  it('proceeds with dispatch when token usage is below budget', async () => {
+  it('proceeds with dispatch when the budget window is not locked', async () => {
     const { createAgentSession, DefaultResourceLoader } = await import('@mariozechner/pi-coding-agent');
     const mockSession = {
       subscribe: vi.fn((cb: any) => {
@@ -308,7 +326,10 @@ describe('Token budget enforcement in dispatch', () => {
     const mgr = new AgentSessionManager(memory);
 
     const mockCostTracker = {
-      getAgentCost: vi.fn().mockReturnValue({ tokensIn: 5000, tokensOut: 3000, cost: 0, calls: 2 }),
+      getAgentBudgetStatus: vi.fn().mockReturnValue({
+        used: 8000, tokensIn: 5000, tokensOut: 3000, calls: 2,
+        budget: 40000, remaining: 32000, percentUsed: 20, windowStart: '2026-07-01T00:00:00.000Z', locked: false,
+      }),
       record: vi.fn(),
     };
     mgr.setCostTracker(mockCostTracker as any);
@@ -317,6 +338,41 @@ describe('Token budget enforcement in dispatch', () => {
 
     await expect(mgr.dispatch(agentUnderBudget, 'Some task')).resolves.toBeDefined();
     expect(mockSession.prompt).toHaveBeenCalled();
+  });
+
+  it('resets a locked agent via the real CostTracker so dispatch proceeds again (#100)', async () => {
+    const { createAgentSession, DefaultResourceLoader } = await import('@mariozechner/pi-coding-agent');
+    const mockSession = {
+      subscribe: vi.fn((cb: any) => {
+        setTimeout(() => cb({ type: 'agent_end' }), 10);
+        return () => {};
+      }),
+      prompt: vi.fn().mockResolvedValue(undefined),
+      dispose: vi.fn(),
+      isStreaming: false,
+      agent: { state: { messages: [{ role: 'assistant', content: 'ok' }] } },
+    };
+    (createAgentSession as any).mockResolvedValue({ session: mockSession });
+    (DefaultResourceLoader as any).mockImplementation(function () {
+      return { reload: vi.fn().mockResolvedValue(undefined) };
+    });
+
+    const memory = new MemoryEngine(10);
+    const mgr = new AgentSessionManager(memory);
+    const costTracker = new CostTracker();
+    mgr.setCostTracker(costTracker);
+
+    const agent: ResolvedAgent = { ...mockAgent, id: 'content@budget-e2e', tokenBudget: 1000 };
+    costTracker.record({ projectId: agent.projectId, agentId: agent.id, model: agent.model, tokensIn: 1000, tokensOut: 0 });
+
+    // Locked: this month's cumulative usage already meets the budget
+    await expect(mgr.dispatch(agent, 'Some task')).rejects.toThrow('Token budget exceeded');
+
+    // Operator unblocks the agent
+    costTracker.resetAgentBudget(agent.id);
+
+    // Dispatch proceeds again without waiting for the calendar month to roll over
+    await expect(mgr.dispatch(agent, 'Some task')).resolves.toBeDefined();
   });
 
   it('skips budget check when no costTracker is set', async () => {

@@ -20,6 +20,7 @@ interface AgentSummary {
   model: string;
   capabilities: string[];
   status: AgentStatus;
+  budgetLocked: boolean;
 }
 
 const STATUS_ORDER: Record<AgentStatus, number> = { busy: 0, idle: 1, offline: 2 };
@@ -90,6 +91,16 @@ function AgentSidebar({ agents }: { agents: AgentSummary[] }) {
             <div className="flex items-center gap-1.5">
               <span className="text-xs font-medium text-zinc-200 truncate">{agent.id}</span>
               <StatusPill status={STATUS_PILL_MAP[agent.status] ?? 'idle'} />
+              {agent.budgetLocked && (
+                <span
+                  title="Token budget exhausted for this window — dispatch is blocked until the next reset."
+                  className="text-red-400 text-[11px]"
+                  role="img"
+                  aria-label="Token budget locked"
+                >
+                  🔒
+                </span>
+              )}
               {brokenModels.has(agent.model) && (
                 <span
                   title={`Model "${agent.model}" is unusable — ${

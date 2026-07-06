@@ -99,6 +99,44 @@ describe('agent auto-select logic', () => {
   });
 });
 
+// ─── Token budget display ─────────────────────────────────────────────────────
+
+describe('token budget display', () => {
+  function formatTokens(n: number): string {
+    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+    if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+    return String(n);
+  }
+
+  function barColor(pct: number, locked: boolean): string {
+    if (locked) return 'bg-red-500';
+    if (pct >= 75) return 'bg-amber-400';
+    return 'bg-emerald-500';
+  }
+
+  it('formats token counts compactly', () => {
+    expect(formatTokens(500)).toBe('500');
+    expect(formatTokens(1500)).toBe('1.5k');
+    expect(formatTokens(30000)).toBe('30.0k');
+    expect(formatTokens(2_500_000)).toBe('2.5M');
+  });
+
+  it('shows green under 75% usage', () => {
+    expect(barColor(20, false)).toBe('bg-emerald-500');
+    expect(barColor(74, false)).toBe('bg-emerald-500');
+  });
+
+  it('shows amber approaching the cap', () => {
+    expect(barColor(75, false)).toBe('bg-amber-400');
+    expect(barColor(99, false)).toBe('bg-amber-400');
+  });
+
+  it('shows red once locked regardless of percent', () => {
+    expect(barColor(100, true)).toBe('bg-red-500');
+    expect(barColor(10, true)).toBe('bg-red-500');
+  });
+});
+
 // ─── Events tab filter ────────────────────────────────────────────────────────
 
 describe('events tab agent filter', () => {

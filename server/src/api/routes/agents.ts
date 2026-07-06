@@ -5,12 +5,22 @@ import type { EventBuffer } from '../../events/buffer.js';
 import type { ResolvedAgent } from '../../config/schema.js';
 import type { TaskTracker } from '../../tasks/tracker.js';
 import type { SkillRegistry } from '../../skills/registry.js';
+import type { CostTracker } from '../../tracking/cost-tracker.js';
 import { logger } from '../../logging/index.js';
 
 /** Per-agent in-memory cache entry. */
 interface CacheEntry {
   data: AgentDetailResponse;
   expiresAt: number;
+}
+
+interface BudgetStatus {
+  used: number;
+  budget: number;
+  remaining: number;
+  percentUsed: number;
+  windowStart: string;
+  locked: boolean;
 }
 
 interface AgentDetailResponse {
@@ -27,6 +37,7 @@ interface AgentDetailResponse {
     avgLatencyP50Ms: number | null;
     costToday: number;
   };
+  budget: BudgetStatus | null;
   skillsLoaded: { name: string; jit: boolean }[];
 }
 
@@ -37,6 +48,7 @@ function buildDetail(
   agent: ResolvedAgent,
   sessionMgr: AgentSessionManager,
   skillRegistry: SkillRegistry | null,
+  costTracker: CostTracker | null,
 ): AgentDetailResponse {
   const db = getDb();
 
@@ -85,6 +97,10 @@ function buildDetail(
     .filter((name) => registeredNames.has(name))
     .map((name) => ({ name, jit: false }));
 
+  const budget = costTracker && agent.tokenBudget
+    ? costTracker.getAgentBudgetStatus(agent.id, agent.tokenBudget)
+    : null;
+
   return {
     id: agent.id,
     type: agent.type,
@@ -99,6 +115,7 @@ function buildDetail(
       avgLatencyP50Ms,
       costToday: costRow.costToday,
     },
+    budget,
     skillsLoaded,
   };
 }
@@ -109,6 +126,7 @@ export function createAgentDetailRoute(
   eventBuffer: EventBuffer,
   tracker: TaskTracker,
   skillRegistry: SkillRegistry | null = null,
+  costTracker: CostTracker | null = null,
 ) {
   const r = new Hono();
 
@@ -123,9 +141,29 @@ export function createAgentDetailRoute(
       return c.json(cached.data);
     }
 
-    const data = buildDetail(agent, sessionMgr, skillRegistry);
+    const data = buildDetail(agent, sessionMgr, skillRegistry, costTracker);
     cache.set(agentId, { data, expiresAt: Date.now() + CACHE_TTL_MS });
     return c.json(data);
+  });
+
+  // POST /api/v1/agents/:id/budget/reset — operator override to unblock an
+  // agent locked out by its token budget before the monthly rollover (#100).
+  r.post('/:id/budget/reset', (c) => {
+    const agentId = c.req.param('id');
+    const agent = agents.find((a) => a.id === agentId);
+    if (!agent) return c.json({ error: `Agent "${agentId}" not found` }, 404);
+    if (!costTracker) return c.json({ error: 'Cost tracking is not configured' }, 500);
+
+    costTracker.resetAgentBudget(agentId);
+    cache.delete(agentId);
+
+    eventBuffer.push(agent.projectId, agentId, 'budget.reset', { agentId });
+    logger.info({ agentId }, 'Agent token budget reset via API');
+
+    const status = agent.tokenBudget
+      ? costTracker.getAgentBudgetStatus(agentId, agent.tokenBudget)
+      : null;
+    return c.json({ reset: true, budget: status });
   });
 
   // POST /api/v1/agents/:id/stop  (#63)
