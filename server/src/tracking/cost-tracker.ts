@@ -37,20 +37,21 @@ export class CostTracker {
     ).run(id, entry.projectId, entry.agentId, entry.model, entry.tokensIn, entry.tokensOut, cost, entry.taskId ?? null, new Date().toISOString());
   }
 
+  // `since`, where supported, is exclusive (`created_at > since`) — it is a
+  // budget-window boundary, and an operator reset must not count the usage
+  // that triggered the lock as still being "after" the reset. Kept identical
+  // across getProjectCost/getAgentCost so the two parallel methods can't drift
+  // into off-by-one divergence when the pattern is reused.
   getProjectCost(projectId: string, since?: string): { tokensIn: number; tokensOut: number; cost: number; calls: number } {
     const db = getDb();
     return db.prepare(
       `SELECT COALESCE(SUM(tokens_in), 0) as tokensIn, COALESCE(SUM(tokens_out), 0) as tokensOut,
               COALESCE(SUM(cost_estimate), 0) as cost, COUNT(*) as calls
-       FROM cost_log WHERE project_id = ? ${since ? "AND created_at >= ?" : ''}`,
+       FROM cost_log WHERE project_id = ? ${since ? "AND created_at > ?" : ''}`,
     ).get(projectId, ...(since ? [since] : [])) as any;
   }
 
-  /**
-   * `since` is exclusive (`created_at > since`), not inclusive — it is used
-   * as a budget-window boundary, and an operator reset must not count the
-   * usage that triggered the lock as still being "after" the reset.
-   */
+  /** See getProjectCost for the exclusive-`since` semantics shared by both. */
   getAgentCost(agentId: string, since?: string): { tokensIn: number; tokensOut: number; cost: number; calls: number } {
     return getDb().prepare(
       `SELECT COALESCE(SUM(tokens_in), 0) as tokensIn, COALESCE(SUM(tokens_out), 0) as tokensOut,
@@ -120,6 +121,59 @@ export class CostTracker {
       windowStart,
       locked: used >= tokenBudget,
     };
+  }
+
+  /**
+   * Batch budget-lock check for the agents list, where only `.locked` is
+   * needed. Avoids the per-agent getAgentBudgetStatus fan-out (2 queries
+   * each): bounded to 1 + (distinct window starts) queries — normally 2
+   * total, since resets are rare and most agents share the calendar-month
+   * window. Returns only budgeted agents; callers default the rest to false.
+   */
+  getBudgetLockedMap(agents: { id: string; tokenBudget?: number }[]): Map<string, boolean> {
+    const locked = new Map<string, boolean>();
+    const budgeted = agents.filter(
+      (a): a is { id: string; tokenBudget: number } => !!a.tokenBudget && a.tokenBudget > 0,
+    );
+    if (budgeted.length === 0) return locked;
+
+    const db = getDb();
+    const monthStart = this.currentMonthStart();
+    const resets = new Map(
+      (
+        db.prepare('SELECT agent_id, reset_at FROM budget_resets').all() as {
+          agent_id: string;
+          reset_at: string;
+        }[]
+      ).map((r) => [r.agent_id, r.reset_at] as const),
+    );
+
+    // Group agents by their effective window start (month start, or a later
+    // reset) so each distinct window costs one grouped SUM.
+    const byWindow = new Map<string, { id: string; tokenBudget: number }[]>();
+    for (const a of budgeted) {
+      const reset = resets.get(a.id);
+      const windowStart = reset && reset > monthStart ? reset : monthStart;
+      const bucket = byWindow.get(windowStart);
+      if (bucket) bucket.push(a);
+      else byWindow.set(windowStart, [a]);
+    }
+
+    for (const [windowStart, group] of byWindow) {
+      const placeholders = group.map(() => '?').join(',');
+      const rows = db
+        .prepare(
+          `SELECT agent_id as agentId, COALESCE(SUM(tokens_in), 0) + COALESCE(SUM(tokens_out), 0) as used
+           FROM cost_log WHERE created_at > ? AND agent_id IN (${placeholders}) GROUP BY agent_id`,
+        )
+        .all(windowStart, ...group.map((a) => a.id)) as { agentId: string; used: number }[];
+      const usedById = new Map(rows.map((r) => [r.agentId, r.used] as const));
+      for (const a of group) {
+        locked.set(a.id, (usedById.get(a.id) ?? 0) >= a.tokenBudget);
+      }
+    }
+
+    return locked;
   }
 
   getMonthlyReport(): any[] {

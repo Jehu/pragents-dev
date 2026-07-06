@@ -144,4 +144,36 @@ describe('CostTracker', () => {
     expect(status.used).toBe(0);
     expect(status.locked).toBe(false);
   });
+
+  it('getBudgetLockedMap matches per-agent status across month + reset windows', () => {
+    tracker.record({ projectId: 'p1', agentId: 'blm-under', model: 'claude-sonnet', tokensIn: 100, tokensOut: 100 });
+    tracker.record({ projectId: 'p1', agentId: 'blm-over', model: 'claude-sonnet', tokensIn: 900, tokensOut: 200 });
+    // Locked by prior usage, then reset — its window moves past that usage.
+    tracker.record({ projectId: 'p1', agentId: 'blm-reset', model: 'claude-sonnet', tokensIn: 1000, tokensOut: 0 });
+    tracker.resetAgentBudget('blm-reset');
+
+    const agents = [
+      { id: 'blm-under', tokenBudget: 1000 },
+      { id: 'blm-over', tokenBudget: 1000 },
+      { id: 'blm-reset', tokenBudget: 1000 },
+      { id: 'blm-nobudget' }, // no tokenBudget → absent from the map
+    ];
+    const map = tracker.getBudgetLockedMap(agents);
+
+    expect(map.get('blm-under')).toBe(false);
+    expect(map.get('blm-over')).toBe(true);
+    expect(map.get('blm-reset')).toBe(false); // reset cleared the window
+    expect(map.has('blm-nobudget')).toBe(false);
+
+    // Batch result agrees with the per-agent method for every budgeted agent.
+    for (const a of agents) {
+      if (!a.tokenBudget) continue;
+      expect(map.get(a.id)).toBe(tracker.getAgentBudgetStatus(a.id, a.tokenBudget).locked);
+    }
+  });
+
+  it('getBudgetLockedMap returns an empty map when no agent has a budget', () => {
+    const map = tracker.getBudgetLockedMap([{ id: 'x' }, { id: 'y', tokenBudget: 0 }]);
+    expect(map.size).toBe(0);
+  });
 });

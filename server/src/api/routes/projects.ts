@@ -431,6 +431,9 @@ export function createAgentsRoute(
   costTracker: CostTracker | null = null,
 ) {
   return new Hono().get('/', (c) => {
+    // Batch the budget-lock check (2 queries total) instead of computing the
+    // full budget status per agent (2 queries each) just to read `.locked`.
+    const lockedMap = costTracker ? costTracker.getBudgetLockedMap(agents) : null;
     const result = agents.map((a) => ({
       id: a.id,
       type: a.type,
@@ -438,9 +441,7 @@ export function createAgentsRoute(
       model: a.model,
       capabilities: a.capabilities,
       status: sessionMgr.getAgentStatus(a.id),
-      budgetLocked: costTracker && a.tokenBudget
-        ? costTracker.getAgentBudgetStatus(a.id, a.tokenBudget).locked
-        : false,
+      budgetLocked: lockedMap?.get(a.id) ?? false,
     }));
     return c.json(result);
   });
