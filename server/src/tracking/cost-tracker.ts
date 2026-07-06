@@ -46,11 +46,80 @@ export class CostTracker {
     ).get(projectId, ...(since ? [since] : [])) as any;
   }
 
-  getAgentCost(agentId: string): { tokensIn: number; tokensOut: number; cost: number; calls: number } {
+  /**
+   * `since` is exclusive (`created_at > since`), not inclusive — it is used
+   * as a budget-window boundary, and an operator reset must not count the
+   * usage that triggered the lock as still being "after" the reset.
+   */
+  getAgentCost(agentId: string, since?: string): { tokensIn: number; tokensOut: number; cost: number; calls: number } {
     return getDb().prepare(
       `SELECT COALESCE(SUM(tokens_in), 0) as tokensIn, COALESCE(SUM(tokens_out), 0) as tokensOut,
-              COALESCE(SUM(cost_estimate), 0) as cost, COUNT(*) as calls FROM cost_log WHERE agent_id = ?`,
-    ).get(agentId) as any;
+              COALESCE(SUM(cost_estimate), 0) as cost, COUNT(*) as calls
+       FROM cost_log WHERE agent_id = ? ${since ? 'AND created_at > ?' : ''}`,
+    ).get(agentId, ...(since ? [since] : [])) as any;
+  }
+
+  /** Start of the current calendar-month budget window (UTC). */
+  private currentMonthStart(): string {
+    const now = new Date();
+    return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
+  }
+
+  /**
+   * Effective start of an agent's token-budget window: the later of the
+   * current calendar month and any operator-triggered reset (#100 — a
+   * lifetime-cumulative budget locked an agent out forever with no way
+   * back in once crossed).
+   */
+  getBudgetWindowStart(agentId: string): string {
+    const monthStart = this.currentMonthStart();
+    const row = getDb()
+      .prepare('SELECT reset_at FROM budget_resets WHERE agent_id = ?')
+      .get(agentId) as { reset_at: string } | undefined;
+    if (row && row.reset_at > monthStart) return row.reset_at;
+    return monthStart;
+  }
+
+  /** Operator action: unblock an agent immediately instead of waiting for the monthly rollover. */
+  resetAgentBudget(agentId: string): void {
+    const now = new Date().toISOString();
+    getDb()
+      .prepare(
+        `INSERT INTO budget_resets (agent_id, reset_at) VALUES (?, ?)
+         ON CONFLICT(agent_id) DO UPDATE SET reset_at = excluded.reset_at`,
+      )
+      .run(agentId, now);
+  }
+
+  /** Usage vs. limit for an agent's current budget window — used by dispatch enforcement and the Agents UI. */
+  getAgentBudgetStatus(
+    agentId: string,
+    tokenBudget: number,
+  ): {
+    used: number;
+    tokensIn: number;
+    tokensOut: number;
+    calls: number;
+    budget: number;
+    remaining: number;
+    percentUsed: number;
+    windowStart: string;
+    locked: boolean;
+  } {
+    const windowStart = this.getBudgetWindowStart(agentId);
+    const usage = this.getAgentCost(agentId, windowStart);
+    const used = (usage.tokensIn ?? 0) + (usage.tokensOut ?? 0);
+    return {
+      used,
+      tokensIn: usage.tokensIn,
+      tokensOut: usage.tokensOut,
+      calls: usage.calls,
+      budget: tokenBudget,
+      remaining: Math.max(0, tokenBudget - used),
+      percentUsed: tokenBudget > 0 ? Math.min(100, (used / tokenBudget) * 100) : 0,
+      windowStart,
+      locked: used >= tokenBudget,
+    };
   }
 
   getMonthlyReport(): any[] {

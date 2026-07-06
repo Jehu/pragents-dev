@@ -30,6 +30,15 @@ interface AgentSummary {
   status: AgentStatus;
 }
 
+interface BudgetStatus {
+  used: number;
+  budget: number;
+  remaining: number;
+  percentUsed: number;
+  windowStart: string;
+  locked: boolean;
+}
+
 interface AgentDetail {
   id: string;
   type: string;
@@ -44,6 +53,7 @@ interface AgentDetail {
     avgLatencyP50Ms: number | null;
     costToday: number;
   };
+  budget: BudgetStatus | null;
   skillsLoaded: { name: string; jit: boolean }[];
 }
 
@@ -112,6 +122,87 @@ function formatIdleCountdown(ms: number | null): string {
   const m = Math.floor(s / 60);
   if (m > 0) return `${m}m ${s % 60}s`;
   return `${s}s`;
+}
+
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return String(n);
+}
+
+// ──────────────────────────────────────────────────────────────────
+// Token budget panel
+// ──────────────────────────────────────────────────────────────────
+
+function BudgetPanel({
+  budget,
+  resetting,
+  onReset,
+}: {
+  budget: BudgetStatus;
+  resetting: boolean;
+  onReset: () => void;
+}) {
+  const pct = Math.max(0, Math.min(100, budget.percentUsed));
+  // Green under 75%, amber approaching the cap, red once locked.
+  const barColor = budget.locked
+    ? 'bg-red-500'
+    : pct >= 75
+      ? 'bg-amber-400'
+      : 'bg-emerald-500';
+  const windowStart = new Date(budget.windowStart);
+
+  return (
+    <div className="px-6 py-4 border-b border-zinc-800 flex-shrink-0">
+      <div className="flex items-center justify-between gap-4 mb-2">
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] uppercase tracking-wider font-semibold text-zinc-500">
+            Token budget
+          </span>
+          {budget.locked && (
+            <span className="text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded bg-red-500/15 text-red-300">
+              locked
+            </span>
+          )}
+        </div>
+        <button
+          onClick={onReset}
+          disabled={resetting}
+          title="Clear usage counted in the current window and unblock dispatch"
+          className="px-3 py-1 text-xs font-medium rounded border border-indigo-600/50 text-indigo-300 hover:bg-indigo-900/20 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+        >
+          {resetting ? 'Resetting…' : 'Reset budget'}
+        </button>
+      </div>
+
+      <div className="h-2 rounded-full bg-zinc-800 overflow-hidden">
+        <div
+          className={`h-full ${barColor} transition-all`}
+          style={{ width: `${pct}%` }}
+          role="progressbar"
+          aria-valuenow={Math.round(pct)}
+          aria-valuemin={0}
+          aria-valuemax={100}
+        />
+      </div>
+
+      <div className="flex items-center justify-between gap-4 mt-1.5 text-[11px] text-zinc-500">
+        <span>
+          <span className={budget.locked ? 'text-red-400' : 'text-zinc-300'}>
+            {formatTokens(budget.used)}
+          </span>{' '}
+          / {formatTokens(budget.budget)} tokens ({Math.round(pct)}%)
+        </span>
+        <span>
+          {budget.locked
+            ? 'Dispatch blocked'
+            : `${formatTokens(budget.remaining)} remaining`}
+          {' · window since '}
+          {windowStart.toLocaleDateString()}
+        </span>
+      </div>
+    </div>
+  );
 }
 
 // ──────────────────────────────────────────────────────────────────
@@ -445,6 +536,7 @@ function CapabilitiesTab({ agent }: { agent: AgentDetail }) {
 function AgentDetail({ agentId }: { agentId: string }) {
   const queryClient = useQueryClient();
   const [stopping, setStopping] = useState(false);
+  const [resetting, setResetting] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>('events');
 
   const { data: agent, isLoading } = useQuery<AgentDetail>({
@@ -462,6 +554,18 @@ function AgentDetail({ agentId }: { agentId: string }) {
       queryClient.invalidateQueries({ queryKey: ['agents'] });
     } finally {
       setStopping(false);
+    }
+  };
+
+  const handleResetBudget = async () => {
+    if (!window.confirm(`Reset the token budget window for "${agentId}"? Usage counted so far this window is cleared and dispatch is unblocked.`)) return;
+    setResetting(true);
+    try {
+      await fetch(`/api/v1/agents/${agentId}/budget/reset`, { method: 'POST' });
+      queryClient.invalidateQueries({ queryKey: ['agent', agentId] });
+      queryClient.invalidateQueries({ queryKey: ['agents'] });
+    } finally {
+      setResetting(false);
     }
   };
 
@@ -539,6 +643,15 @@ function AgentDetail({ agentId }: { agentId: string }) {
           value={agent.skillsLoaded.length}
         />
       </div>
+
+      {/* Token budget */}
+      {agent.budget && (
+        <BudgetPanel
+          budget={agent.budget}
+          resetting={resetting}
+          onReset={handleResetBudget}
+        />
+      )}
 
       {/* Tabs */}
       <div className="flex items-center gap-1 px-6 py-2 border-b border-zinc-800 flex-shrink-0">

@@ -3,6 +3,7 @@ import { initDb, closeDb, getDb } from '../../../db/sqlite.js';
 import { TaskTracker } from '../../../tasks/tracker.js';
 import { EventBuffer } from '../../../events/buffer.js';
 import { createAgentDetailRoute } from '../agents.js';
+import { CostTracker } from '../../../tracking/cost-tracker.js';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -82,6 +83,7 @@ describe('GET /agents/:id', () => {
     expect(body.stats).toHaveProperty('tasksTodayComplete');
     expect(body.stats).toHaveProperty('avgLatencyP50Ms');
     expect(body.stats).toHaveProperty('costToday');
+    expect(body.budget).toBeNull();
   });
 
   it('returns session info when session active', async () => {
@@ -208,5 +210,62 @@ describe('POST /agents/:id/stop', () => {
     const body = await res.json();
     expect(body.stopped).toBe(false);
     expect(body.reason).toBe('no_active_session');
+  });
+});
+
+describe('Token budget status and reset (#100)', () => {
+  const tmpDir = mkdtempSync(join(tmpdir(), 'pragents-agents-budget-test-'));
+  let tracker: TaskTracker;
+  let eventBuffer: EventBuffer;
+  let costTracker: CostTracker;
+
+  beforeAll(() => {
+    initDb(join(tmpDir, 'test.db'));
+    tracker = new TaskTracker();
+    eventBuffer = new EventBuffer(100);
+    costTracker = new CostTracker();
+  });
+
+  afterAll(() => {
+    closeDb();
+    rmSync(tmpDir, { recursive: true });
+  });
+
+  it('GET /:id includes budget status when a costTracker is wired', async () => {
+    const agent = makeAgent('content@budget', { tokenBudget: 1000 });
+    const sessionMgr = makeSessionMgr('content@budget', false);
+    const app = createAgentDetailRoute([agent], sessionMgr, eventBuffer, tracker, null, costTracker);
+    const res = await app.request('/content@budget');
+    const body = await res.json();
+    expect(body.budget).toMatchObject({ used: 0, budget: 1000, remaining: 1000, locked: false });
+  });
+
+  it('POST /:id/budget/reset unblocks an agent whose usage met its budget', async () => {
+    const agent = makeAgent('content@locked', { tokenBudget: 1000 });
+    costTracker.record({ projectId: 'project-test', agentId: 'content@locked', model: 'claude-sonnet', tokensIn: 1000, tokensOut: 0 });
+
+    const sessionMgr = makeSessionMgr('content@locked', false);
+    const app = createAgentDetailRoute([agent], sessionMgr, eventBuffer, tracker, null, costTracker);
+
+    const before = await app.request('/content@locked');
+    expect((await before.json()).budget.locked).toBe(true);
+
+    const resetRes = await app.request('/content@locked/budget/reset', { method: 'POST' });
+    expect(resetRes.status).toBe(200);
+    const resetBody = await resetRes.json();
+    expect(resetBody.reset).toBe(true);
+    expect(resetBody.budget.locked).toBe(false);
+    expect(resetBody.budget.used).toBe(0);
+
+    const after = await app.request('/content@locked');
+    expect((await after.json()).budget.locked).toBe(false);
+  });
+
+  it('POST /:id/budget/reset returns 404 for an unknown agent', async () => {
+    const agent = makeAgent('content@other');
+    const sessionMgr = makeSessionMgr('content@other', false);
+    const app = createAgentDetailRoute([agent], sessionMgr, eventBuffer, tracker, null, costTracker);
+    const res = await app.request('/unknown-agent/budget/reset', { method: 'POST' });
+    expect(res.status).toBe(404);
   });
 });

@@ -446,8 +446,8 @@ export async function startServer() {
       onProjectWorkflowsChanged: (projectId) => loadProjectWorkflows(projectId),
     }),
   );
-  const agentsRouter = createAgentsRoute(agents, sessionMgr);
-  agentsRouter.route('/', createAgentDetailRoute(agents, sessionMgr, eventBuffer, tracker));
+  const agentsRouter = createAgentsRoute(agents, sessionMgr, costTracker);
+  agentsRouter.route('/', createAgentDetailRoute(agents, sessionMgr, eventBuffer, tracker, skillRegistry, costTracker));
   app.route('/api/v1/agents', agentsRouter);
   app.route('/api/v1/tasks', createTasksRoute(tracker, agents, sessionMgr, eventBuffer));
   app.route('/api/v1/workflows', createWorkflowsRoute(wfRegistry, wfEngine, wfTracker));

@@ -254,13 +254,15 @@ export class AgentSessionManager {
   }
 
   async dispatch(agent: ResolvedAgent, task: string, taskId?: string): Promise<string> {
-    // Enforce token budget before dispatching
+    // Enforce token budget before dispatching. The budget window is the
+    // current calendar month (or since an operator's manual reset, if more
+    // recent) — a lifetime-cumulative check locked agents out forever with
+    // no way back in once crossed (#100).
     if (agent.tokenBudget && this.costTracker) {
-      const usage = this.costTracker.getAgentCost(agent.id);
-      const used = (usage.tokensIn ?? 0) + (usage.tokensOut ?? 0);
-      if (used >= agent.tokenBudget) {
+      const status = this.costTracker.getAgentBudgetStatus(agent.id, agent.tokenBudget);
+      if (status.locked) {
         logger.warn(
-          { agentId: agent.id, used, budget: agent.tokenBudget },
+          { agentId: agent.id, used: status.used, budget: agent.tokenBudget, windowStart: status.windowStart },
           'Token budget exceeded — dispatch blocked',
         );
         if (this.onEvent) {
@@ -268,8 +270,9 @@ export class AgentSessionManager {
             agentId: agent.id,
             projectId: agent.projectId,
             type: 'budget.exceeded',
-            used,
+            used: status.used,
             budget: agent.tokenBudget,
+            windowStart: status.windowStart,
             timestamp: new Date().toISOString(),
           });
         }
